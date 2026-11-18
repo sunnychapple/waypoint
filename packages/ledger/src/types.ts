@@ -26,7 +26,7 @@ export type Hold = {
 export type CommandResult =
   | { ok: true }
   | { ok: true; charged: number }
-  | { ok: true; released: string[] }
+  | { ok: true; released: readonly string[] }
   | { ok: true; removed: number }
   | { ok: false; shortfall: number }
   | { ok: false; reason: "unknown_hold" };
@@ -34,8 +34,8 @@ export type CommandResult =
 export type WalletState = {
   balances: { monthly: number; purchased: number; monthly_resets_at: number | null };
   holds: Record<string, Hold>;
-  // Maps command id to the first result it produced.
-  applied: Record<string, CommandResult>;
+  // Maps command id to the type and the successful result it first produced.
+  applied: Record<string, { type: Command["type"]; result: CommandResult }>;
 };
 
 export type Command =

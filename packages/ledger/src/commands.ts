@@ -23,12 +23,17 @@ type Draft = {
 };
 
 // Applies one command and returns new objects. The input state is never mutated.
+// Only successful results are remembered by command id, so a failed command can be retried with the same id.
 export function apply(state: WalletState, command: Command, now: number): ApplyOutput {
-  if (Object.hasOwn(state.applied, command.id)) {
-    const prior = state.applied[command.id];
-    if (prior !== undefined) {
-      return { state, entries: [], result: prior };
+  requireId("command id", command.id);
+  requireTime("now", now);
+
+  const prior = Object.hasOwn(state.applied, command.id) ? state.applied[command.id] : undefined;
+  if (prior !== undefined) {
+    if (prior.type !== command.type) {
+      throw new Error("command id reused for a different command");
     }
+    return { state, entries: [], result: prior.result };
   }
 
   const draft: Draft = {
@@ -38,13 +43,20 @@ export function apply(state: WalletState, command: Command, now: number): ApplyO
     command: command.id,
     at: now,
   };
-  const result = execute(draft, command);
+  const result = Object.freeze(execute(draft, command));
+
+  const applied = result.ok
+    ? {
+        ...state.applied,
+        [command.id]: Object.freeze({ type: command.type, result }),
+      }
+    : state.applied;
 
   return {
     state: {
       balances: draft.balances,
       holds: draft.holds,
-      applied: { ...state.applied, [command.id]: result },
+      applied,
     },
     entries: draft.entries,
     result,
@@ -60,7 +72,9 @@ function execute(d: Draft, command: Command): CommandResult {
     }
 
     case "hold": {
+      requireId("hold_id", command.hold_id);
       requirePositive("credits", command.credits);
+      requireTime("expires_at", command.expires_at);
       if (Object.hasOwn(d.holds, command.hold_id)) {
         throw new Error(`hold already exists: ${command.hold_id}`);
       }
@@ -85,6 +99,7 @@ function execute(d: Draft, command: Command): CommandResult {
     }
 
     case "settle": {
+      requireId("hold_id", command.hold_id);
       requireNonNegative("actual", command.actual);
       const hold = findHold(d, command.hold_id);
       if (!hold) return { ok: false, reason: "unknown_hold" };
@@ -97,6 +112,7 @@ function execute(d: Draft, command: Command): CommandResult {
     }
 
     case "release": {
+      requireId("hold_id", command.hold_id);
       const hold = findHold(d, command.hold_id);
       if (!hold) return { ok: false, reason: "unknown_hold" };
       returnToBuckets(d, hold, "release", hold.from_purchased, hold.from_monthly);
@@ -114,7 +130,7 @@ function execute(d: Draft, command: Command): CommandResult {
           returnToBuckets(d, hold, "release", hold.from_purchased, hold.from_monthly);
         }
       }
-      return { ok: true, released: due };
+      return { ok: true, released: Object.freeze(due) };
     }
 
     case "refund": {
@@ -132,10 +148,14 @@ function execute(d: Draft, command: Command): CommandResult {
 
     case "reset": {
       requireNonNegative("credits", command.credits);
+      requireTime("resets_at", command.resets_at);
       move(d, "monthly", command.credits - d.balances.monthly, "reset", null, command.id);
       d.balances = { ...d.balances, monthly_resets_at: command.resets_at };
       return { ok: true };
     }
+
+    default:
+      throw new Error("unknown command type");
   }
 }
 
@@ -149,10 +169,14 @@ function move(
   ref: string,
 ): void {
   if (delta === 0) return;
+  const next = (bucket === "monthly" ? d.balances.monthly : d.balances.purchased) + delta;
+  if (next > Number.MAX_SAFE_INTEGER) {
+    throw new RangeError(`${bucket} balance would exceed Number.MAX_SAFE_INTEGER`);
+  }
   d.balances =
     bucket === "monthly"
-      ? { ...d.balances, monthly: d.balances.monthly + delta }
-      : { ...d.balances, purchased: d.balances.purchased + delta };
+      ? { ...d.balances, monthly: next }
+      : { ...d.balances, purchased: next };
   d.entries.push({
     id: `${d.command}:${d.entries.length}`,
     at: d.at,
@@ -179,6 +203,23 @@ function returnToBuckets(
 
 function findHold(d: Draft, holdId: string): Hold | undefined {
   return Object.hasOwn(d.holds, holdId) ? d.holds[holdId] : undefined;
+}
+
+// Command and hold ids: 1 to 128 of A-Z, a-z, 0-9, _, : or -, and not an object-prototype key.
+const ID_PATTERN = /^[A-Za-z0-9_:-]{1,128}$/;
+const RESERVED_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+function requireId(name: string, value: string): void {
+  if (typeof value !== "string" || !ID_PATTERN.test(value) || RESERVED_IDS.has(value)) {
+    throw new RangeError(`${name} must be 1-128 letters, digits, _, : or -`);
+  }
+}
+
+// Unix milliseconds: a safe integer, zero or more.
+function requireTime(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`);
+  }
 }
 
 function requirePositive(name: string, value: number): void {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { apply, emptyWallet } from "../src/index.ts";
-import type { Command, WalletState } from "../src/index.ts";
+import type { ApplyOutput, Command, CommandResult, WalletState } from "../src/index.ts";
 
 const NOW = 1_000;
 
@@ -237,19 +237,181 @@ describe("reset", () => {
 });
 
 describe("command ids", () => {
-  it("returns the stored first result for a repeated id, with no entries and no change", () => {
-    const first = apply(wallet(1, 0), holdCommand("dup", "H1", 5), NOW);
-    expect(first.result).toEqual({ ok: false, shortfall: 4 });
+  it("names entries <command id>:<n> starting at 0", () => {
+    const out = apply(wallet(3, 10), holdCommand("abc", "H1", 5), NOW);
+    expect(out.entries.map((e) => e.id)).toEqual(["abc:0", "abc:1"]);
+  });
 
-    const again = apply(first.state, { type: "grant", id: "dup", bucket: "monthly", credits: 50, ref: "x" }, NOW);
-    expect(again.result).toEqual({ ok: false, shortfall: 4 });
+  it("returns the stored result for a repeated id and type, with no entries and no change", () => {
+    const held = apply(wallet(3, 10), holdCommand("h1", "H1", 5), NOW).state;
+    const first = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 2 }, NOW);
+    expect(first.result).toEqual({ ok: true, charged: 2 });
+
+    const again = apply(first.state, { type: "settle", id: "s1", hold_id: "H1", actual: 0 }, NOW);
+    expect(again.result).toEqual({ ok: true, charged: 2 });
     expect(again.entries).toEqual([]);
     expect(again.state).toEqual(first.state);
   });
 
-  it("names entries <command id>:<n> starting at 0", () => {
-    const out = apply(wallet(3, 10), holdCommand("abc", "H1", 5), NOW);
-    expect(out.entries.map((e) => e.id)).toEqual(["abc:0", "abc:1"]);
+  it("throws when a known id is reused for a different command type", () => {
+    const granted = apply(emptyWallet(), { type: "grant", id: "g1", bucket: "monthly", credits: 5, ref: "x" }, NOW).state;
+    expect(() => apply(granted, holdCommand("g1", "H1", 5), NOW)).toThrow("command id reused for a different command");
+  });
+
+  it("throws when a settle reuses a grant id", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    const granted = apply(held, { type: "grant", id: "g1", bucket: "monthly", credits: 1, ref: "x" }, NOW).state;
+    expect(() => apply(granted, { type: "settle", id: "g1", hold_id: "H1", actual: 1 }, NOW)).toThrow(
+      "command id reused for a different command",
+    );
+  });
+
+  it("treats inherited object keys as unused ids", () => {
+    const out = apply(emptyWallet(), { type: "grant", id: "toString", bucket: "monthly", credits: 2, ref: "x" }, NOW);
+    expect(out.result).toEqual({ ok: true });
+    expect(out.state.balances.monthly).toBe(2);
+  });
+
+  it("does not look up inherited object keys as holds", () => {
+    const out = apply(wallet(5, 0), { type: "settle", id: "s1", hold_id: "toString", actual: 1 }, NOW);
+    expect(out.result).toEqual({ ok: false, reason: "unknown_hold" });
+  });
+});
+
+describe("failed results", () => {
+  it("does not remember a shortfall, so a retry with the same id succeeds once credits are granted", () => {
+    const short = apply(emptyWallet(), holdCommand("retry", "H1", 5), NOW);
+    expect(short.result).toEqual({ ok: false, shortfall: 5 });
+    expect(Object.hasOwn(short.state.applied, "retry")).toBe(false);
+
+    const funded = apply(short.state, { type: "grant", id: "top-up", bucket: "purchased", credits: 5, ref: "pack" }, NOW).state;
+    const retried = apply(funded, holdCommand("retry", "H1", 5), NOW);
+    expect(retried.result).toEqual({ ok: true });
+    expect(retried.state.balances.purchased).toBe(0);
+    expect(Object.hasOwn(retried.state.holds, "H1")).toBe(true);
+
+    // Now that it succeeded, the same id returns the stored success and changes nothing.
+    const replay = apply(retried.state, holdCommand("retry", "H1", 5), NOW);
+    expect(replay.result).toEqual({ ok: true });
+    expect(replay.entries).toEqual([]);
+    expect(replay.state.balances.purchased).toBe(0);
+  });
+
+  it("does not remember an unknown hold, so the same id can succeed later", () => {
+    const missing = apply(wallet(5, 0), { type: "settle", id: "s1", hold_id: "H1", actual: 1 }, NOW);
+    expect(missing.result).toEqual({ ok: false, reason: "unknown_hold" });
+    expect(Object.hasOwn(missing.state.applied, "s1")).toBe(false);
+
+    const held = apply(missing.state, holdCommand("h1", "H1", 4), NOW).state;
+    const settled = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 1 }, NOW);
+    expect(settled.result).toEqual({ ok: true, charged: 1 });
+  });
+
+  it("does not remember a failed release either", () => {
+    const missing = apply(wallet(5, 0), { type: "release", id: "r1", hold_id: "H1" }, NOW);
+    expect(Object.hasOwn(missing.state.applied, "r1")).toBe(false);
+  });
+});
+
+describe("id validation", () => {
+  it.each(["", "has space", "dot.id", "slash/id", "é", "x".repeat(129)])("rejects command id %j with RangeError", (id) => {
+    expect(() => apply(emptyWallet(), { type: "grant", id, bucket: "monthly", credits: 1, ref: "x" }, NOW)).toThrow(RangeError);
+  });
+
+  it.each(["__proto__", "constructor", "prototype"])("rejects reserved command id %s with RangeError", (id) => {
+    expect(() => apply(emptyWallet(), { type: "grant", id, bucket: "monthly", credits: 1, ref: "x" }, NOW)).toThrow(RangeError);
+  });
+
+  it("accepts an id of exactly 128 allowed characters", () => {
+    const id = "a_:-".repeat(32);
+    expect(id).toHaveLength(128);
+    const out = apply(emptyWallet(), { type: "grant", id, bucket: "monthly", credits: 1, ref: "x" }, NOW);
+    expect(out.result).toEqual({ ok: true });
+  });
+
+  it.each(["", "bad id", "x".repeat(129), "__proto__", "constructor", "prototype"])(
+    "rejects hold_id %j with RangeError on hold",
+    (holdId) => {
+      expect(() => apply(wallet(10, 0), holdCommand("h1", holdId, 2), NOW)).toThrow(RangeError);
+    },
+  );
+
+  it("rejects a bad hold_id on settle and release", () => {
+    expect(() => apply(wallet(10, 0), { type: "settle", id: "s1", hold_id: "__proto__", actual: 1 }, NOW)).toThrow(RangeError);
+    expect(() => apply(wallet(10, 0), { type: "release", id: "r1", hold_id: "bad id" }, NOW)).toThrow(RangeError);
+  });
+
+  it("keeps the credits when a __proto__ hold id is refused", () => {
+    expect(() => apply(wallet(0, 100), holdCommand("h1", "__proto__", 50), NOW)).toThrow(RangeError);
+  });
+});
+
+describe("time validation", () => {
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects now %s with RangeError",
+    (now) => {
+      expect(() => apply(emptyWallet(), { type: "release_expired", id: "x1" }, now)).toThrow(RangeError);
+    },
+  );
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects expires_at %s on hold with RangeError",
+    (expiresAt) => {
+      expect(() => apply(wallet(10, 0), holdCommand("h1", "H1", 2, expiresAt), NOW)).toThrow(RangeError);
+    },
+  );
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects resets_at %s on reset with RangeError", (resetsAt) => {
+    expect(() => apply(wallet(1, 0), { type: "reset", id: "m1", credits: 1, resets_at: resetsAt }, NOW)).toThrow(RangeError);
+  });
+
+  it("accepts zero for every time", () => {
+    const out = apply(wallet(1, 0), { type: "reset", id: "m1", credits: 1, resets_at: 0 }, 0);
+    expect(out.result).toEqual({ ok: true });
+    expect(out.state.balances.monthly_resets_at).toBe(0);
+    const held = apply(wallet(4, 0), holdCommand("h1", "H1", 2, 0), 0);
+    expect(held.result).toEqual({ ok: true });
+  });
+});
+
+describe("balance overflow", () => {
+  it("throws RangeError when a grant would take a balance above Number.MAX_SAFE_INTEGER", () => {
+    const full = apply(emptyWallet(), { type: "grant", id: "g1", bucket: "monthly", credits: Number.MAX_SAFE_INTEGER, ref: "x" }, NOW).state;
+    expect(full.balances.monthly).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => apply(full, { type: "grant", id: "g2", bucket: "monthly", credits: 2, ref: "x" }, NOW)).toThrow(RangeError);
+  });
+
+  it("throws RangeError when a refund would overflow purchased", () => {
+    const full = apply(emptyWallet(), { type: "grant", id: "g1", bucket: "purchased", credits: Number.MAX_SAFE_INTEGER, ref: "x" }, NOW).state;
+    expect(() => apply(full, { type: "refund", id: "f1", bucket: "purchased", credits: 1, ref: "x" }, NOW)).toThrow(RangeError);
+  });
+});
+
+describe("unknown command type", () => {
+  it("throws at runtime for a type the union does not have, and records nothing", () => {
+    const bogus: Command = JSON.parse('{"type":"bogus","id":"b1"}');
+    expect(() => apply(emptyWallet(), bogus, NOW)).toThrow("unknown command type");
+
+    // The id was not recorded, so a real command with the same id still runs.
+    const real = apply(emptyWallet(), { type: "grant", id: "b1", bucket: "monthly", credits: 1, ref: "x" }, NOW);
+    expect(real.result).toEqual({ ok: true });
+  });
+});
+
+describe("frozen results", () => {
+  it("freezes the returned result and the stored copy", () => {
+    const out: ApplyOutput = apply(emptyWallet(), { type: "grant", id: "g1", bucket: "monthly", credits: 1, ref: "x" }, NOW);
+    const result: CommandResult = out.result;
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(out.state.applied.g1?.result)).toBe(true);
+  });
+
+  it("freezes the released array, so a caller cannot change a stored result", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 2), NOW).state;
+    const out = apply(held, { type: "release_expired", id: "x1" }, 5_000);
+    expect(out.result).toEqual({ ok: true, released: ["H1"] });
+    expect("released" in out.result && Object.isFrozen(out.result.released)).toBe(true);
+    expect(Object.isFrozen(out.state.applied.x1)).toBe(true);
   });
 });
 
