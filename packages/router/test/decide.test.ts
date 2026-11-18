@@ -74,6 +74,7 @@ describe("decideRoute", () => {
     expect(decision).toEqual({
       ok: true,
       tier: "standard",
+      requested_tier: "standard",
       model: "workers-ai/deepseek-v4.1-flash",
       retention: "standard",
       offerResearch: false,
@@ -132,12 +133,129 @@ describe("decideRoute", () => {
       zeroRetention: true,
       routes: zeroRoutes,
     });
+    // Changed by the fix round: tier is now the tier of the entry actually used (strong),
+    // and requested_tier keeps the tier the router asked for (standard).
     expect(decision).toMatchObject({
       ok: true,
-      tier: "standard",
+      tier: "strong",
+      requested_tier: "standard",
       model: "strong-zero",
       retention: "zero",
     });
+  });
+
+  test("zero retention applies to a fixed task too", () => {
+    const decision = decideRoute({
+      task: "more_detail",
+      zeroRetention: true,
+      routes: { ...zeroRoutes, fixed: { more_detail: "standard" } },
+    });
+    expect(decision).toMatchObject({
+      ok: true,
+      tier: "strong",
+      requested_tier: "standard",
+      model: "strong-zero",
+      retention: "zero",
+    });
+  });
+
+  test("zero retention never uses a standard entry or a weaker tier's zero entry", () => {
+    const routes: RouteTable = {
+      ...zeroRoutes,
+      tiers: {
+        light: [{ model: "light-zero", retention: "zero" }],
+        standard: [{ model: "standard-standard", retention: "standard" }],
+        strong: [{ model: "strong-standard", retention: "standard" }],
+      },
+    };
+    expect(
+      decideRoute({ task: "explain", answers: answers(3), zeroRetention: true, routes }),
+    ).toEqual({ ok: false, reason: "no_zero_retention_route" });
+  });
+
+  test("unsafe at exactly the minimum confidence is reported", () => {
+    const decision = decideRoute({
+      task: "explain",
+      answers: answers(2, 0.9, { unsafe: [true, 0.6] }),
+      zeroRetention: false,
+      routes: DEFAULT_ROUTES,
+    });
+    expect(decision).toMatchObject({ ok: true, unsafe: true });
+  });
+
+  test("research is not offered just under the minimum confidence", () => {
+    const decision = decideRoute({
+      task: "explain",
+      answers: answers(2, 0.9, { needsWeb: [true, 0.59] }),
+      zeroRetention: false,
+      routes: DEFAULT_ROUTES,
+    });
+    expect(decision).toMatchObject({ ok: true, offerResearch: false });
+  });
+
+  test("a custom minConfidence changes the unsure rule, tier and flags", () => {
+    expect(chooseTier(answers(1, 0.7), 0.8)).toBe("strong");
+    expect(chooseTier(answers(1, 0.7), 0.5)).toBe("light");
+
+    const decision = decideRoute({
+      task: "explain",
+      answers: answers(1, 0.7, { needsWeb: [true, 0.7], unsafe: [true, 0.7] }),
+      zeroRetention: false,
+      routes: DEFAULT_ROUTES,
+      minConfidence: 0.8,
+    });
+    expect(decision).toMatchObject({
+      ok: true,
+      tier: "strong",
+      requested_tier: "strong",
+      offerResearch: false,
+      unsafe: false,
+    });
+  });
+
+  test.each([NaN, Infinity, 0, -0.1, 1.5])("minConfidence %s is rejected", (minConfidence) => {
+    expect(() => chooseTier(answers(2), minConfidence)).toThrow(RangeError);
+    expect(() =>
+      decideRoute({
+        task: "more_detail",
+        zeroRetention: false,
+        routes: DEFAULT_ROUTES,
+        minConfidence,
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      decideRoute({
+        task: "explain",
+        answers: answers(2),
+        zeroRetention: false,
+        routes: DEFAULT_ROUTES,
+        minConfidence,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  test.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "%s is not a fixed task",
+    (task) => {
+      expect(
+        decideRoute({ task, answers: answers(2), zeroRetention: false, routes: DEFAULT_ROUTES }),
+      ).toMatchObject({ ok: true, tier: "light", requested_tier: "light" });
+      expect(decideRoute({ task, zeroRetention: false, routes: DEFAULT_ROUTES })).toEqual({
+        ok: false,
+        reason: "answers_required",
+      });
+    },
+  );
+
+  test("__proto__ as a task with zero retention uses the routed tier, not an inherited value", () => {
+    expect(
+      decideRoute({
+        task: "__proto__",
+        answers: answers(2),
+        zeroRetention: true,
+        routes: zeroRoutes,
+      }),
+    ).toMatchObject({ ok: true, tier: "light", requested_tier: "light", model: "light-zero" });
   });
 
   test("zero retention prefers a zero entry in the same tier", () => {

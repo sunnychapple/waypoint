@@ -6,7 +6,7 @@ export type Tier = (typeof TIERS)[number];
 export type RouteEntry = { model: string; retention: "standard" | "zero" };
 
 const RouteEntrySchema = z.strictObject({
-  model: z.string(),
+  model: z.string().min(1),
   retention: z.enum(["standard", "zero"]),
 });
 
@@ -36,8 +36,8 @@ export const DEFAULT_ROUTES: RouteTable = {
   fixed: {
     more_detail: "standard",
     double_check: "strong",
-    research_read: "light",
-    research_write: "standard",
+    read_link: "light",
+    research: "standard",
     overview_script: "strong",
     video_slides: "strong",
     diagram: "strong",
