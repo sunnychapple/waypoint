@@ -177,7 +177,7 @@ Branch `pr/05-router`. Dependencies: `zod` 4.6.7. Files: only under `packages/ro
 - `TIERS = ["light", "standard", "strong"]`. Type `Tier`.
 - `RouteEntry = { model: string; retention: "standard" | "zero" }`.
 - `RouteTableSchema` (zod, strict): `{ version: non-empty string, tiers: { light: RouteEntry[], standard: RouteEntry[], strong: RouteEntry[] } (each at least one entry), fixed: partial record from task name to Tier }`. Type `RouteTable`.
-- `DEFAULT_ROUTES: RouteTable`, version `"2026-11-16.1"`. One entry per tier with the planning models, all `retention: "standard"` (no route is confirmed zero-retention yet): light `"workers-ai/glm-4.7-flash"`, standard `"workers-ai/deepseek-v4.1-flash"`, strong `"workers-ai/kimi-k2.6"`. These ids are placeholders until flow 8; leave a one-line comment saying so. `fixed`: `more_detail` standard, `double_check` strong, `research_read` light, `research_write` standard, `overview_script` strong, `video_slides` strong, `diagram` strong, `mini_app` strong, `practice` standard. `explain` is not fixed: the router picks.
+- `DEFAULT_ROUTES: RouteTable`, version `"2026-11-16.1"`. One entry per tier with the planning models, all `retention: "standard"` (no route is confirmed zero-retention yet): light `"workers-ai/glm-4.7-flash"`, standard `"workers-ai/deepseek-v4.1-flash"`, strong `"workers-ai/kimi-k2.6"`. These ids are placeholders until flow 8; leave a one-line comment saying so. `fixed`: `more_detail` standard, `double_check` strong, `read_link` light, `research` standard, `overview_script` strong, `video_slides` strong, `diagram` strong, `mini_app` strong, `practice` standard. `explain` is not fixed: the router picks.
 
 `src/decide.ts`
 - `chooseTier(answers, minConfidence = 0.6): Tier`: if `difficulty.p < minConfidence` → strong; otherwise 1–2 light, 3–4 standard, 5 strong.
@@ -190,6 +190,76 @@ Branch `pr/05-router`. Dependencies: `zod` 4.6.7. Files: only under `packages/ro
 Tests: each difficulty band; low confidence goes strong; fixed tasks ignore answers; zero retention with no zero routes fails; zero retention picks a zero entry from a stronger tier; `DEFAULT_ROUTES` parses; invalid answers (p > 1, difficulty 6) fail the schema.
 
 ---
+
+## Wave 1 fix cards (after the Sonnet review)
+
+Each wave-1 pull request gets one fix round on its own branch. Where a fix card and the original card disagree, the fix card wins. Fix only what the fix card lists; the review comment on the pull request explains each item.
+
+Decisions made on 18 Nov 2026 (also written into `docs/architecture.md`):
+
+- **D1 Monthly credits held across a reset are forfeited.** When a hold that took monthly credits is settled or released after a later reset, its monthly part is not returned.
+- **D2 Balance owed.** A clawback larger than the purchased balance records the rest as a balance owed. Any credits that later come into the wallet (grants, refunds, settle and release returns, resets) pay the balance owed first.
+- **D3 Hold expiry outlives the task.** A hold's `expires_at` is always later than the task's own time limit, and the server stops work on a task whose hold is gone. (The API cards will enforce this; the ledger just keeps its rules.)
+- **D4 The +2 fallback voice applies to audio and video overviews**, and to nothing else.
+- **D5 Failed commands are not recorded.** Only successful results are remembered by command id, so the app can retry the same request after buying credits.
+
+### PR 01 fix · contracts
+
+Branch `pr/01-contracts`.
+- `minutes`: also at most 600 (a 10-hour cap).
+- Document `retry_after` as seconds in a one-line comment on the schema.
+- `InsufficientCreditsErrorSchema` is the body of every 402. Leave the schemas as they are.
+- Add tests: `retranscribe` with `minutes` accepted; `video_slides` and `diagram` with `minutes` rejected; `minutes` 600 accepted and 600.5 rejected; `fallback_voice: true` accepted on `video_slides` and rejected on `retranscribe`; `fallback_voice: false` accepted on `retranscribe`; `ApiErrorSchema` rejects a missing `retry_after` key and accepts `retry_after: 0`; `InsufficientCreditsErrorSchema` rejects `shortfall: 1.5` and `0`; `QuoteResponseSchema` accepts `credits: 1` and `balance_after: 0`, rejects `credits: 1.5` and `expires_in: 0`.
+
+### PR 02 fix · pricing
+
+Branch `pr/02-pricing`.
+- `priceKeyFor` throws `Error("unknown task: <task>")` when the built key is not a real `PriceKey` (for example `research` with depth `"huge"`). Use an own-property check (`Object.hasOwn`), so inherited names like `toString` are unknown too.
+- `quoteCredits` throws `RangeError` when `minutes` is not finite, ≤ 0 or > 600.
+- `quoteCredits` throws `Error("fallback_voice is only for overviews")` when `fallback_voice` is true and the task is not `overview_script` or `video_slides` (D4).
+- `creditsForCost` throws `RangeError` when the result is not a safe integer. Keep the `1e-9` epsilon: it is there so `0.0015` gives 3, not 4. Say so in a one-line comment.
+- Derive the schema's `credits` shape from `PRICE_KEYS`, so the two cannot drift.
+- Add tests: every price in the shipped table equals section 7 exactly; a quote for every task; each new throw; schema rejects `0`, `1.5` and an empty `version`.
+
+### PR 03 fix · ledger
+
+Branch `pr/03-ledger`.
+- **Command ids.** `applied` stores `{ type, result }`. A known id with a different `type` throws `Error("command id reused for a different command")`. Same id and type returns the stored result as before.
+- **D5.** Store only results with `ok: true`. A failed hold (shortfall) or an unknown hold is returned but not remembered, so the same id can succeed later.
+- **Ids.** Every `id` and `hold_id` must match `^[A-Za-z0-9_:-]{1,128}$` and must not be `__proto__`, `constructor` or `prototype`; otherwise `RangeError`. Use `Object.hasOwn` for every lookup in `holds` and `applied`.
+- **Times.** `now`, `expires_at` and `resets_at` must be safe integers ≥ 0; otherwise `RangeError`.
+- **Overflow.** Throw `RangeError` if any balance would go above `Number.MAX_SAFE_INTEGER`.
+- **Unknown command type** at runtime throws `Error("unknown command type")`.
+- **Results are frozen** (`Object.freeze`, including the `released` array), so a caller cannot change a stored result.
+- **D1, monthly periods.** Add `monthly_period: number` (starts at 0) to `balances`. Each `reset` adds 1. A hold stores the `monthly_period` it was made in. On settle or release, the monthly part goes back only if the hold's period equals the current one; otherwise it is dropped, with no entry, and the result carries `forfeited_monthly: <credits>` (0 when nothing was dropped). On settle, credits still go back to purchased first.
+- **D2, balance owed.** Add `owed: number` (starts at 0) to `balances`. Ledger entries gain the bucket `"owed"`, whose credits are the signed change to the amount owed. `clawback` removes what it can from purchased (a `clawback` entry on `purchased`), then adds the rest to owed (a `clawback` entry on `owed`, positive). Whenever credits come into the wallet (grant, refund, reset, settle and release returns), they first pay off owed: an entry with the same kind on `owed` (negative), and only the rest goes to the bucket. `clawback`'s result is `{ ok: true, removed, owed }`. `balancesFromLedger` returns `{ monthly, purchased, owed }`. For reset: the new allowance pays owed first, and monthly is set to what is left.
+- Keep exporting `ApplyOutput`, `Command` and `CommandResult`; they are needed.
+- **Tests.** One test per new rule, including: the reset-while-held scenario (monthly 10, hold 8, reset to 10, release → monthly stays 10 and `forfeited_monthly` is 8); the clawback-while-held scenario (purchased 100, hold 90, clawback 100 → purchased 0, owed 90; release → owed 0, purchased 0); a retry with the same id after a shortfall succeeds once credits are granted. Strengthen the 200-step sequence: at least half the holds must succeed (grant more often), include resets and clawbacks while holds are open, and check after every step that `balancesFromLedger(entries)` equals all three balances and that no balance is negative, and check for every settle and release that charged + credits returned (to buckets or to owed) + `forfeited_monthly` equals the hold's credits.
+
+### PR 04 fix · D1 schema
+
+Branch `pr/04-d1-schema`.
+- `groups.name_locked` is `TEXT NOT NULL`: the group's name, encrypted with the group key. It is not a flag.
+- Keys and public keys (`sign_pub`, `box_pub`, `wrapped_key`, `wrapped_account_key`) are base64url `TEXT`. No change needed if they already are.
+- `users.billing_account_id` stays `NOT NULL`; it is set to the user's own id at sign-up.
+- **Deleting.** Make `groups.created_by` nullable. Foreign keys get:
+  - `ON DELETE CASCADE`: every `user_id` column (`entitlements`, `devices`, `recovery`, `memberships`, `jobs`, `activity`), every `group_id` column (`memberships`, `key_envelopes`, `invites`, `links`) and `key_envelopes.device_id`.
+  - `ON DELETE SET NULL`: `groups.created_by`, `invites.accepted_by`.
+  - `purchases` has no user foreign key; purchase records are kept.
+- Add indexes `key_envelopes(device_id)` and `invites(group_id)`.
+- **Tests.** Check column types and `NOT NULL` from `PRAGMA table_info`; check every index exists (`PRAGMA index_list`); check every CHECK list rejects a bad value (`invites.role`, `entitlements.source`, `purchases.kind`, `purchases.status`, `jobs.type` and each 0/1 flag); check every foreign key rejects a missing parent; check deleting a user removes their devices, memberships and jobs, and sets `created_by` to null on a group they made; check deleting a group removes its memberships, invites and links. Drop the test that only reads back the pragma it set.
+
+### PR 05 fix · router
+
+Branch `pr/05-router`.
+- `fixed` uses only task names from `@waypoint/contracts`: `more_detail` standard, `double_check` strong, `read_link` light, `research` standard, `overview_script` strong, `video_slides` strong, `diagram` strong, `mini_app` strong, `practice` standard. Remove `research_read` and `research_write`; the research workflow picks its own reading tier. `retranscribe` is not routed (it always uses Whisper). `explain` is still the only task the router picks for.
+- Look up `fixed` with `Object.hasOwn`, so `constructor`, `toString` and `__proto__` are not fixed tasks.
+- `minConfidence` must be a finite number with 0 < value ≤ 1; otherwise `RangeError`, in both `chooseTier` and `decideRoute`.
+- `tier` in the result is the tier of the entry actually used. Add `requested_tier` for the tier asked for. They differ only when zero retention moves up a tier.
+- "Unsure" means only `difficulty.p < minConfidence`. Add a one-line comment.
+- `RouteEntry.model` must be a non-empty string.
+- Exporting `SUBJECTS`, `RouteDecision` and `DecideRouteInput` is fine.
+- Add tests: zero retention on a fixed task; a stronger tier with only standard entries; the zero entry in a weaker tier is never used; `unsafe` at exactly 0.6; a custom `minConfidence`; a bad `minConfidence`; `constructor` and `__proto__` as tasks; schema for p = 0, p = 1, extra keys, difficulty 0 and 2.5; an empty model string.
 
 ## Wave 2: the API Worker's spine (cards written when wave 1 is merged)
 

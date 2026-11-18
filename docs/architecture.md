@@ -144,12 +144,19 @@ presence (device_id, user_id, since)   -- memory only
 ### Wallet (one Durable Object per billing account, SQLite storage)
 
 ```
-balances (bucket PK -- monthly | purchased, credits, resets_at)
+balances (bucket PK -- monthly | purchased | owed, credits, resets_at)
 holds    (id PK, user_id, task, credits, expires_at)
 ledger   (id PK, at, user_id, kind -- grant | hold | settle | release | refund | clawback | reset, bucket, credits, ref)
 ```
 
 Monthly credits are spent first, then purchased ones. The ledger only ever gets new rows, so the balance can always be rebuilt from it. A `family_share` entitlement creates no wallet grant.
+
+Wallet rules decided on 18 Nov 2026:
+
+- Monthly credits held across a monthly reset belong to the old month: if that hold is later settled or released, its monthly part is dropped, not returned.
+- **Balance owed.** When Apple refunds or revokes a purchase and the purchased balance cannot cover the clawback (for example because those credits are held for a task), the rest is recorded as a balance owed (bucket `owed`). Any credits that later come into the wallet pay the balance owed first.
+- A hold always expires later than the task's own time limit, and the server stops work on a task whose hold is gone, so no task runs unpaid.
+- Only successful wallet commands are remembered by id, so the app can retry the same request after buying credits.
 
 ### KV keys
 
@@ -254,6 +261,6 @@ Pricing rule: one credit covers $0.0005 of provider cost. Task price in credits 
 | `mini_app` | 40 |
 | `practice` | 8 |
 | `retranscribe` | 1 per audio minute |
-| `fallback_voice` | +2 on top of an overview |
+| `fallback_voice` | +2 on top of an audio or video overview, on phones too old for the on-device voices |
 
 Products: free with 25 starter credits; Own it once (2,000 credits once, to the buyer only); Plus monthly or yearly (2,000 credits a month as a monthly allowance); credit packs of 1,000, 5,000 and 20,000. Purchased credits never expire. Free syncs text only; audio and photos sync on paid plans. Included synced media is capped at 3 GB per person.
