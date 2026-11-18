@@ -22,21 +22,7 @@ const credit = z.number().int().min(1);
 
 export const PriceTableSchema = z.strictObject({
   version: z.string().min(1),
-  credits: z.strictObject({
-    explain: credit,
-    double_check: credit,
-    more_detail: credit,
-    research_quick: credit,
-    research_standard: credit,
-    research_deep: credit,
-    overview_script: credit,
-    video_slides: credit,
-    diagram: credit,
-    mini_app: credit,
-    practice: credit,
-    retranscribe: credit,
-    fallback_voice: credit,
-  }),
+  credits: z.record(z.enum(PRICE_KEYS), credit),
 });
 
 export type PriceTable = z.infer<typeof PriceTableSchema>;

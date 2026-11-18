@@ -10,6 +10,10 @@ describe("creditsForCost", () => {
     expect(creditsForCost(0.0612)).toBe(123);
   });
 
+  test("absorbs float noise at an exact boundary", () => {
+    expect(creditsForCost(0.0015)).toBe(3);
+  });
+
   test("throws RangeError for negative input", () => {
     expect(() => creditsForCost(-0.01)).toThrow(RangeError);
   });
@@ -20,5 +24,10 @@ describe("creditsForCost", () => {
 
   test("throws RangeError for infinite input", () => {
     expect(() => creditsForCost(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+
+  test("throws RangeError when the result is not a safe integer", () => {
+    expect(() => creditsForCost(1e300)).toThrow(RangeError);
+    expect(() => creditsForCost(Number.MAX_VALUE)).toThrow(RangeError);
   });
 });
