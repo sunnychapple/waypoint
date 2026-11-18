@@ -48,7 +48,7 @@ describe("hold", () => {
     expect(out.state.balances.monthly).toBe(4);
     expect(out.state.balances.purchased).toBe(4);
     expect(out.state.holds.H1).toEqual({
-      id: "H1", user_id: "u1", task: "explain", credits: 6, expires_at: 5_000, from_monthly: 6, from_purchased: 0,
+      id: "H1", user_id: "u1", task: "explain", credits: 6, expires_at: 5_000, from_monthly: 6, from_purchased: 0, monthly_period: 0,
     });
     expect(out.entries).toEqual([
       { id: "h1:0", at: NOW, user_id: "u1", kind: "hold", bucket: "monthly", credits: -6, ref: "H1" },
@@ -93,7 +93,7 @@ describe("settle", () => {
     // Hold 5 takes monthly 3 and purchased 2. Actual 2 means 3 come back: purchased 2, monthly 1.
     const held = apply(wallet(3, 10), holdCommand("h1", "H1", 5), NOW).state;
     const out = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 2 }, NOW + 1);
-    expect(out.result).toEqual({ ok: true, charged: 2 });
+    expect(out.result).toEqual({ ok: true, charged: 2, forfeited_monthly: 0 });
     expect(out.state.balances.purchased).toBe(10);
     expect(out.state.balances.monthly).toBe(1);
     expect(out.state.holds.H1).toBeUndefined();
@@ -106,7 +106,7 @@ describe("settle", () => {
   it("charges only the hold when actual is above it and writes no entries", () => {
     const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
     const out = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 9 }, NOW);
-    expect(out.result).toEqual({ ok: true, charged: 4 });
+    expect(out.result).toEqual({ ok: true, charged: 4, forfeited_monthly: 0 });
     expect(out.state.balances.monthly).toBe(6);
     expect(out.entries).toEqual([]);
   });
@@ -127,7 +127,7 @@ describe("release", () => {
   it("returns the full split to the buckets it came from and deletes the hold", () => {
     const held = apply(wallet(3, 10), holdCommand("h1", "H1", 5), NOW).state;
     const out = apply(held, { type: "release", id: "r1", hold_id: "H1" }, NOW + 1);
-    expect(out.result).toEqual({ ok: true });
+    expect(out.result).toEqual({ ok: true, forfeited_monthly: 0 });
     expect(out.state.balances.monthly).toBe(3);
     expect(out.state.balances.purchased).toBe(10);
     expect(out.state.holds.H1).toBeUndefined();
@@ -184,20 +184,26 @@ describe("refund", () => {
 });
 
 describe("clawback", () => {
-  it("removes only what purchased holds, never going below zero", () => {
+  // D2: the part of the clawback that purchased cannot cover is recorded as owed (3 here).
+  it("removes only what purchased holds and records the rest as owed", () => {
     const out = apply(wallet(10, 5), { type: "clawback", id: "k1", credits: 8, ref: "refund-apple" }, NOW);
-    expect(out.result).toEqual({ ok: true, removed: 5 });
+    expect(out.result).toEqual({ ok: true, removed: 5, owed: 3 });
     expect(out.state.balances.purchased).toBe(0);
     expect(out.state.balances.monthly).toBe(10);
+    expect(out.state.balances.owed).toBe(3);
     expect(out.entries).toEqual([
       { id: "k1:0", at: NOW, user_id: null, kind: "clawback", bucket: "purchased", credits: -5, ref: "refund-apple" },
+      { id: "k1:1", at: NOW, user_id: null, kind: "clawback", bucket: "owed", credits: 3, ref: "refund-apple" },
     ]);
   });
 
-  it("writes no entry when nothing is removed", () => {
+  // D2: when nothing is purchased, the whole clawback is recorded as owed, so the purchased entry is skipped.
+  it("writes no purchased entry when nothing is removed, and records the whole amount as owed", () => {
     const out = apply(wallet(10, 0), { type: "clawback", id: "k1", credits: 8, ref: "x" }, NOW);
-    expect(out.result).toEqual({ ok: true, removed: 0 });
-    expect(out.entries).toEqual([]);
+    expect(out.result).toEqual({ ok: true, removed: 0, owed: 8 });
+    expect(out.entries).toEqual([
+      { id: "k1:0", at: NOW, user_id: null, kind: "clawback", bucket: "owed", credits: 8, ref: "x" },
+    ]);
   });
 
   it("rejects non-positive credits with RangeError", () => {
@@ -236,6 +242,47 @@ describe("reset", () => {
   });
 });
 
+// D1 and D2 with holds still open. Each test follows the scenario in docs/build-plan.md (PR 03 fix).
+describe("held credits across a reset and a clawback", () => {
+  it("forfeits the monthly part of a hold made before a reset, and keeps monthly at the new amount", () => {
+    // Monthly 10, hold 8 takes monthly 8 (period 0). Reset to 10 starts period 1 and sets monthly to 10.
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 8), NOW).state;
+    const reset = apply(held, { type: "reset", id: "m1", credits: 10, resets_at: 9_999 }, NOW + 1);
+    expect(reset.state.balances.monthly).toBe(10);
+    expect(reset.state.balances.monthly_period).toBe(1);
+
+    const out = apply(reset.state, { type: "release", id: "r1", hold_id: "H1" }, NOW + 2);
+    expect(out.result).toEqual({ ok: true, forfeited_monthly: 8 });
+    expect(out.state.balances.monthly).toBe(10);
+    expect(out.entries).toEqual([]);
+  });
+
+  it("drops the monthly part of a settle after a reset, and still charges the hold", () => {
+    // Hold 8 from monthly. Actual 3 means 5 would come back, all monthly, so all 5 are dropped.
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 8), NOW).state;
+    const reset = apply(held, { type: "reset", id: "m1", credits: 10, resets_at: 9_999 }, NOW + 1).state;
+    const out = apply(reset, { type: "settle", id: "s1", hold_id: "H1", actual: 3 }, NOW + 2);
+    expect(out.result).toEqual({ ok: true, charged: 3, forfeited_monthly: 5 });
+    expect(out.state.balances.monthly).toBe(10);
+  });
+
+  it("records the part a clawback cannot take as owed, and clears it when the hold is released", () => {
+    // Purchased 100, hold 90 from purchased leaves 10. Clawback 100 takes 10 and owes 90.
+    const held = apply(wallet(0, 100), holdCommand("h1", "H1", 90), NOW).state;
+    const clawed = apply(held, { type: "clawback", id: "k1", credits: 100, ref: "refund-apple" }, NOW + 1);
+    expect(clawed.result).toEqual({ ok: true, removed: 10, owed: 90 });
+    expect(clawed.state.balances).toMatchObject({ purchased: 0, owed: 90 });
+
+    // The released 90 pays off what is owed, so nothing goes back to purchased.
+    const out = apply(clawed.state, { type: "release", id: "r1", hold_id: "H1" }, NOW + 2);
+    expect(out.result).toEqual({ ok: true, forfeited_monthly: 0 });
+    expect(out.state.balances).toMatchObject({ monthly: 0, purchased: 0, owed: 0 });
+    expect(out.entries).toEqual([
+      { id: "r1:0", at: NOW + 2, user_id: "u1", kind: "release", bucket: "owed", credits: -90, ref: "H1" },
+    ]);
+  });
+});
+
 describe("command ids", () => {
   it("names entries <command id>:<n> starting at 0", () => {
     const out = apply(wallet(3, 10), holdCommand("abc", "H1", 5), NOW);
@@ -245,10 +292,10 @@ describe("command ids", () => {
   it("returns the stored result for a repeated id and type, with no entries and no change", () => {
     const held = apply(wallet(3, 10), holdCommand("h1", "H1", 5), NOW).state;
     const first = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 2 }, NOW);
-    expect(first.result).toEqual({ ok: true, charged: 2 });
+    expect(first.result).toEqual({ ok: true, charged: 2, forfeited_monthly: 0 });
 
     const again = apply(first.state, { type: "settle", id: "s1", hold_id: "H1", actual: 0 }, NOW);
-    expect(again.result).toEqual({ ok: true, charged: 2 });
+    expect(again.result).toEqual({ ok: true, charged: 2, forfeited_monthly: 0 });
     expect(again.entries).toEqual([]);
     expect(again.state).toEqual(first.state);
   });
@@ -304,7 +351,7 @@ describe("failed results", () => {
 
     const held = apply(missing.state, holdCommand("h1", "H1", 4), NOW).state;
     const settled = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 1 }, NOW);
-    expect(settled.result).toEqual({ ok: true, charged: 1 });
+    expect(settled.result).toEqual({ ok: true, charged: 1, forfeited_monthly: 0 });
   });
 
   it("does not remember a failed release either", () => {

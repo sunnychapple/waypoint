@@ -2,7 +2,7 @@ import type { LedgerEntry, WalletState } from "./types.ts";
 
 export function emptyWallet(): WalletState {
   return {
-    balances: { monthly: 0, purchased: 0, monthly_resets_at: null },
+    balances: { monthly: 0, purchased: 0, owed: 0, monthly_period: 0, monthly_resets_at: null },
     holds: {},
     applied: {},
   };
@@ -11,15 +11,19 @@ export function emptyWallet(): WalletState {
 export function balancesFromLedger(entries: readonly LedgerEntry[]): {
   monthly: number;
   purchased: number;
+  owed: number;
 } {
   let monthly = 0;
   let purchased = 0;
+  let owed = 0;
   for (const entry of entries) {
     if (entry.bucket === "monthly") {
       monthly += entry.credits;
+    } else if (entry.bucket === "owed") {
+      owed += entry.credits;
     } else {
       purchased += entry.credits;
     }
   }
-  return { monthly, purchased };
+  return { monthly, purchased, owed };
 }

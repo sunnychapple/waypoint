@@ -5,6 +5,7 @@ import type {
   EntryKind,
   Hold,
   LedgerEntry,
+  WalletBucket,
   WalletState,
 } from "./types.ts";
 
@@ -67,7 +68,7 @@ function execute(d: Draft, command: Command): CommandResult {
   switch (command.type) {
     case "grant": {
       requirePositive("credits", command.credits);
-      move(d, command.bucket, command.credits, "grant", command.user_id ?? null, command.ref);
+      credit(d, command.bucket, command.credits, "grant", command.user_id ?? null, command.ref);
       return { ok: true };
     }
 
@@ -92,6 +93,7 @@ function execute(d: Draft, command: Command): CommandResult {
         expires_at: command.expires_at,
         from_monthly: fromMonthly,
         from_purchased: fromPurchased,
+        monthly_period: d.balances.monthly_period,
       };
       move(d, "monthly", -fromMonthly, "hold", command.user_id, command.hold_id);
       move(d, "purchased", -fromPurchased, "hold", command.user_id, command.hold_id);
@@ -107,16 +109,16 @@ function execute(d: Draft, command: Command): CommandResult {
       const rest = hold.credits - charged;
       const toPurchased = Math.min(rest, hold.from_purchased);
       const toMonthly = rest - toPurchased;
-      returnToBuckets(d, hold, "settle", toPurchased, toMonthly);
-      return { ok: true, charged };
+      const forfeited = returnToBuckets(d, hold, "settle", toPurchased, toMonthly);
+      return { ok: true, charged, forfeited_monthly: forfeited };
     }
 
     case "release": {
       requireId("hold_id", command.hold_id);
       const hold = findHold(d, command.hold_id);
       if (!hold) return { ok: false, reason: "unknown_hold" };
-      returnToBuckets(d, hold, "release", hold.from_purchased, hold.from_monthly);
-      return { ok: true };
+      const forfeited = returnToBuckets(d, hold, "release", hold.from_purchased, hold.from_monthly);
+      return { ok: true, forfeited_monthly: forfeited };
     }
 
     case "release_expired": {
@@ -135,22 +137,29 @@ function execute(d: Draft, command: Command): CommandResult {
 
     case "refund": {
       requirePositive("credits", command.credits);
-      move(d, command.bucket, command.credits, "refund", command.user_id ?? null, command.ref);
+      credit(d, command.bucket, command.credits, "refund", command.user_id ?? null, command.ref);
       return { ok: true };
     }
 
     case "clawback": {
       requirePositive("credits", command.credits);
       const removed = Math.min(command.credits, d.balances.purchased);
+      const owed = command.credits - removed;
       move(d, "purchased", -removed, "clawback", null, command.ref);
-      return { ok: true, removed };
+      move(d, "owed", owed, "clawback", null, command.ref);
+      return { ok: true, removed, owed };
     }
 
     case "reset": {
       requireNonNegative("credits", command.credits);
       requireTime("resets_at", command.resets_at);
-      move(d, "monthly", command.credits - d.balances.monthly, "reset", null, command.id);
-      d.balances = { ...d.balances, monthly_resets_at: command.resets_at };
+      const left = payOwed(d, command.credits, "reset", null, command.id);
+      move(d, "monthly", left - d.balances.monthly, "reset", null, command.id);
+      d.balances = {
+        ...d.balances,
+        monthly_period: d.balances.monthly_period + 1,
+        monthly_resets_at: command.resets_at,
+      };
       return { ok: true };
     }
 
@@ -169,14 +178,11 @@ function move(
   ref: string,
 ): void {
   if (delta === 0) return;
-  const next = (bucket === "monthly" ? d.balances.monthly : d.balances.purchased) + delta;
+  const next = d.balances[bucket] + delta;
   if (next > Number.MAX_SAFE_INTEGER) {
     throw new RangeError(`${bucket} balance would exceed Number.MAX_SAFE_INTEGER`);
   }
-  d.balances =
-    bucket === "monthly"
-      ? { ...d.balances, monthly: next }
-      : { ...d.balances, purchased: next };
+  d.balances = { ...d.balances, [bucket]: next };
   d.entries.push({
     id: `${d.command}:${d.entries.length}`,
     at: d.at,
@@ -188,17 +194,45 @@ function move(
   });
 }
 
+// Credits coming into the wallet first pay off the balance owed. Returns what is left over.
+function payOwed(
+  d: Draft,
+  amount: number,
+  kind: EntryKind,
+  userId: string | null,
+  ref: string,
+): number {
+  const paid = Math.min(amount, d.balances.owed);
+  move(d, "owed", -paid, kind, userId, ref);
+  return amount - paid;
+}
+
+// Adds credits to a bucket after the balance owed has been paid off.
+function credit(
+  d: Draft,
+  bucket: WalletBucket,
+  amount: number,
+  kind: EntryKind,
+  userId: string | null,
+  ref: string,
+): void {
+  move(d, bucket, payOwed(d, amount, kind, userId, ref), kind, userId, ref);
+}
+
 // Gives credits back to purchased first, then monthly, and deletes the hold.
+// Monthly credits from an earlier monthly period are dropped. Returns how many were dropped.
 function returnToBuckets(
   d: Draft,
   hold: Hold,
   kind: "settle" | "release",
   toPurchased: number,
   toMonthly: number,
-): void {
-  move(d, "purchased", toPurchased, kind, hold.user_id, hold.id);
-  move(d, "monthly", toMonthly, kind, hold.user_id, hold.id);
+): number {
+  const stale = hold.monthly_period !== d.balances.monthly_period;
+  credit(d, "purchased", toPurchased, kind, hold.user_id, hold.id);
+  credit(d, "monthly", stale ? 0 : toMonthly, kind, hold.user_id, hold.id);
   delete d.holds[hold.id];
+  return stale ? toMonthly : 0;
 }
 
 function findHold(d: Draft, holdId: string): Hold | undefined {
