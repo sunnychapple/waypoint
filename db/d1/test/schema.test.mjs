@@ -24,6 +24,37 @@ const EXPECTED = {
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
 };
 
+// "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
+// spec makes optional (ends, removals, verification, expiry, accepted_by,
+// passcode_hash, spent, route, result_key) plus groups.created_by.
+const EXPECTED_TYPES = {
+  users: { id: "TEXT", clerk_id: "TEXT", created_at: "INTEGER", plan: "TEXT", billing_account_id: "TEXT", zero_retention: "INTEGER" },
+  entitlements: { user_id: "TEXT", product: "TEXT", source: "TEXT", media_cap_gb: "INTEGER", granted_at: "INTEGER", ended_at: "INTEGER?" },
+  devices: { id: "TEXT", user_id: "TEXT", name: "TEXT", platform: "TEXT", sign_pub: "TEXT", box_pub: "TEXT", can_approve: "INTEGER", added_at: "INTEGER", removed_at: "INTEGER?" },
+  recovery: { user_id: "TEXT", wrapped_account_key: "TEXT", verified_at: "INTEGER?" },
+  groups: { id: "TEXT", kind: "TEXT", name_locked: "TEXT", key_version: "INTEGER", created_by: "TEXT?" },
+  memberships: { group_id: "TEXT", user_id: "TEXT", role: "TEXT", starts_at: "INTEGER", ends_at: "INTEGER?", history_from: "INTEGER", left_at: "INTEGER?" },
+  key_envelopes: { group_id: "TEXT", key_version: "INTEGER", device_id: "TEXT", wrapped_key: "TEXT" },
+  invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?" },
+  links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER" },
+  purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
+  jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?" },
+  activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
+};
+
+// Indexes the card requires, as [table, indexed columns in order].
+const REQUIRED_INDEXES = [
+  ["devices", ["user_id"]],
+  ["memberships", ["user_id"]],
+  ["purchases", ["original_id"]],
+  ["purchases", ["billing_account_id"]],
+  ["jobs", ["user_id", "created_at"]],
+  ["activity", ["user_id", "at"]],
+  ["links", ["group_id"]],
+  ["key_envelopes", ["device_id"]],
+  ["invites", ["group_id"]],
+];
+
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
@@ -40,8 +71,19 @@ function seedUser(db, id = "u1", clerkId = "clerk_1") {
 function seedGroup(db, id = "g1") {
   seedUser(db);
   db.prepare(
-    "INSERT INTO groups (id, kind, created_by) VALUES (?, 'shared', 'u1')",
+    "INSERT INTO groups (id, kind, name_locked, created_by) VALUES (?, 'shared', 'sealed', 'u1')",
   ).run(id);
+}
+
+function seedGroupAndDevice(db) {
+  seedGroup(db);
+  db.prepare(
+    "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, added_at) VALUES ('d1', 'u1', 'phone', 'ios', 's', 'b', 1)",
+  ).run();
+}
+
+function count(db, sql, ...args) {
+  return db.prepare(sql).get(...args).n;
 }
 
 test("creates exactly the 12 directory tables", () => {
@@ -61,6 +103,17 @@ test("each table has exactly the columns in architecture section 5", () => {
   }
 });
 
+test("each column has the card's type and NOT NULL setting", () => {
+  const db = freshDb();
+  for (const [table, expected] of Object.entries(EXPECTED_TYPES)) {
+    const actual = {};
+    for (const c of db.prepare(`PRAGMA table_info(${table})`).all()) {
+      actual[c.name] = c.type + (c.notnull ? "" : "?");
+    }
+    assert.deepEqual(actual, expected, `types of ${table}`);
+  }
+});
+
 test("no column is named text, content, body, transcript or note", () => {
   const db = freshDb();
   const banned = new Set(["text", "content", "body", "transcript", "note"]);
@@ -71,9 +124,15 @@ test("no column is named text, content, body, transcript or note", () => {
   }
 });
 
-test("foreign key enforcement is on", () => {
+test("each required index exists on its columns", () => {
   const db = freshDb();
-  assert.equal(db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+  for (const [table, columns] of REQUIRED_INDEXES) {
+    const indexes = db.prepare(`PRAGMA index_list(${table})`).all();
+    const found = indexes.some((idx) =>
+      db.prepare(`PRAGMA index_info(${idx.name})`).all().map((c) => c.name).join(",") === columns.join(","),
+    );
+    assert.equal(found, true, `index on ${table}(${columns.join(", ")})`);
+  }
 });
 
 test("rejects a bad users.plan", () => {
@@ -104,7 +163,7 @@ test("rejects a bad groups.kind", () => {
   seedUser(db);
   assert.throws(
     () =>
-      db.prepare("INSERT INTO groups (id, kind, created_by) VALUES ('g1', 'team', 'u1')").run(),
+      db.prepare("INSERT INTO groups (id, kind, name_locked, created_by) VALUES ('g1', 'team', 'sealed', 'u1')").run(),
     /CHECK constraint failed/,
   );
 });
@@ -149,4 +208,81 @@ test("rejects a membership for a missing group", () => {
       ).run(),
     /FOREIGN KEY constraint failed/,
   );
+});
+
+const BAD_CHECKS = [
+  ["invites.role", "INSERT INTO invites (token_hash, group_id, role, expires_at) VALUES ('h1', 'g1', 'admin', 1)"],
+  ["entitlements.source", "INSERT INTO entitlements (user_id, product, source, granted_at) VALUES ('u1', 'waypoint', 'gift', 1)"],
+  ["purchases.kind", "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES ('t1', 'o1', 'ba_1', 'p', 'lifetime', 'active', 1)"],
+  ["purchases.status", "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES ('t1', 'o1', 'ba_1', 'p', 'consumable', 'pending', 1)"],
+  ["jobs.type", "INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j1', 'u1', 'summarize', 'queued', 5, 1)"],
+  ["users.zero_retention", "INSERT INTO users (id, clerk_id, created_at, billing_account_id, zero_retention) VALUES ('u9', 'c9', 1, 'ba_9', 2)"],
+  ["devices.can_approve", "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, can_approve, added_at) VALUES ('d9', 'u1', 'phone', 'ios', 's', 'b', 2, 1)"],
+];
+
+for (const [label, sql] of BAD_CHECKS) {
+  test(`rejects a bad ${label}`, () => {
+    const db = freshDb();
+    seedGroupAndDevice(db);
+    assert.throws(() => db.prepare(sql).run(), /CHECK constraint failed/);
+  });
+}
+
+const MISSING_PARENTS = [
+  ["entitlements.user_id", "INSERT INTO entitlements (user_id, product, source, granted_at) VALUES ('missing', 'waypoint', 'purchase', 1)"],
+  ["devices.user_id", "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, added_at) VALUES ('d2', 'missing', 'phone', 'ios', 's', 'b', 1)"],
+  ["recovery.user_id", "INSERT INTO recovery (user_id, wrapped_account_key) VALUES ('missing', 'k')"],
+  ["groups.created_by", "INSERT INTO groups (id, kind, name_locked, created_by) VALUES ('g2', 'personal', 'sealed', 'missing')"],
+  ["memberships.group_id", "INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('missing', 'u1', 'owner', 1, 1)"],
+  ["memberships.user_id", "INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('g1', 'missing', 'viewer', 1, 1)"],
+  ["key_envelopes.group_id", "INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES ('missing', 1, 'd1', 'k')"],
+  ["key_envelopes.device_id", "INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES ('g1', 1, 'missing', 'k')"],
+  ["invites.group_id", "INSERT INTO invites (token_hash, group_id, role, expires_at) VALUES ('h1', 'missing', 'viewer', 1)"],
+  ["invites.accepted_by", "INSERT INTO invites (token_hash, group_id, role, expires_at, accepted_by) VALUES ('h1', 'g1', 'viewer', 1, 'missing')"],
+  ["links.group_id", "INSERT INTO links (id, group_id, blob_key) VALUES ('l1', 'missing', 'b')"],
+  ["jobs.user_id", "INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j1', 'missing', 'research', 'queued', 5, 1)"],
+  ["activity.user_id", "INSERT INTO activity (id, user_id, task, credits, route, retention, at) VALUES ('a1', 'missing', 'explain', 1, 'r', 'standard', 1)"],
+];
+
+for (const [label, sql] of MISSING_PARENTS) {
+  test(`rejects a ${label} that points at a missing parent`, () => {
+    const db = freshDb();
+    seedGroupAndDevice(db);
+    assert.throws(() => db.prepare(sql).run(), /FOREIGN KEY constraint failed/);
+  });
+}
+
+test("deleting a user removes their devices, memberships and jobs, and clears created_by", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  seedUser(db, "u2", "clerk_2");
+  db.exec(`
+    INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES ('g1', 1, 'd1', 'k');
+    INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('g1', 'u1', 'owner', 1, 1);
+    INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('g1', 'u2', 'editor', 1, 1);
+    INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j1', 'u1', 'research', 'queued', 5, 1);
+  `);
+  db.prepare("DELETE FROM users WHERE id = 'u1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM devices WHERE user_id = 'u1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM key_envelopes WHERE device_id = 'd1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM memberships WHERE user_id = 'u1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM jobs WHERE user_id = 'u1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM memberships WHERE user_id = 'u2'"), 1);
+  const group = db.prepare("SELECT created_by FROM groups WHERE id = 'g1'").get();
+  assert.equal(group.created_by, null);
+});
+
+test("deleting a group removes its memberships, invites and links", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.exec(`
+    INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('g1', 'u1', 'owner', 1, 1);
+    INSERT INTO invites (token_hash, group_id, role, expires_at) VALUES ('h1', 'g1', 'viewer', 1);
+    INSERT INTO links (id, group_id, blob_key) VALUES ('l1', 'g1', 'b');
+  `);
+  db.prepare("DELETE FROM groups WHERE id = 'g1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM memberships WHERE group_id = 'g1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM invites WHERE group_id = 'g1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM links WHERE group_id = 'g1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM users"), 1);
 });

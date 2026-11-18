@@ -3,7 +3,7 @@
 -- and activity. Never holds note, transcript or page text.
 
 CREATE TABLE users (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   clerk_id TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL,
   plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'plus', 'own')),
@@ -12,7 +12,7 @@ CREATE TABLE users (
 );
 
 CREATE TABLE entitlements (
-  user_id TEXT NOT NULL REFERENCES users(id),
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   product TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('purchase', 'family_share')),
   media_cap_gb INTEGER NOT NULL DEFAULT 3,
@@ -22,8 +22,8 @@ CREATE TABLE entitlements (
 );
 
 CREATE TABLE devices (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   sign_pub TEXT NOT NULL,
@@ -35,22 +35,23 @@ CREATE TABLE devices (
 CREATE INDEX devices_user_id ON devices(user_id);
 
 CREATE TABLE recovery (
-  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  user_id TEXT NOT NULL PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   wrapped_account_key TEXT NOT NULL,
   verified_at INTEGER
 );
 
 CREATE TABLE groups (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('personal', 'shared')),
-  name_locked INTEGER NOT NULL DEFAULT 0 CHECK (name_locked IN (0, 1)),
+  -- The group name, sealed (encrypted) with the group key.
+  name_locked TEXT NOT NULL,
   key_version INTEGER NOT NULL DEFAULT 1,
-  created_by TEXT NOT NULL REFERENCES users(id)
+  created_by TEXT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE memberships (
-  group_id TEXT NOT NULL REFERENCES groups(id),
-  user_id TEXT NOT NULL REFERENCES users(id),
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
   starts_at INTEGER NOT NULL,
   ends_at INTEGER,
@@ -61,24 +62,26 @@ CREATE TABLE memberships (
 CREATE INDEX memberships_user_id ON memberships(user_id);
 
 CREATE TABLE key_envelopes (
-  group_id TEXT NOT NULL REFERENCES groups(id),
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   key_version INTEGER NOT NULL,
-  device_id TEXT NOT NULL REFERENCES devices(id),
+  device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   wrapped_key TEXT NOT NULL,
   PRIMARY KEY (group_id, key_version, device_id)
 );
+CREATE INDEX key_envelopes_device_id ON key_envelopes(device_id);
 
 CREATE TABLE invites (
-  token_hash TEXT PRIMARY KEY,
-  group_id TEXT NOT NULL REFERENCES groups(id),
+  token_hash TEXT NOT NULL PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
   expires_at INTEGER NOT NULL,
-  accepted_by TEXT REFERENCES users(id)
+  accepted_by TEXT REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE INDEX invites_group_id ON invites(group_id);
 
 CREATE TABLE links (
-  id TEXT PRIMARY KEY,
-  group_id TEXT NOT NULL REFERENCES groups(id),
+  id TEXT NOT NULL PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   blob_key TEXT NOT NULL,
   passcode_hash TEXT,
   expires_at INTEGER,
@@ -88,7 +91,7 @@ CREATE TABLE links (
 CREATE INDEX links_group_id ON links(group_id);
 
 CREATE TABLE purchases (
-  transaction_id TEXT PRIMARY KEY,
+  transaction_id TEXT NOT NULL PRIMARY KEY,
   original_id TEXT NOT NULL,
   billing_account_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
@@ -100,8 +103,8 @@ CREATE INDEX purchases_original_id ON purchases(original_id);
 CREATE INDEX purchases_billing_account_id ON purchases(billing_account_id);
 
 CREATE TABLE jobs (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN (
     'research', 'overview_script', 'video_slides', 'diagram',
     'mini_app', 'practice', 'retranscribe'
@@ -117,8 +120,8 @@ CREATE TABLE jobs (
 CREATE INDEX jobs_user_id_created_at ON jobs(user_id, created_at);
 
 CREATE TABLE activity (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id),
+  id TEXT NOT NULL PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   task TEXT NOT NULL,
   bytes_sent INTEGER NOT NULL DEFAULT 0,
   credits INTEGER NOT NULL,
