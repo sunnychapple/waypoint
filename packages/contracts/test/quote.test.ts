@@ -67,6 +67,28 @@ describe("QuoteRequestSchema", () => {
     expect(messagesFor({ task: "research", depth: "quick", minutes: 3 })).toContain(
       "minutes is only allowed for overview_script and retranscribe",
     );
+    expect(messagesFor({ task: "video_slides", minutes: 3 })).toContain(
+      "minutes is only allowed for overview_script and retranscribe",
+    );
+    expect(messagesFor({ task: "diagram", minutes: 3 })).toContain(
+      "minutes is only allowed for overview_script and retranscribe",
+    );
+  });
+
+  test("retranscribe accepts minutes", () => {
+    expect(QuoteRequestSchema.safeParse({ task: "retranscribe", minutes: 4 }).success).toBe(true);
+  });
+
+  test("minutes accepts 600 and rejects anything above 600", () => {
+    expect(QuoteRequestSchema.safeParse({ task: "retranscribe", minutes: 600 }).success).toBe(true);
+    expect(QuoteRequestSchema.safeParse({ task: "retranscribe", minutes: 600.5 }).success).toBe(false);
+    expect(QuoteRequestSchema.safeParse({ task: "overview_script", minutes: 601 }).success).toBe(false);
+  });
+
+  test("fallback_voice false is accepted on retranscribe", () => {
+    expect(
+      QuoteRequestSchema.safeParse({ task: "retranscribe", minutes: 2, fallback_voice: false }).success,
+    ).toBe(true);
   });
 });
 
@@ -81,6 +103,15 @@ describe("QuoteResponseSchema", () => {
 
   test("accepts the spec example", () => {
     expect(QuoteResponseSchema.safeParse(example).success).toBe(true);
+  });
+
+  test("accepts credits 1 and balance_after 0", () => {
+    expect(QuoteResponseSchema.safeParse({ ...example, credits: 1, balance_after: 0 }).success).toBe(true);
+  });
+
+  test("rejects fractional credits and expires_in 0", () => {
+    expect(QuoteResponseSchema.safeParse({ ...example, credits: 1.5 }).success).toBe(false);
+    expect(QuoteResponseSchema.safeParse({ ...example, expires_in: 0 }).success).toBe(false);
   });
 
   test("rejects zero credits, a negative balance and an unknown retention", () => {

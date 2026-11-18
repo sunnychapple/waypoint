@@ -17,7 +17,7 @@ export const QUOTE_TASKS = [
 export const QuoteRequestSchema = z
   .strictObject({
     task: z.enum(QUOTE_TASKS),
-    minutes: z.number().gt(0).optional(),
+    minutes: z.number().gt(0).max(600).optional(),
     depth: z.enum(RESEARCH_DEPTHS).optional(),
     fallback_voice: z.boolean().optional(),
   })

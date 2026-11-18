@@ -25,9 +25,14 @@ describe("STATUS_FOR_CODE", () => {
 });
 
 describe("ApiErrorSchema", () => {
-  test("accepts a valid error with and without retry_after", () => {
+  test("accepts a valid error with retry_after null, 0 and 30", () => {
     expect(ApiErrorSchema.safeParse({ code: "not_found", message: "Gone", retry_after: null }).success).toBe(true);
+    expect(ApiErrorSchema.safeParse({ code: "internal", message: "Retry", retry_after: 0 }).success).toBe(true);
     expect(ApiErrorSchema.safeParse({ code: "rate_limited", message: "Slow down", retry_after: 30 }).success).toBe(true);
+  });
+
+  test("rejects a missing retry_after key", () => {
+    expect(ApiErrorSchema.safeParse({ code: "internal", message: "x" }).success).toBe(false);
   });
 
   test("rejects an unknown code", () => {
@@ -60,6 +65,17 @@ describe("InsufficientCreditsErrorSchema", () => {
         shortfall: 5,
       }).success,
     ).toBe(true);
+  });
+
+  test("rejects a fractional shortfall", () => {
+    expect(
+      InsufficientCreditsErrorSchema.safeParse({
+        code: "insufficient_credits",
+        message: "Out of credits",
+        retry_after: null,
+        shortfall: 1.5,
+      }).success,
+    ).toBe(false);
   });
 
   test("rejects a shortfall of 0", () => {

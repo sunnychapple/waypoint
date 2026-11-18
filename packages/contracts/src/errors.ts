@@ -26,6 +26,7 @@ export const STATUS_FOR_CODE: Record<ErrorCode, number> = {
   internal: 500,
 };
 
+// retry_after is in seconds; null means no wait is advised.
 export const ApiErrorSchema = z.strictObject({
   code: z.enum(ERROR_CODES),
   message: z.string().min(1),
