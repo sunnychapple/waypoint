@@ -216,6 +216,9 @@ function credit(
   userId: string | null,
   ref: string,
 ): void {
+  if (bucket !== "monthly" && bucket !== "purchased") {
+    throw new RangeError("bucket must be monthly or purchased");
+  }
   move(d, bucket, payOwed(d, amount, kind, userId, ref), kind, userId, ref);
 }
 

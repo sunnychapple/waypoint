@@ -473,3 +473,18 @@ describe("immutability", () => {
     expect(JSON.stringify(start)).toBe(snapshot);
   });
 });
+
+describe("bucket check at runtime", () => {
+  for (const type of ["grant", "refund"] as const) {
+    for (const bucket of ["owed", "bogus"]) {
+      it(`${type} into ${bucket} throws and changes nothing`, () => {
+        const command: Command = JSON.parse(
+          JSON.stringify({ type, id: "c1", bucket, credits: 5, ref: "r" }),
+        );
+        const state = emptyWallet();
+        expect(() => apply(state, command, NOW)).toThrow(RangeError);
+        expect(state.balances.owed).toBe(0);
+      });
+    }
+  }
+});
