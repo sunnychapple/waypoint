@@ -37,7 +37,8 @@ export type CommandResult =
   | { ok: true; removed: number; owed: number }
   | { ok: false; shortfall: number }
   | { ok: false; reason: "unknown_hold" }
-  | { ok: false; reason: "hold_closed" };
+  | { ok: false; reason: "hold_closed" }
+  | { ok: false; reason: "hold_in_progress" };
 
 export type WalletState = {
   balances: {

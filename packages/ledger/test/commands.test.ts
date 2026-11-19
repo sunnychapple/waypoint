@@ -337,9 +337,9 @@ describe("failed results", () => {
     expect(retried.state.balances.purchased).toBe(0);
     expect(Object.hasOwn(retried.state.holds, "H1")).toBe(true);
 
-    // Now that it succeeded, the same id returns the stored success and changes nothing.
+    // Now that it succeeded, the same id while the hold is open is "in progress" and changes nothing.
     const replay = apply(retried.state, holdCommand("retry", "H1", 5), NOW);
-    expect(replay.result).toEqual({ ok: true });
+    expect(replay.result).toEqual({ ok: false, reason: "hold_in_progress" });
     expect(replay.entries).toEqual([]);
     expect(replay.state.balances.purchased).toBe(0);
   });
@@ -527,10 +527,12 @@ describe("buy and retry with owed credits", () => {
 });
 
 describe("replayed hold", () => {
-  it("returns ok with no entries while the same hold is open", () => {
+  it("returns hold_in_progress with no entries while the same hold is open", () => {
     const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
     const replay = apply(held, holdCommand("h1", "H1", 4), NOW);
-    expect(replay.result).toEqual({ ok: true });
+    expect(replay.result).toEqual({ ok: false, reason: "hold_in_progress" });
+    expect(Object.isFrozen(replay.result)).toBe(true);
+    expect(replay.state.applied).toBe(held.applied);
     expect(replay.entries).toEqual([]);
     expect(replay.state).toEqual(held);
   });
