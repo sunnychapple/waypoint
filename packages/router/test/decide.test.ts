@@ -234,6 +234,18 @@ describe("decideRoute", () => {
     ).toThrow(RangeError);
   });
 
+  test("optional answers and minConfidence typed as possibly undefined are accepted", () => {
+    const maybe: RouterAnswers | undefined = undefined;
+    const decision = decideRoute({
+      task: "diagram",
+      answers: maybe,
+      minConfidence: undefined,
+      zeroRetention: false,
+      routes: DEFAULT_ROUTES,
+    });
+    expect(decision).toMatchObject({ ok: true, tier: "strong" });
+  });
+
   test.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
     "%s is not a fixed task",
     (task) => {

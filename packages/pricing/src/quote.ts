@@ -2,9 +2,9 @@ import { PRICE_KEYS, type PriceKey, type PriceTable } from "./table.ts";
 
 export type QuoteInput = {
   task: string;
-  depth?: "quick" | "standard" | "deep";
-  minutes?: number;
-  fallback_voice?: boolean;
+  depth?: "quick" | "standard" | "deep" | undefined;
+  minutes?: number | undefined;
+  fallback_voice?: boolean | undefined;
 };
 
 // An own-property lookup, so inherited names such as "toString" are not keys.

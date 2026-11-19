@@ -150,4 +150,13 @@ describe("quoteCredits", () => {
   test("an unknown task throws", () => {
     expect(() => quoteCredits(table, { task: "nope" })).toThrow("unknown task: nope");
   });
+
+  test("optional fields typed as possibly undefined are accepted", () => {
+    const depth: "quick" | "standard" | "deep" | undefined = undefined;
+    const minutes: number | undefined = undefined;
+    const fallbackVoice: boolean | undefined = undefined;
+    expect(
+      quoteCredits(table, { task: "explain", depth, minutes, fallback_voice: fallbackVoice }),
+    ).toBe(1);
+  });
 });

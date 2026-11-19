@@ -12,6 +12,9 @@ const RouteEntrySchema = z.strictObject({
 
 const TierSchema = z.enum(TIERS);
 
+// explain is not here (the router picks its tier); retranscribe is never routed.
+export const FIXED_TASKS = ["more_detail", "double_check", "read_link", "research", "overview_script", "video_slides", "diagram", "mini_app", "practice"] as const;
+
 export const RouteTableSchema = z.strictObject({
   version: z.string().min(1),
   tiers: z.strictObject({
@@ -19,7 +22,10 @@ export const RouteTableSchema = z.strictObject({
     standard: z.array(RouteEntrySchema).min(1),
     strong: z.array(RouteEntrySchema).min(1),
   }),
-  fixed: z.record(z.string(), TierSchema),
+  fixed: z.partialRecord(z.enum(FIXED_TASKS), TierSchema).refine(
+    (fixed) => FIXED_TASKS.every((task) => Object.hasOwn(fixed, task)),
+    "fixed must list every fixed task",
+  ),
 });
 
 export type RouteTable = z.infer<typeof RouteTableSchema>;
