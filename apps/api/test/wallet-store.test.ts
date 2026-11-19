@@ -48,6 +48,31 @@ function seeded(seed: number): () => number {
   };
 }
 
+// Wraps a store so that the nth write after arming throws. Reads are not counted.
+function faultyStore(inner: SqlStore) {
+  let writesLeft = Number.POSITIVE_INFINITY;
+  const store: SqlStore = {
+    sql: {
+      exec(query, ...bindings) {
+        if (!query.trimStart().startsWith("SELECT")) {
+          writesLeft -= 1;
+          if (writesLeft === 0) {
+            throw new Error("injected write failure");
+          }
+        }
+        return inner.sql.exec(query, ...bindings);
+      },
+    },
+    transactionSync: (fn) => inner.transactionSync(fn),
+  };
+  return {
+    store,
+    failWriteNumber(n: number) {
+      writesLeft = n;
+    },
+  };
+}
+
 describe("wallet store", () => {
   test("grant then read shows the balance", () => {
     const wallet = createWalletStore(createTestStore());
@@ -126,6 +151,32 @@ describe("wallet store", () => {
     expect(snapshot(store)).toEqual(before);
   });
 
+  test("a replayed settle and a replayed release_expired return frozen results", () => {
+    const wallet = createWalletStore(createTestStore());
+    wallet.apply({ type: "grant", id: "g1", bucket: "monthly", credits: 10, ref: "plan" }, 1000);
+    wallet.apply(
+      { type: "hold", id: "c1", hold_id: "h1", user_id: "u1", task: "summary", credits: 4, expires_at: 2000 },
+      1000,
+    );
+    const settleFirst = wallet.apply({ type: "settle", id: "s1", hold_id: "h1", actual: 1 }, 1100);
+    const settleReplay = wallet.apply({ type: "settle", id: "s1", hold_id: "h1", actual: 9 }, 1200);
+    expect(settleReplay).toEqual(settleFirst);
+    expect(Object.isFrozen(settleFirst)).toBe(true);
+    expect(Object.isFrozen(settleReplay)).toBe(true);
+
+    wallet.apply(
+      { type: "hold", id: "c2", hold_id: "h2", user_id: "u1", task: "summary", credits: 2, expires_at: 2500 },
+      1300,
+    );
+    const expiredFirst = wallet.apply({ type: "release_expired", id: "e1" }, 3000);
+    const expiredReplay = wallet.apply({ type: "release_expired", id: "e1" }, 3100);
+    expect(expiredFirst).toEqual({ ok: true, released: ["h2"] });
+    expect(expiredReplay).toEqual(expiredFirst);
+    expect(Object.isFrozen(expiredFirst)).toBe(true);
+    expect(Object.isFrozen(expiredReplay)).toBe(true);
+    expect("released" in expiredReplay && Object.isFrozen(expiredReplay.released)).toBe(true);
+  });
+
   test("the same command id with another type throws and writes nothing", () => {
     const store = createTestStore();
     const wallet = createWalletStore(store);
@@ -172,6 +223,26 @@ describe("wallet store", () => {
     expect(snapshot(store)).toEqual(before);
   });
 
+  test("a write that fails partway through rolls back balances, holds, ledger and applied", () => {
+    const inner = createTestStore();
+    const faulty = faultyStore(inner);
+    const wallet = createWalletStore(faulty.store);
+    wallet.apply({ type: "grant", id: "g1", bucket: "monthly", credits: 10, ref: "plan" }, 1000);
+    wallet.apply({ type: "grant", id: "g2", bucket: "purchased", credits: 5, ref: "pack" }, 1000);
+    const before = snapshot(inner);
+
+    // A hold writes the three balances, then the hold row, then the ledger rows. Fail on the first ledger row.
+    faulty.failWriteNumber(5);
+    expect(() =>
+      wallet.apply(
+        { type: "hold", id: "c1", hold_id: "h1", user_id: "u1", task: "summary", credits: 12, expires_at: 9000 },
+        1100,
+      ),
+    ).toThrow("injected write failure");
+    expect(snapshot(inner)).toEqual(before);
+    expect(wallet.read()).toEqual({ monthly: 10, purchased: 5, owed: 0, monthly_resets_at: null, holds: [] });
+  });
+
   test("a new store on the same SqlStore sees the same state", () => {
     const store = createTestStore();
     const first = createWalletStore(store);
@@ -203,20 +274,22 @@ describe("wallet store", () => {
     const history: Command[] = [];
     let now = 1000;
 
+    const counts = { settles: 0, releases: 0, resets: 0, owedClawbacks: 0, replays: 0, settleReplays: 0, failedHolds: 0 };
+
     for (let step = 0; step < 200; step++) {
       now += int(3000);
       const roll = int(100);
       let command: Command;
-      if (roll < 20) {
+      if (roll < 23) {
         command = {
           type: "grant",
           id: `c${step}`,
-          bucket: rand() < 0.5 ? "monthly" : "purchased",
+          bucket: rand() < 0.8 ? "monthly" : "purchased",
           credits: 1 + int(40),
           ref: `ref-${step}`,
           ...(rand() < 0.5 ? { user_id: "u1" } : {}),
         };
-      } else if (roll < 40) {
+      } else if (roll < 51) {
         const id = `h${step}`;
         holdIds.push(id);
         command = {
@@ -228,13 +301,13 @@ describe("wallet store", () => {
           credits: 1 + int(60),
           expires_at: now + 1 + int(20000),
         };
-      } else if (roll < 55) {
-        command = { type: "settle", id: `c${step}`, hold_id: pick(holdIds, "missing"), actual: int(50) };
-      } else if (roll < 65) {
-        command = { type: "release", id: `c${step}`, hold_id: pick(holdIds, "missing") };
       } else if (roll < 72) {
+        command = { type: "settle", id: `c${step}`, hold_id: pick(holdIds, "missing"), actual: int(50) };
+      } else if (roll < 82) {
+        command = { type: "release", id: `c${step}`, hold_id: pick(holdIds, "missing") };
+      } else if (roll < 84) {
         command = { type: "release_expired", id: `c${step}` };
-      } else if (roll < 80) {
+      } else if (roll < 86) {
         command = {
           type: "refund",
           id: `c${step}`,
@@ -242,7 +315,7 @@ describe("wallet store", () => {
           credits: 1 + int(20),
           ref: `ref-${step}`,
         };
-      } else if (roll < 88) {
+      } else if (roll < 90) {
         command = { type: "clawback", id: `c${step}`, credits: 1 + int(30), ref: `ref-${step}` };
       } else if (roll < 93) {
         command = { type: "reset", id: `c${step}`, credits: int(25), resets_at: now + 1000 + int(1000000) };
@@ -251,6 +324,7 @@ describe("wallet store", () => {
       }
       history.push(command);
 
+      const replayed = Object.hasOwn(state.applied, command.id);
       let expected: CommandResult | { error: string };
       try {
         const output = apply(state, command, now);
@@ -269,7 +343,30 @@ describe("wallet store", () => {
       }
       expect(actual, `step ${step}`).toEqual(expected);
       expect(wallet.read(), `step ${step}`).toEqual(viewOf(state));
+
+      if (replayed) {
+        counts.replays += 1;
+        if (command.type === "settle") counts.settleReplays += 1;
+      } else if (command.type === "settle" && "ok" in expected && expected.ok) {
+        counts.settles += 1;
+      } else if (command.type === "release" && "ok" in expected && expected.ok) {
+        counts.releases += 1;
+      } else if (command.type === "reset" && "ok" in expected && expected.ok) {
+        counts.resets += 1;
+      } else if (command.type === "clawback" && "owed" in expected && expected.owed > 0) {
+        counts.owedClawbacks += 1;
+      } else if (command.type === "hold" && "ok" in expected && !expected.ok) {
+        counts.failedHolds += 1;
+      }
     }
+    expect(counts.settles, "successful settles").toBeGreaterThanOrEqual(10);
+    expect(counts.releases, "successful releases").toBeGreaterThanOrEqual(5);
+    expect(counts.resets, "successful resets").toBeGreaterThanOrEqual(3);
+    expect(counts.owedClawbacks, "clawbacks leaving owed above 0").toBeGreaterThanOrEqual(3);
+    expect(counts.replays, "replays of earlier command ids").toBeGreaterThanOrEqual(5);
+    expect(counts.settleReplays, "replayed settles").toBeGreaterThanOrEqual(1);
+    expect(counts.failedHolds, "failed holds").toBeGreaterThanOrEqual(3);
+
 
     const paged: LedgerEntry[] = [];
     let after = 0;
@@ -301,6 +398,15 @@ describe("wallet store", () => {
     expect(third.next).toBe(7);
     expect(wallet.ledger(third.next, 3)).toEqual({ entries: [], next: 7 });
     expect(wallet.ledger(0, 500).entries).toHaveLength(7);
+  });
+
+  test("ledger returns entries in seq order even when id order differs", () => {
+    const wallet = createWalletStore(createTestStore());
+    wallet.apply({ type: "grant", id: "b", bucket: "monthly", credits: 1, ref: "first" }, 1000);
+    wallet.apply({ type: "grant", id: "a", bucket: "monthly", credits: 1, ref: "second" }, 1001);
+    const page = wallet.ledger(0, 10);
+    expect(page.entries.map((entry) => entry.id)).toEqual(["b:0", "a:0"]);
+    expect(page.entries.map((entry) => entry.ref)).toEqual(["first", "second"]);
   });
 
   test("ledger throws RangeError for a bad after or limit", () => {

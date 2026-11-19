@@ -96,7 +96,11 @@ export function createWalletStore(store: SqlStore) {
         .exec("SELECT type, result FROM applied WHERE command_id = ?", commandId)
         .toArray() as { type: Command["type"]; result: string }[];
       if (row !== undefined) {
-        applied[commandId] = { type: row.type, result: JSON.parse(row.result) as CommandResult };
+        const result = JSON.parse(row.result) as CommandResult;
+        if ("released" in result) {
+          Object.freeze(result.released);
+        }
+        applied[commandId] = { type: row.type, result: Object.freeze(result) };
       }
     }
 
