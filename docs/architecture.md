@@ -97,7 +97,7 @@ One versioned REST surface on the API Worker plus one socket per group. Every re
 
 Rules every endpoint follows:
 
-- **Idempotency-Key on every write.** A retry on a bad connection never charges twice or writes twice.
+- **Idempotency-Key on every write.** A retry on a bad connection never charges twice or writes twice. Writes whose replies hold no note content store their reply for 24 hours and replay it. Task endpoints that answer with content never store the reply; the wallet hold made from the key stops them running twice.
 - **402 when credits run out.** The reply carries the shortfall. The app shows Out of credits and retries the same request after a purchase.
 - **One error shape:** `code`, `message`, `retry_after`.
 - **No readable notes outside a task.** The server never accepts readable note content except inside a task request.
@@ -131,6 +131,7 @@ links        (id, group_id, blob_key, passcode_hash, expires_at, revoked_at, vie
 purchases    (transaction_id PK, original_id, billing_account_id, product_id, kind, status, purchased_at)
 jobs         (id, user_id, type, state, quoted, spent, route, result_key, created_at, expires_at)
 activity     (id, user_id, task, bytes_sent, credits, route, retention, at)
+idempotency  (user_id, key, request_hash, state, status, body, created_at)  -- replies to repeated writes, 24 h
 ```
 
 ### Group room (one Durable Object per group, SQLite storage)

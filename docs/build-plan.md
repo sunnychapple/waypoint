@@ -779,6 +779,136 @@ Notes the wave 3 cards must carry (from the wave 1 follow-up review):
 - **PR 18:** a refunded or revoked Plus month is `reset { id: "apple:<notification uuid>", credits: 0, resets_at: now }`, never a clawback. A credit pack or Own it refund is a `clawback` of that purchase's credits. A renewal is `reset { credits: 2000, resets_at: <next period> }`.
 - **The first card that writes `activity`:** `task` comes from the typed task list, never from request text.
 
+## Wave 3, first cards: PR 11 and PR 12
+
+Both branch from `main` and touch different files, so they can be built one after the other and merged in either order. The wave 2 rules (top of "Wave 2") still apply: files only where the card says, no `node:` imports in `apps/api/src`, tests through `app.request` with hand-made `env` objects, no network, run `npm run bundle -w @waypoint/api` before opening the pull request.
+
+Route tests in both cards build a fresh app instead of using `createApp`, so they need no Clerk token:
+
+```ts
+const app = new Hono<AppEnv>();
+app.onError(handleError);
+app.use(async (c, next) => {
+  c.set("user", user);
+  await next();
+});
+// then mount the middleware or route under test
+```
+
+### PR 11 · Idempotency store
+
+Branch `pr/11-idempotency-store`. No new dependencies. Files: `db/d1/migrations/0002_idempotency.sql`, `db/d1/test/schema.test.mjs`, `apps/api/test/helpers/d1.ts`, `apps/api/src/idempotency.ts`, `apps/api/test/idempotency-store.test.ts`. No other files.
+
+Why it looks like this: a repeated write must not run twice, but the server must never store readable note content. So responses are stored only for write endpoints whose replies hold no note content (purchases, groups, invites, links, jobs created, settings). Endpoints that answer with content (`explain`, `more_detail`, `double_check`, `read_link`, a job's result) never use this store; the wallet hold, whose command id comes from the key, protects them instead (see the wave 3 notes on `hold_closed`). No route uses the store in this pull request; later cards add it to their own routes.
+
+`db/d1/migrations/0002_idempotency.sql`, exactly:
+
+```sql
+-- Stored replies for repeated write requests (PR 11). Never holds note content: only routes whose
+-- replies have none use this table. Rows older than 24 hours are ignored and cleaned up later (PR 33).
+CREATE TABLE idempotency (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'done')),
+  status INTEGER,
+  body TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+
+CREATE INDEX idempotency_created_at ON idempotency (created_at);
+```
+
+`db/d1/test/schema.test.mjs`: apply every `.sql` file in `migrations/` in name order instead of only `0001`. Add `idempotency` to the expected tables and columns, and tests that: `state` rejects `'other'`; a row for a missing user is rejected; deleting the user deletes their rows; the index exists. Keep every existing test.
+
+`apps/api/test/helpers/d1.ts`: apply every `.sql` file in `db/d1/migrations/` in name order (`readdirSync`, sorted) instead of only `0001_directory.sql`. Change nothing else in the file.
+
+`apps/api/src/idempotency.ts`: keep `requireIdempotencyKey` as it is and add:
+
+```ts
+export const IDEMPOTENCY_KEEP_MS = 24 * 60 * 60 * 1000;
+export const IDEMPOTENCY_PENDING_MS = 60 * 1000;
+export const IDEMPOTENCY_MAX_BODY_BYTES = 16384;
+export function idempotent(deps: { now: () => number }): MiddlewareHandler<AppEnv>
+```
+
+What `idempotent` does, in order:
+1. `key` is the `Idempotency-Key` header; if `isValidIdempotencyKey` is false, throw `ApiFailure("bad_request", "Idempotency-Key header required")`. `userId` is `c.get("user").id`.
+2. `request_hash` is the lowercase hex SHA-256 (`crypto.subtle.digest`) of the bytes of `<METHOD>\n<pathname + search>\n` followed by the request body bytes (`c.req.arrayBuffer()`; the handler can still read the body afterwards).
+3. `INSERT INTO idempotency (user_id, key, request_hash, state, status, body, created_at) VALUES (?, ?, ?, 'pending', NULL, NULL, ?) ON CONFLICT (user_id, key) DO NOTHING`. If one row changed, go to step 5.
+4. Otherwise read the row. Then:
+   - If it is older than `IDEMPOTENCY_KEEP_MS`, or it is `pending` and older than `IDEMPOTENCY_PENDING_MS` (a request that died): delete it with `WHERE user_id = ? AND key = ? AND created_at = ?` (its old `created_at`), and run the insert from step 3 once more. If that changes one row, go to step 5; if not, throw `ApiFailure("conflict", "request in progress", 1)`.
+   - If `request_hash` differs: throw `ApiFailure("conflict", "Idempotency-Key reused with a different request")`.
+   - If `pending`: throw `ApiFailure("conflict", "request in progress", 1)`.
+   - If `done`: return the stored reply without running the handler: `new Response(body, { status, headers: { "Content-Type": "application/json", "Idempotent-Replayed": "true" } })`.
+5. `await next()`. Then look at `c.res` (Hono has already turned a thrown error into a reply by this point):
+   - The reply is stored only if its status is 200–299, 400, 404 or 409, its `Content-Type` starts with `application/json`, and its body (read from `c.res.clone()`) is at most `IDEMPOTENCY_MAX_BODY_BYTES` bytes. Then `UPDATE idempotency SET state = 'done', status = ?, body = ? WHERE user_id = ? AND key = ?`.
+   - Otherwise delete the row, so the same request can be sent again. This covers 402 (buy credits and retry, D5), 401, 403, 429 and every 5xx.
+   - If the update or delete itself throws, still return the handler's reply unchanged.
+6. Never store or log the request body; only its hash.
+
+Tests (`apps/api/test/idempotency-store.test.ts`), using `createTestDb()` with one user inserted, the fresh app above, `idempotent({ now })` with a test clock, and throwaway routes that count how often they run:
+- First `POST` runs the handler and returns its reply; the same key and body again returns the same status and body with `Idempotent-Replayed: true`, and the handler count is still 1.
+- The handler can read the JSON body after the middleware hashed it.
+- Same key, different body → 409 `conflict`, handler not run. Same key, different path → 409. Same key, different query string → 409.
+- Same key used by a different user runs normally (keys are per user).
+- A second request while the first is still `pending` (insert the pending row by hand) → 409 with `retry_after` 1 and a `Retry-After: 1` header.
+- A `pending` row older than 60 s is taken over: the handler runs and the reply is stored.
+- A `done` row older than 24 hours is ignored: the handler runs again.
+- A handler that throws `ApiFailure("insufficient_credits", ...)` (402): the row is deleted, and the same request again runs the handler.
+- A handler that throws a plain `Error` (500): row deleted. One that returns 403: row deleted.
+- A handler that returns 400, 404 and 409: stored and replayed.
+- A handler that returns `c.text("ok")`: not stored (row deleted).
+- A JSON reply over 16,384 bytes: not stored (row deleted); exactly 16,384 bytes: stored.
+- A missing or 15-character key → 400 `bad_request`.
+- The stored `request_hash` is 64 lowercase hex characters, and no column holds the request body (send a body with a marker string and check that no column of the row contains it).
+- If the D1 update fails (wrap the test DB so `UPDATE` throws), the handler's reply is still returned.
+
+Not in this PR: adding the middleware to any route, the cleanup cron (PR 33), storing replies for content endpoints (never).
+
+### PR 12 · `POST /v1/tasks/quote`
+
+Branch `pr/12-quote`. No new dependencies (`@waypoint/contracts`, `@waypoint/pricing` and `@waypoint/ledger` are already in `apps/api`). Files: `apps/api/src/errors.ts`, `apps/api/src/tasks/quote.ts`, `apps/api/src/app.ts` (one import and one line), `apps/api/test/quote.test.ts`, `apps/api/test/app.test.ts` (new tests only). No other files.
+
+`src/errors.ts`: add
+
+```ts
+export class InsufficientCredits extends ApiFailure {
+  constructor(readonly shortfall: number) {
+    super("insufficient_credits", "not enough credits");
+  }
+}
+```
+
+and in `handleError`, an `InsufficientCredits` reply is the usual 402 body plus `shortfall` (it must pass `InsufficientCreditsErrorSchema`). Check `InsufficientCredits` before the plain `ApiFailure` branch.
+
+`src/tasks/quote.ts`: `export const quoteRoute = new Hono<AppEnv>().post("/v1/tasks/quote", handler)`. The handler, in order:
+1. Read the body with `c.req.json()`. Bad JSON, or a body `QuoteRequestSchema.safeParse` rejects → `ApiFailure("bad_request", "invalid request")`. Do not echo the body or zod's messages.
+2. `loadConfig(c.env.CONFIG)`; a `ConfigError` → `ApiFailure("internal", "config unavailable")`, anything else is rethrown (same as `src/config/route.ts`).
+3. `credits = quoteCredits(config.prices, request)`; if it throws → `ApiFailure("bad_request", "invalid request")`.
+4. Read the wallet: `c.env.WALLET.get(c.env.WALLET.idFromName(user.billing_account_id)).read()`.
+5. `const short = shortfall(view, credits)` (from `@waypoint/ledger`). If `short > 0`, throw `new InsufficientCredits(short)`.
+6. Reply 200 with a `QuoteResponse`: `{ credits, price_table: config.prices.version, retention: user.zero_retention ? "zero" : "standard", balance_after: view.monthly + view.purchased - credits, expires_in: 300 }`.
+
+The quote is read-only: it does not hold credits, write to D1 or use the PR 11 store. The global Idempotency-Key header check still applies because it is a `POST`.
+
+`src/app.ts`: `app.route("/", quoteRoute);` under "Routes go below this line", after the config route.
+
+Tests (`test/quote.test.ts`), with the fresh app above and `quoteRoute` mounted. `env.CONFIG` is a small `Map`-backed stub holding a full good config built from `PRICE_TABLE_2026_11_16_2` and `DEFAULT_ROUTES` (and `config:current`, router, flags, min-native, voice pack values that pass the schemas). `env.WALLET` is a stub `{ idFromName: (name: string) => name, get: (id: string) => ({ read: async () => view }) }` that records the name it was given. Cases:
+- `explain` with monthly 10 → 200, credits 1, `balance_after` 9, `price_table` `"2026-11-16.2"`, `retention` `"standard"`, `expires_in` 300; the body passes `QuoteResponseSchema`; the wallet was looked up by the user's `billing_account_id`.
+- `overview_script` with `fallback_voice: true` → 42; `retranscribe` with `minutes: 4` → 4; `research` with `depth: "deep"` → 125.
+- A user with `zero_retention: true` → `retention: "zero"`.
+- Monthly 1 and purchased 2, `more_detail` (3) → 200 with `balance_after` 0.
+- Purchased 3 and owed 7, `double_check` (4) → 402 with `shortfall` 8; the body passes `InsufficientCreditsErrorSchema`.
+- Monthly 50 and owed 90, `explain` → 200 (owed does not block a quote that fits).
+- Bad JSON → 400; `{ "task": "nope" }` → 400; `research` without `depth` → 400; `fallback_voice: true` on `explain` → 400; extra key → 400. None of the 400 bodies contain the request text.
+- `config:current` missing → 500 `internal` "config unavailable".
+
+`test/app.test.ts` (add, change nothing else): a route throwing `new InsufficientCredits(5)` gives 402 with `shortfall` 5 passing `InsufficientCreditsErrorSchema`; through `createApp`, `POST /v1/tasks/quote` with no `Authorization` header gives 401 (the route is behind the session check).
+
+Not in this PR: holding credits, the router call, quotes for `read_link` (no price yet).
+
 ## Blocked until a security owner signs off
 
 | PR | Title |
