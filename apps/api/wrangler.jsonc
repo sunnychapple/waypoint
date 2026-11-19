@@ -11,5 +11,6 @@
       "migrations_dir": "../../db/d1/migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }]
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "" }
 }
