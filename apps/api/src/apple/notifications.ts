@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Db } from "../storage.ts";
-import type { AppleProduct } from "./products.ts";
+import { purchaseKind, type AppleProduct } from "./products.ts";
 import {
   applyTransaction,
   applyWalletCommand,
@@ -111,7 +111,25 @@ export async function applyNotice(input: NoticeInput): Promise<void> {
       .prepare("SELECT status FROM purchases WHERE transaction_id = ? AND billing_account_id = ?")
       .bind(txn.transactionId, account.billing_account_id)
       .first<{ status: string }>();
-    if (row === null) return; // never granted here, so nothing to take back
+    if (row === null) {
+      // Never granted here. Record it as refunded or revoked, so a grant that arrives later
+      // (a retried purchase notice, or the app's own request) finds the row and grants nothing.
+      await db
+        .prepare(
+          "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (transaction_id) DO NOTHING",
+        )
+        .bind(
+          txn.transactionId,
+          txn.originalTransactionId,
+          account.billing_account_id,
+          txn.productId,
+          purchaseKind(product.kind),
+          action === "refund" ? "refunded" : "revoked",
+          txn.purchaseDate,
+        )
+        .run();
+      return;
+    }
     if (row.status === "active" && purchased) {
       if (product.kind === "plus") {
         await applyWalletCommand(wallet, { type: "reset", id: commandId, credits: 0, resets_at: now });

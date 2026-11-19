@@ -285,10 +285,22 @@ describe("refunds, revokes and lapses", () => {
     expect(commands.filter((c) => c.type === "clawback")).toHaveLength(1);
   });
 
-  test("a refund of a transaction never recorded makes no wallet command and no row", async () => {
+  test("a refund of a transaction never recorded makes no wallet command and records it as refunded", async () => {
     await apply(accountA, notice("REFUND", uuid(2)), transaction("t404", "waypoint.credits.1000"));
     expect(commands).toHaveLength(0);
-    expect((await one<{ n: number }>("SELECT COUNT(*) AS n FROM purchases")).n).toBe(0);
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t404")).status).toBe("refunded");
+  });
+
+  test("a refund that arrives before its purchase stops the later grant", async () => {
+    await apply(accountA, notice("REFUND", uuid(2)), transaction("t405", "waypoint.credits.1000"));
+    await apply(accountA, notice("ONE_TIME_CHARGE", uuid(3)), transaction("t405", "waypoint.credits.1000"));
+    expect(commands).toHaveLength(0);
+    expect(read(accountA).purchased).toBe(0);
+  });
+
+  test("a revoke that arrives before its purchase records it as revoked", async () => {
+    await apply(accountA, notice("REVOKE", uuid(2)), transaction("t406", "waypoint.own_it"));
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t406")).status).toBe("revoked");
   });
 
   test("a revoke of a Family Sharing Own it makes no wallet command, ends only that entitlement and leaves the purchaser's", async () => {
