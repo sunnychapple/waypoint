@@ -122,11 +122,19 @@ test("no column is named text, content, body, transcript or note", () => {
   const db = freshDb();
   const banned = new Set(["text", "content", "body", "transcript", "note"]);
   for (const table of Object.keys(EXPECTED)) {
-    // idempotency.body holds a stored reply (PR 11), not note content; it is checked by its own tests.
-    if (table === "idempotency") continue;
     for (const col of db.prepare(`PRAGMA table_info(${table})`).all()) {
+      // idempotency.body holds a stored reply (PR 11), not note content; the marker test in idempotency-store.test.ts checks it.
+      if (table === "idempotency" && col.name === "body") continue;
       assert.equal(banned.has(col.name), false, `${table}.${col.name}`);
     }
+  }
+});
+
+test("idempotency has no column named text, content, transcript or note", () => {
+  const db = freshDb();
+  const columns = db.prepare("PRAGMA table_info(idempotency)").all().map((c) => c.name);
+  for (const name of ["text", "content", "transcript", "note"]) {
+    assert.equal(columns.includes(name), false, `idempotency.${name}`);
   }
 });
 

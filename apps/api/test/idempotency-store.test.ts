@@ -90,6 +90,29 @@ function failingUpdate(db: Db): Db {
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Another request takes the row over (rewrites its created_at) just before this request's takeover delete runs.
+function takenOverBeforeDelete(db: Db, userId: string, newCreatedAt: number): Db {
+  const racing = (statement: DbStatement): DbStatement => ({
+    bind: (...values) => racing(statement.bind(...values)),
+    first: <T = Record<string, unknown>>() => statement.first<T>(),
+    all: <T = Record<string, unknown>>() => statement.all<T>(),
+    run: async () => {
+      await db.prepare("UPDATE idempotency SET created_at = ? WHERE user_id = ? AND key = ?").bind(newCreatedAt, userId, KEY).run();
+      return statement.run();
+    },
+  });
+  return {
+    prepare: (query) => {
+      const statement = db.prepare(query);
+      return query.startsWith("DELETE FROM idempotency") ? racing(statement) : statement;
+    },
+  };
+}
+
 describe("idempotent: replay", () => {
   test("the first POST runs the handler; the same key and body replays the same reply", async () => {
     const db = createTestDb();
@@ -401,5 +424,122 @@ describe("idempotent: key and storage shape", () => {
     const rows = await db.prepare("SELECT * FROM idempotency").all<Record<string, unknown>>();
     expect(rows.results).toHaveLength(1);
     expect(JSON.stringify(rows.results)).not.toContain(marker);
+  });
+});
+
+describe("idempotent: races", () => {
+  test("five concurrent POSTs with the same key run the handler once", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    let runs = 0;
+    const app = makeApp(db, async (c) => {
+      runs += 1;
+      await sleep(20);
+      return c.json({ made: runs }, 201);
+    });
+    const replies = await Promise.all(Array.from({ length: 5 }, () => post(app, db, PATH, { name: "a" })));
+    expect(runs).toBe(1);
+    for (const reply of replies) expect([201, 409]).toContain(reply.status);
+    const bodies = await Promise.all(replies.filter((r) => r.status === 201).map((r) => r.text()));
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) expect(body).toBe('{"made":1}');
+    expect(await rowCount(db)).toBe(1);
+  });
+
+  test("two requests racing to take over the same abandoned pending row run the handler once", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    await insertRow(db, {
+      hash: await requestHash("POST", PATH, '{"name":"a"}'),
+      state: "pending",
+      createdAt: NOW - IDEMPOTENCY_PENDING_MS - 1,
+    });
+    let runs = 0;
+    const app = makeApp(db, async (c) => {
+      runs += 1;
+      await sleep(20);
+      return c.json({ run: runs }, 201);
+    });
+    const replies = await Promise.all([post(app, db, PATH, { name: "a" }), post(app, db, PATH, { name: "a" })]);
+    expect(runs).toBe(1);
+    for (const reply of replies) expect([201, 409]).toContain(reply.status);
+    expect(await rowCount(db)).toBe(1);
+  });
+});
+
+describe("idempotent: check order", () => {
+  test("a pending row with a different request_hash is the reused-key 409, not request in progress", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    let runs = 0;
+    const app = makeApp(db, (c) => {
+      runs += 1;
+      return c.json({ ok: true });
+    });
+    await insertRow(db, { hash: await requestHash("POST", PATH, '{"name":"other"}'), state: "pending", createdAt: NOW });
+    const res = await post(app, db, PATH, { name: "a" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      code: "conflict",
+      message: "Idempotency-Key reused with a different request",
+      retry_after: null,
+    });
+    expect(runs).toBe(0);
+  });
+});
+
+describe("idempotent: byte limit counts UTF-8 bytes", () => {
+  // "é" is 2 bytes in UTF-8 but one UTF-16 unit, and the envelope {"pad":""} is 10 bytes.
+  test("a JSON reply of 2-byte characters that is exactly 16,384 bytes is stored", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    const reply = JSON.stringify({ pad: "é".repeat(8187) });
+    expect(new TextEncoder().encode(reply).byteLength).toBe(IDEMPOTENCY_MAX_BODY_BYTES);
+    let runs = 0;
+    const app = makeApp(db, () => {
+      runs += 1;
+      return new Response(reply, { headers: { "Content-Type": "application/json" } });
+    });
+    await post(app, db, PATH, { name: "a" });
+    expect(await db.prepare("SELECT state FROM idempotency").first()).toEqual({ state: "done" });
+    const second = await post(app, db, PATH, { name: "a" });
+    expect(await second.text()).toBe(reply);
+    expect(runs).toBe(1);
+  });
+
+  test("a JSON reply of 2-byte characters that is 16,385 bytes is not stored", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    const reply = JSON.stringify({ pad: "é".repeat(8187) + "x" });
+    expect(new TextEncoder().encode(reply).byteLength).toBe(IDEMPOTENCY_MAX_BODY_BYTES + 1);
+    const app = makeApp(db, () => new Response(reply, { headers: { "Content-Type": "application/json" } }));
+    const res = await post(app, db, PATH, { name: "a" });
+    expect(await res.text()).toBe(reply);
+    expect(await rowCount(db)).toBe(0);
+  });
+});
+
+describe("idempotent: takeover delete is compare-and-delete", () => {
+  test("if another request takes the row over before the delete, nothing is deleted and the request is 409 request in progress", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    const takenOverAt = NOW - 1_000;
+    await insertRow(db, {
+      hash: await requestHash("POST", PATH, '{"name":"a"}'),
+      state: "pending",
+      createdAt: NOW - IDEMPOTENCY_PENDING_MS - 1,
+    });
+    let runs = 0;
+    const app = makeApp(db, (c) => {
+      runs += 1;
+      return c.json({ ok: true });
+    });
+    const res = await post(app, takenOverBeforeDelete(db, "u1", takenOverAt), PATH, { name: "a" });
+    expect(res.status).toBe(409);
+    expect(res.headers.get("Retry-After")).toBe("1");
+    expect(await res.json()).toEqual({ code: "conflict", message: "request in progress", retry_after: 1 });
+    expect(runs).toBe(0);
+    expect(await rowCount(db)).toBe(1);
+    expect(await db.prepare("SELECT created_at FROM idempotency").first()).toEqual({ created_at: takenOverAt });
   });
 });
