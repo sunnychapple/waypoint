@@ -1,14 +1,11 @@
 // test/helpers/d1.ts
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { Db, DbStatement } from "../../src/storage.ts";
 
-const MIGRATION = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../../db/d1/migrations/0001_directory.sql",
-);
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../db/d1/migrations");
 
 function toInput(value: unknown): SQLInputValue {
   if (value === null || typeof value === "string" || typeof value === "number") return value;
@@ -20,7 +17,9 @@ function toInput(value: unknown): SQLInputValue {
 export function createTestDb(): Db {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(readFileSync(MIGRATION, "utf8"));
+  for (const file of readdirSync(MIGRATIONS_DIR).filter((name) => name.endsWith(".sql")).sort()) {
+    db.exec(readFileSync(join(MIGRATIONS_DIR, file), "utf8"));
+  }
   const statement = (query: string, values: SQLInputValue[]): DbStatement => ({
     bind: (...next) => statement(query, next.map(toInput)),
     first: async <T,>() => (db.prepare(query).get(...values) ?? null) as T | null,

@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const migrationPath = fileURLToPath(
-  new URL("../migrations/0001_directory.sql", import.meta.url),
-);
-const migration = readFileSync(migrationPath, "utf8");
+const migrationsDir = fileURLToPath(new URL("../migrations/", import.meta.url));
+const migrations = readdirSync(migrationsDir)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(join(migrationsDir, name), "utf8"));
 
 const EXPECTED = {
   users: ["id", "clerk_id", "created_at", "plan", "billing_account_id", "zero_retention"],
@@ -22,6 +24,7 @@ const EXPECTED = {
   purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
   jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at"],
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
+  idempotency: ["user_id", "key", "request_hash", "state", "status", "body", "created_at"],
 };
 
 // "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
@@ -40,6 +43,7 @@ const EXPECTED_TYPES = {
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
   jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?" },
   activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
+  idempotency: { user_id: "TEXT", key: "TEXT", request_hash: "TEXT", state: "TEXT", status: "INTEGER?", body: "TEXT?", created_at: "INTEGER" },
 };
 
 // Indexes the card requires, as [table, indexed columns in order].
@@ -58,7 +62,7 @@ const REQUIRED_INDEXES = [
 function freshDb() {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
-  db.exec(migration);
+  for (const sql of migrations) db.exec(sql);
   return db;
 }
 
@@ -86,13 +90,13 @@ function count(db, sql, ...args) {
   return db.prepare(sql).get(...args).n;
 }
 
-test("creates exactly the 12 directory tables", () => {
+test("creates exactly the 12 directory tables and the idempotency table", () => {
   const db = freshDb();
   const rows = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all();
   assert.deepEqual(rows.map((r) => r.name), Object.keys(EXPECTED).sort());
-  assert.equal(rows.length, 12);
+  assert.equal(rows.length, 13);
 });
 
 test("each table has exactly the columns in architecture section 5", () => {
@@ -119,8 +123,18 @@ test("no column is named text, content, body, transcript or note", () => {
   const banned = new Set(["text", "content", "body", "transcript", "note"]);
   for (const table of Object.keys(EXPECTED)) {
     for (const col of db.prepare(`PRAGMA table_info(${table})`).all()) {
+      // idempotency.body holds a stored reply (PR 11), not note content; the marker test in idempotency-store.test.ts checks it.
+      if (table === "idempotency" && col.name === "body") continue;
       assert.equal(banned.has(col.name), false, `${table}.${col.name}`);
     }
+  }
+});
+
+test("idempotency has no column named text, content, transcript or note", () => {
+  const db = freshDb();
+  const columns = db.prepare("PRAGMA table_info(idempotency)").all().map((c) => c.name);
+  for (const name of ["text", "content", "transcript", "note"]) {
+    assert.equal(columns.includes(name), false, `idempotency.${name}`);
   }
 });
 
@@ -285,4 +299,49 @@ test("deleting a group removes its memberships, invites and links", () => {
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM invites WHERE group_id = 'g1'"), 0);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM links WHERE group_id = 'g1'"), 0);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM users"), 1);
+});
+
+test("rejects an idempotency state other than pending or done", () => {
+  const db = freshDb();
+  seedUser(db);
+  assert.throws(
+    () =>
+      db.prepare(
+        "INSERT INTO idempotency (user_id, key, request_hash, state, created_at) VALUES ('u1', 'k1', 'h', 'other', 1)",
+      ).run(),
+    /CHECK constraint failed/,
+  );
+});
+
+test("rejects an idempotency row for a missing user", () => {
+  const db = freshDb();
+  assert.throws(
+    () =>
+      db.prepare(
+        "INSERT INTO idempotency (user_id, key, request_hash, state, created_at) VALUES ('missing', 'k1', 'h', 'pending', 1)",
+      ).run(),
+    /FOREIGN KEY constraint failed/,
+  );
+});
+
+test("deleting a user deletes their idempotency rows", () => {
+  const db = freshDb();
+  seedUser(db);
+  seedUser(db, "u2", "clerk_2");
+  db.exec(`
+    INSERT INTO idempotency (user_id, key, request_hash, state, created_at) VALUES ('u1', 'k1', 'h', 'pending', 1);
+    INSERT INTO idempotency (user_id, key, request_hash, state, created_at) VALUES ('u2', 'k1', 'h', 'pending', 1);
+  `);
+  db.prepare("DELETE FROM users WHERE id = 'u1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM idempotency WHERE user_id = 'u1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM idempotency WHERE user_id = 'u2'"), 1);
+});
+
+test("has an index on idempotency(created_at)", () => {
+  const db = freshDb();
+  const indexes = db.prepare("PRAGMA index_list(idempotency)").all();
+  const found = indexes.some((idx) =>
+    db.prepare(`PRAGMA index_info(${idx.name})`).all().map((c) => c.name).join(",") === "created_at",
+  );
+  assert.equal(found, true);
 });
