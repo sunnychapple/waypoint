@@ -82,7 +82,7 @@ Branch `pr/01-contracts`. Dependencies: `zod` 4.6.7. Files: only under `packages
 
 `src/headers.ts`
 - `IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"`.
-- `isValidIdempotencyKey(value: string | null | undefined): boolean`: true only for 16 to 128 characters of `A-Z a-z 0-9 _ -`.
+- `isValidIdempotencyKey(value: string | null | undefined): boolean`: true only for 16 to 64 characters of `A-Z a-z 0-9 _ -` (64 since the wave-1 follow-up; it was 128).
 
 Tests: every schema accepts the spec's quote example and rejects each refinement case above; `STATUS_FOR_CODE` covers every code; idempotency key boundary lengths 15, 16, 128, 129 and a bad character.
 
@@ -260,6 +260,93 @@ Branch `pr/05-router`.
 - `RouteEntry.model` must be a non-empty string.
 - Exporting `SUBJECTS`, `RouteDecision` and `DecideRouteInput` is fine.
 - Add tests: zero retention on a fixed task; a stronger tier with only standard entries; the zero entry in a weaker tier is never used; `unsafe` at exactly 0.6; a custom `minConfidence`; a bad `minConfidence`; `constructor` and `__proto__` as tasks; schema for p = 0, p = 1, extra keys, difficulty 0 and 2.5; an empty model string.
+
+## Wave 1 follow-up (after the Fable review)
+
+A second review of wave 1 (19 Nov 2026), checked against the merged code, left two small fix pull requests. Both branch from `main` and can run one after the other. Where these cards and the wave 1 cards disagree, these win.
+
+### PR F1 · ledger: shortfall counts the balance owed; a replayed hold must still be open
+
+Branch `pr/fix-w1-ledger`. Files: `packages/ledger/src/types.ts`, `packages/ledger/src/commands.ts`, `packages/ledger/test/commands.test.ts`. No other files.
+
+`src/types.ts`
+- Add `| { ok: false; reason: "hold_closed" }` to `CommandResult`.
+- In the `grant` and `refund` commands, change `user_id?: string` to `user_id?: string | undefined`.
+
+`src/commands.ts`
+1. Add this exported function above `execute`, exactly:
+   ```ts
+   // Credits to buy before a hold of this size succeeds: 0 when it fits now. A purchase pays the
+   // balance owed first, so owed is added to what is missing.
+   export function shortfall(balances: { monthly: number; purchased: number; owed: number }, credits: number): number {
+     const available = balances.monthly + balances.purchased;
+     return available >= credits ? 0 : credits - available + balances.owed;
+   }
+   ```
+   In `hold`, replace the two `available` lines with `const short = shortfall(d.balances, command.credits); if (short > 0) return { ok: false, shortfall: short };`.
+2. Add a module constant `const HOLD_CLOSED: CommandResult = Object.freeze({ ok: false, reason: "hold_closed" });`.
+3. In `apply`, after the "command id reused for a different command" type check and before `return { state, entries: [], result: prior.result }`, add exactly:
+   ```ts
+   if (command.type === "hold") {
+     // A replayed hold is ok only while that same hold is still open; otherwise the task would run unpaid.
+     const open = Object.hasOwn(state.holds, command.hold_id) ? state.holds[command.hold_id] : undefined;
+     if (open === undefined) return { state, entries: [], result: HOLD_CLOSED };
+     if (open.user_id !== command.user_id || open.task !== command.task || open.credits !== command.credits) {
+       throw new Error("command id reused for a different command");
+     }
+   }
+   ```
+   Do not compare `expires_at`: a real retry works out a new one.
+
+Tests (`test/commands.test.ts`), each its own test:
+- `shortfall`: `{monthly 5, purchased 0, owed 0}` and 5 → 0; `{0, 3, 0}` and 5 → 2; `{50, 0, 90}` and 10 → 0 (owed does not block a hold that fits); `{0, 3, 7}` and 5 → 9.
+- Buy and retry: grant purchased 90, clawback 180 (owed 90), hold `h1` of 10 → `{ ok: false, shortfall: 100 }`; grant purchased 100 → owed 0, purchased 10; the same `h1` again → `{ ok: true }`, purchased 0.
+- Replay of an open hold with the same id and fields returns `{ ok: true }` and no entries.
+- Replay after the hold was settled → `{ ok: false, reason: "hold_closed" }`, no entries, state equal to before, `applied` unchanged.
+- Replay after `release_expired` released it → `hold_closed`.
+- Replay while the hold is open but with other `credits`, and with another `task` → throws "command id reused for a different command".
+- Same command id with a new `hold_id` → `hold_closed`, and the new hold is not created.
+- A `grant` whose `user_id` comes from a variable typed `string | undefined` and set to `undefined` compiles, and its entry's `user_id` is `null`.
+- Plus refund with existing commands only: reset 2000, hold 40, then `reset { id: "apple-refund-1", credits: 0, resets_at: <now> }` → monthly 0; settle that hold with actual 10 → `charged: 10, forfeited_monthly: 30`, monthly still 0.
+
+Run `npm run typecheck` and `npm test` from the root; every other package's tests, including `apps/api`, must pass unchanged.
+
+### PR F2 · optional fields, the routes table's fixed tasks, Idempotency-Key length
+
+Branch `pr/fix-w1-types-routes`. Files: `packages/pricing/src/quote.ts`, `packages/pricing/test/quote.test.ts`; `packages/router/src/routes.ts`, `packages/router/src/decide.ts`, `packages/router/test/routes.test.ts`, `packages/router/test/decide.test.ts`; `packages/contracts/src/headers.ts`, `packages/contracts/test/headers.test.ts`. If a test file named here does not exist, add the tests to the package's existing test file for that source file instead. No other files.
+
+The repo uses `exactOptionalPropertyTypes`, so a zod-parsed object with an optional field (type `T | undefined`) cannot be passed where the field is declared `?: T`.
+
+pricing
+- `QuoteInput`: `depth?: "quick" | "standard" | "deep" | undefined; minutes?: number | undefined; fallback_voice?: boolean | undefined`.
+- Test: a variable with those fields typed `| undefined` and all set to `undefined`, `task: "explain"`, gives `quoteCredits` → 1.
+
+router `src/routes.ts`
+- `export const FIXED_TASKS = ["more_detail", "double_check", "read_link", "research", "overview_script", "video_slides", "diagram", "mini_app", "practice"] as const;` with the comment `// explain is not here (the router picks its tier); retranscribe is never routed.`
+- `fixed` in `RouteTableSchema` becomes:
+  ```ts
+  z.partialRecord(z.enum(FIXED_TASKS), TierSchema).refine(
+    (fixed) => FIXED_TASKS.every((task) => Object.hasOwn(fixed, task)),
+    "fixed must list every fixed task",
+  )
+  ```
+  so a typo, a missing task, `fixed: {}`, `explain` or `retranscribe` in `fixed` are all rejected.
+
+router `src/decide.ts`
+- `DecideRouteInput`: `answers?: RouterAnswers | undefined; minConfidence?: number | undefined`.
+- Replace the fixed lookup with:
+  ```ts
+  const fixed: Readonly<Record<string, Tier | undefined>> = input.routes.fixed;
+  const fixedTier = Object.hasOwn(fixed, input.task) ? fixed[input.task] : undefined;
+  ```
+
+Router tests: `DEFAULT_ROUTES` parses; these are rejected: `fixed` with `double_check` renamed to `doble_check`; `fixed: {}`; `fixed` without `double_check`; `fixed` plus `explain: "light"`; `fixed` plus `retranscribe: "light"`. `decideRoute({ task: "diagram", answers: maybe, minConfidence: undefined, ... })` with `maybe` typed `RouterAnswers | undefined` and set to `undefined` compiles and gives `ok` with tier `strong`. Update existing fixtures only where the new schema needs every fixed task listed.
+
+contracts `src/headers.ts`
+- Pattern `^[A-Za-z0-9_-]{16,64}$`, with the comment `// 64 so a wallet command id "<op>:<user id>:<key>" fits the ledger's 128.`
+- Test boundaries: 15 rejected, 16 accepted, 64 accepted, 65 rejected (replace the 128 and 129 cases).
+
+Run `npm run typecheck` and `npm test` from the root; every other package's tests must pass unchanged.
 
 ## Wave 2: the API Worker's spine
 
@@ -682,6 +769,15 @@ Not in this PR: sockets, presence, push, membership checks, the HTTP sync endpoi
 | 31 | Push: push-token endpoint and the queue consumer that calls Apple |
 | 32 | `PUT /v1/settings/zero-retention` (Plus only) and `GET /v1/activity` |
 | 33 | Usage events to Analytics Engine; cleanup cron for `results/` (7 days) and `tmp/audio/` |
+
+Notes the wave 3 cards must carry (from the wave 1 follow-up review):
+
+- **PR 11:** store a hash of method, path and body with each key; the same key with another body is 409 `conflict`. Store every final response except a 402, so buy and retry works (D5). Wallet command ids are `<op>:<user_id>:<key>`, with `op` at most 24 characters.
+- **PR 12:** the 402 shortfall is the ledger's `shortfall(wallet.read(), credits)`. When it is 0, `balance_after` is monthly + purchased − credits.
+- **PR 14, 15, 20:** a hold result of `hold_closed` is 409 `conflict` ("request already finished"); never run a task without an ok hold. `expires_at` is now + the task's time limit + a margin (D3). Write the settle result's `charged` into `jobs.spent` and the usage event.
+- **PR 16:** `GET /v1/wallet/ledger` returns the ledger rows and the open hold ids. What each task cost comes from `activity` and `jobs.spent`, not from adding up ledger rows.
+- **PR 18:** a refunded or revoked Plus month is `reset { id: "apple:<notification uuid>", credits: 0, resets_at: now }`, never a clawback. A credit pack or Own it refund is a `clawback` of that purchase's credits. A renewal is `reset { credits: 2000, resets_at: <next period> }`.
+- **The first card that writes `activity`:** `task` comes from the typed task list, never from request text.
 
 ## Blocked until a security owner signs off
 

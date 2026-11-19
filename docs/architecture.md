@@ -161,6 +161,12 @@ Wallet rules decided on 18 Nov 2026:
 - A hold always expires later than the task's own time limit, and the server stops work on a task whose hold is gone, so no task runs unpaid.
 - Only successful wallet commands are remembered by id, so the app can retry the same request after buying credits.
 
+Wallet rules decided on 19 Nov 2026:
+
+- The shortfall in a 402 includes the balance owed, because a purchase pays that first.
+- A repeated hold command counts only while that hold is still open; otherwise it fails with `hold_closed` and the task does not run.
+- A refunded or revoked Plus month resets monthly credits to 0. Credits already spent that month are not owed. Refunds of purchased credits use clawback, then the balance owed.
+
 ### KV keys
 
 ```
