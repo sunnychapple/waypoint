@@ -199,6 +199,13 @@ describe("quote errors", () => {
   });
 });
 
+describe("wallet", () => {
+  test("GET /v1/wallet with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/wallet", {}, env);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("webhook route through createApp", () => {
   test("POST /webhooks/clerk with no Authorization, no Idempotency-Key and no svix headers gives 401 invalid signature", async () => {
     const res = await setup().request(

@@ -1,6 +1,6 @@
 # Wave 3 cards: Apple purchases, push, privacy, usage and cleanup
 
-PR 17, 18, 31, 32 and 33. Written 19 Nov 2026 against `main` at PR 12 (`e53c250`). Every code block marked "exactly" was built and run in a scratch copy of the repo before it was written here: `npm run typecheck`, `npm test` and `npm run bundle -w @waypoint/api` all passed with it.
+PR 17, 18, 31, 32 and 33. Written 19 Nov 2026 against `main` at PR 12 (`e53c250`). Every code block marked "exactly" was built and run in a scratch copy of the repo before it was written here: `npm run typecheck`, `npm test` and `npm run bundle -w @waypoint/api` all passed with it. The integration pass of 19 Nov 2026 (`docs/build-plan.md`, "Build order") changed PR 33 Part A (the consumer now reads PR 14's usage event from a new file, Analytics Engine binding `ANALYTICS`), PR 33 Part B (`request_nonces` cleanup, `index.ts` import), the migration numbers, and the `wrangler.jsonc` blocks of PR 17 and PR 31; the changed code was built and run again with PR 13, 14, 17 and 31 in place.
 
 ## Rules for these cards
 
@@ -21,10 +21,13 @@ On top of that:
 - **No new dependencies.** Everything here uses WebCrypto (`crypto.subtle`), which Workers and Node both have.
 - **Never log** a signed transaction, a signed payload, an APNs device token, the APNs provider token or the `.p8` key. These cards add no `console` calls at all.
 - **Shared files.** These cards add lines to `apps/api/src/env.ts`, `apps/api/src/app.ts`, `apps/api/wrangler.jsonc` and `packages/contracts/src/index.ts`. Add only your own lines and leave the rest as it is.
-- **Migration numbers.** PR 18 adds `0003_apple_notifications.sql`, PR 31 adds `0004_push_tokens.sql`. If `main` already has a migration with your number when you start, use the next free number and say so in the pull request. Gaps are fine: the test helpers apply files in name order.
+- **Migration numbers** are fixed by the build order: PR 31 adds `0003_push_tokens.sql`, PR 18 adds `0004_apple_notifications.sql` (S1A adds `0005_security.sql`). Use exactly these names. The test helpers apply files in name order.
+- **The table-count test** in `db/d1/test/schema.test.mjs` is named "creates exactly the expected tables" and has no fixed number: its `deepEqual` against `Object.keys(EXPECTED)` already checks the count. The first card here that adds a migration (PR 31) renames it and deletes the line `assert.equal(rows.length, 13);`; later cards only add their tables to `EXPECTED` and `EXPECTED_TYPES`.
 - **Where an exact code block and the prose disagree, the code block wins.** Copy it as it is, including comments.
 
-Order: PR 17 (two sittings) first. PR 18 after PR 17 is merged. PR 31 and PR 32 do not depend on 17 and can start any time. PR 33 after PR 17 and PR 31 are merged.
+Order (the full merge order is "Build order" in `docs/build-plan.md`): PR 17 (two sittings) first. PR 18 after PR 17 is merged. PR 31 and PR 32 do not depend on 17 and can start any time. PR 33 after PR 14, PR 17, PR 31 and S1A are merged (it reads PR 14's usage event type and deletes S1A's old request nonces).
+
+**Device signatures.** `POST /v1/purchases/apple` grants credits, so `docs/security.md` section 7 requires a device signature on it. PR 17 is built before the signature check exists (S1A) and does not add it; card S1E in `docs/cards/security.md` adds it in `createApp` afterwards, before the route's `idempotent()` store. After S1E a purchase can only be recorded from an approved device. `POST /webhooks/apple` is Apple calling us and is never signed.
 
 ## Decisions these cards make
 
@@ -36,6 +39,9 @@ Order: PR 17 (two sittings) first. PR 18 after PR 17 is merged. PR 31 and PR 32 
 - **Plan.** `users.plan` is worked out from open entitlements: `plus` over `own` over `free`. Anyone not on Plus has `zero_retention` turned off at the same time.
 - **Plus yearly** renews once a year, but its credits are monthly. PR 17 resets to 2,000 for the first month; PR 33's hourly cron resets to 2,000 at the start of months 2 to 12.
 - **Sandbox.** `APPLE_ENVIRONMENTS` is `"Production,Sandbox"`, because App Review buys with sandbox accounts against the production server. This also lets TestFlight testers get free credits on production; see the open questions.
+- **Usage events** have one shape, `UsageEvent` in `apps/api/src/usage.ts` (PR 14): task code sends it to the queue binding `USAGE_QUEUE` and never writes `activity` itself. PR 33 consumes it; the Analytics Engine binding is `ANALYTICS`.
+- **R2.** PR 33 is the first card to add R2: binding `BUCKET`, bucket `waypoint`. Every later card that uses R2 (PR 20, 23, 29, 30 and the workflows that call S4's `sealJobResult`) uses `BUCKET`.
+- **Bundle id placeholder** is `app.waypoint.ios` everywhere (`apps/mobile/app.json` in M1a, `APPLE_BUNDLE_ID`, `APNS_TOPIC`), until the owner sets the real one in all three places.
 
 ## What was checked during planning
 
@@ -939,13 +945,14 @@ Errors, for reference: bad JSON or body → 400 `bad_request` "invalid request";
   app.route("/", applePurchaseRoute({ now: deps.now, rootSha256: APPLE_ROOT_CA_G3_SHA256 }));
 ```
 
-`wrangler.jsonc`: replace the one-line `"vars"` with (same values, two new):
+`wrangler.jsonc`: replace the one-line `"vars"` (PR 13 has added `AI_GATEWAY_ID` to it) with (same values, two new):
 
 ```jsonc
   "vars": {
     "CLERK_ISSUER": "https://clerk.example.com",
     "CLERK_AUTHORIZED_PARTIES": "",
-    "APPLE_BUNDLE_ID": "com.example.waypoint",
+    "AI_GATEWAY_ID": "waypoint",
+    "APPLE_BUNDLE_ID": "app.waypoint.ios",
     "APPLE_ENVIRONMENTS": "Production,Sandbox"
   },
 ```
@@ -1004,7 +1011,7 @@ A transaction payload has `transactionId`, `originalTransactionId`, `bundleId`, 
 
 `test/app.test.ts` (add, change nothing else): through `createApp`, `POST /v1/purchases/apple` with no `Authorization` header → 401.
 
-Not in this PR: App Store notices (PR 18), monthly top-ups for Plus yearly (PR 33), OCSP revocation checks, calls to the App Store Server API, `GET /v1/wallet`, restoring purchases in bulk.
+Not in this PR: App Store notices (PR 18), monthly top-ups for Plus yearly (PR 33), the device signature (S1E), OCSP revocation checks, calls to the App Store Server API, `GET /v1/wallet`, restoring purchases in bulk.
 
 ---
 
@@ -1025,9 +1032,9 @@ What each notice does (anything not listed is recorded and answered 200 with no 
 
 #### Part A: what a notice does
 
-Files: `db/d1/migrations/0003_apple_notifications.sql`, `db/d1/test/schema.test.mjs`, `apps/api/src/apple/notifications.ts`, `apps/api/test/apple-notices.test.ts`. No other files.
+Files: `db/d1/migrations/0004_apple_notifications.sql`, `db/d1/test/schema.test.mjs`, `apps/api/src/apple/notifications.ts`, `apps/api/test/apple-notices.test.ts`. No other files.
 
-`db/d1/migrations/0003_apple_notifications.sql`, exactly:
+`db/d1/migrations/0004_apple_notifications.sql`, exactly:
 
 ```sql
 -- App Store Server Notifications already handled (PR 18), so a repeated notificationUUID does nothing.
@@ -1039,7 +1046,7 @@ CREATE TABLE apple_notifications (
 );
 ```
 
-`db/d1/test/schema.test.mjs`: add `apple_notifications: ["notification_uuid", "notification_type", "received_at"]` to `EXPECTED` and `apple_notifications: { notification_uuid: "TEXT", notification_type: "TEXT", received_at: "INTEGER" }` to `EXPECTED_TYPES`; rename the "creates exactly the 12 directory tables and the idempotency table" test to "creates exactly the expected tables". Add one test: inserting the same `notification_uuid` twice fails. Keep every other test.
+`db/d1/test/schema.test.mjs`: add `apple_notifications: ["notification_uuid", "notification_type", "received_at"]` to `EXPECTED` and `apple_notifications: { notification_uuid: "TEXT", notification_type: "TEXT", received_at: "INTEGER" }` to `EXPECTED_TYPES` (PR 31 has already renamed the table-count test to "creates exactly the expected tables" and removed its fixed count; see "Rules for these cards"). Add one test: inserting the same `notification_uuid` twice fails. Keep every other test.
 
 `src/apple/notifications.ts`, exactly:
 
@@ -1331,13 +1338,14 @@ How push works here: other code (job workflows, sync, device approval, in later 
 
 #### Part A: storing tokens
 
-Files: `db/d1/migrations/0004_push_tokens.sql`, `db/d1/test/schema.test.mjs`, `packages/contracts/src/push.ts`, `packages/contracts/src/index.ts` (one line), `packages/contracts/test/push.test.ts`, `apps/api/src/push/route.ts`, `apps/api/src/app.ts`, `apps/api/test/push-route.test.ts`, `apps/api/test/app.test.ts` (new tests only). No other files.
+Files: `db/d1/migrations/0003_push_tokens.sql`, `db/d1/test/schema.test.mjs`, `packages/contracts/src/push.ts`, `packages/contracts/src/index.ts` (one line), `packages/contracts/test/push.test.ts`, `apps/api/src/push/route.ts`, `apps/api/src/app.ts`, `apps/api/test/push-route.test.ts`, `apps/api/test/app.test.ts` (new tests only). No other files.
 
-`db/d1/migrations/0004_push_tokens.sql`, exactly:
+`db/d1/migrations/0003_push_tokens.sql`, exactly:
 
 ```sql
 -- APNs device tokens (PR 31). One row per signed-in app install; a token belongs to one user at a time.
--- device_id is the app's own install id; it does not reference devices(id) until device registration (S1) exists.
+-- device_id is the device's id in devices (S1B), which the app registers before it asks for push. No foreign key, so
+-- this table does not depend on the S1 cards; S1F deletes a removed device's row.
 CREATE TABLE push_tokens (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   device_id TEXT NOT NULL,
@@ -1348,14 +1356,14 @@ CREATE TABLE push_tokens (
 );
 ```
 
-`db/d1/test/schema.test.mjs`: add `push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"]` to `EXPECTED` and `push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" }` to `EXPECTED_TYPES` (if PR 18 has not renamed the "creates exactly ..." test yet, rename it to "creates exactly the expected tables"). Add tests: `environment` rejects `'dev'`; the same token for two rows is rejected; deleting the user deletes their rows.
+`db/d1/test/schema.test.mjs`: add `push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"]` to `EXPECTED` and `push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" }` to `EXPECTED_TYPES` and rename the "creates exactly the 12 directory tables and the idempotency table" test to "creates exactly the expected tables", deleting its line `assert.equal(rows.length, 13);` (the `deepEqual` above it already checks the count). Add tests: `environment` rejects `'dev'`; the same token for two rows is rejected; deleting the user deletes their rows.
 
 `packages/contracts/src/push.ts`, exactly, and `export * from "./push.ts";` at the end of `packages/contracts/src/index.ts`:
 
 ```ts
 import { z } from "zod";
 
-// The app's own install id, the APNs device token as lowercase hex, and which APNs server issued it
+// The device's id (devices.id, registered with POST /v1/devices), the APNs device token as lowercase hex, and which APNs server issued it
 // (sandbox for development and TestFlight-from-Xcode builds, production for App Store and TestFlight builds).
 export const PushTokenRequestSchema = z.strictObject({
   device_id: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
@@ -1702,14 +1710,19 @@ export default {
   APNS_PRIVATE_KEY: string; // secret: wrangler secret put APNS_PRIVATE_KEY
 ```
 
-`wrangler.jsonc`: add `"APNS_KEY_ID": "XXXXXXXXXX"`, `"APNS_TEAM_ID": "XXXXXXXXXX"` and `"APNS_TOPIC": "com.example.waypoint"` to `"vars"` (placeholders; the key id and team id are not secrets), and at the top level:
+`wrangler.jsonc`: add `"APNS_KEY_ID": "XXXXXXXXXX"`, `"APNS_TEAM_ID": "XXXXXXXXXX"` and `"APNS_TOPIC": "app.waypoint.ios"` to `"vars"` (placeholders; the key id and team id are not secrets). PR 14 has already added a top-level `"queues"` block with the usage producer; add the push producer and the push consumer to it, so it reads:
 
 ```jsonc
   "queues": {
-    "producers": [{ "binding": "PUSH_QUEUE", "queue": "waypoint-push" }],
+    "producers": [
+      { "binding": "USAGE_QUEUE", "queue": "waypoint-usage" },
+      { "binding": "PUSH_QUEUE", "queue": "waypoint-push" }
+    ],
     "consumers": [{ "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 }]
   }
 ```
+
+(If PR 14 is not merged when you start, write the block with only the push producer; the merge combines them.)
 
 `APNS_PRIVATE_KEY` is never in `vars` or in the repo. The owner sets it with `npx wrangler secret put APNS_PRIVATE_KEY < AuthKey_<KEY ID>.p8` (the whole PEM file, header lines included).
 
@@ -1730,7 +1743,7 @@ Tests (`test/push.test.ts`). Make the `.p8` stand-in in the test: generate a P-2
 - Consumer: a D1 that throws on `prepare` → `retry({ delaySeconds: 60 })`.
 - Consumer: no request body or URL the stub saw contains the `.p8` PEM text.
 
-Not in this PR: sending to the queue from jobs, sync or devices (their own cards), deleting a token on sign-out, Android, Live Activity pushes, a dead-letter queue.
+Not in this PR: sending to the queue from jobs (PR 20 to 25), sync (PR 28) or device pairing (S1F), deleting a token on sign-out or device removal (S1F), Android, Live Activity pushes, a dead-letter queue.
 
 ---
 
@@ -1740,7 +1753,7 @@ Branch `pr/32-privacy`. No new dependencies. One sitting. Does not depend on 17,
 
 Files: `packages/contracts/src/privacy.ts`, `packages/contracts/src/index.ts` (one line), `packages/contracts/test/privacy.test.ts`, `apps/api/src/privacy/routes.ts`, `apps/api/src/app.ts`, `apps/api/test/privacy.test.ts`, `apps/api/test/app.test.ts` (new tests only). No other files.
 
-Behaviour: turning zero retention **on** needs Plus (`user.plan === "plus"`), else 403 `plan_required`; turning it **off** is always allowed (someone whose Plus ended must be able to switch it off; PR 17 also turns it off when Plus ends). The reply is stored by the PR 11 store. `GET /v1/activity` lists the signed-in user's `activity` rows newest first: `id, task, bytes_sent` (the size), `credits, route, retention, at`. Nothing else, and no text. Paging: `?limit=` 1 to 100 (default 50) and `?before=<next>` from the previous page.
+Behaviour: turning zero retention **on** needs Plus (`user.plan === "plus"`), else 403 `plan_required`. It is allowed even though no zero-retention route exists in KV yet; until one does, a user with the switch on gets 403 `forbidden` "no zero-retention route for this task" for every cloud task (PR 14 decision 3), and the app says so beside the switch (M21). Turning it **off** is always allowed (someone whose Plus ended must be able to switch it off; PR 17 also turns it off when Plus ends). The reply is stored by the PR 11 store. `GET /v1/activity` lists the signed-in user's `activity` rows newest first: `id, task, bytes_sent` (the size), `credits, route, retention, at`. Nothing else, and no text. Paging: `?limit=` 1 to 100 (default 50) and `?before=<next>` from the previous page.
 
 `packages/contracts/src/privacy.ts`, exactly, and `export * from "./privacy.ts";` at the end of `packages/contracts/src/index.ts`:
 
@@ -1876,17 +1889,17 @@ Not in this PR: writing `activity` rows (PR 33 Part A), using `zero_retention` w
 
 ### PR 33 · Usage events, Analytics Engine, the cleanup cron and Plus yearly top-ups
 
-Branch `pr/33-usage-cleanup`. Builds on PR 17 and PR 31 (branch after both are merged). No new dependencies. Two sittings: Part A (usage events), commit and push, then Part B (the cron).
+Branch `pr/33-usage-cleanup`. Builds on PR 14, PR 17, PR 31 and S1A (branch after all four are merged). No new dependencies. Two sittings: Part A (usage events), commit and push, then Part B (the cron).
 
-**R2.** No card merged before this one adds an R2 binding (checked on `main` on 19 Nov 2026), so Part B adds it as `BUCKET`. If one has been merged by the time you start, use it, do not add a second, and use its binding name wherever this card says `BUCKET`; say so in the pull request.
+**R2.** This card is the first to add R2: Part B adds the binding `BUCKET` (bucket `waypoint`). Later cards use `BUCKET` and never add a second R2 binding.
 
 #### Part A: usage events to D1 activity and Analytics Engine
 
-Files: `apps/api/src/usage.ts`, `apps/api/src/index.ts`, `apps/api/src/env.ts`, `apps/api/wrangler.jsonc`, `apps/api/test/usage.test.ts`. No other files.
+Files: `apps/api/src/usage-consumer.ts`, `apps/api/src/index.ts`, `apps/api/src/env.ts`, `apps/api/wrangler.jsonc`, `apps/api/test/usage.test.ts`. No other files. Do not change `apps/api/src/usage.ts` (PR 14 owns it).
 
-Flow 1 says a usage event goes to a queue. Task code (PR 14, 15, 20 and later) sends a `UsageEvent` to `USAGE_QUEUE` after it settles; this consumer writes the `activity` row the person sees in `GET /v1/activity` and one Analytics Engine data point (task, route, retention, credits, bytes; no user id, no text). `task` comes from the typed task list (the wave 3 note), and `id` should be the hold id so a redelivered event is written once.
+Flow 1 says a usage event goes to a queue. Task code (PR 14, 15, and PR 20 to 25 for jobs) sends a `UsageEvent` (the type in `src/usage.ts`, PR 14) to `USAGE_QUEUE` after it settles or releases the hold; this consumer writes the `activity` row the person sees in `GET /v1/activity` and one Analytics Engine data point (no user id, no text). `task` comes from the typed task list (the wave 3 note), and `id` is the hold id, so a redelivered event is written once. `activity.route` is the event's `tier`. An event with `outcome: "model_failed"` is written too (with `credits` 0): the text was sent to the cloud, so the person sees it in their activity.
 
-`src/usage.ts`, exactly:
+`src/usage-consumer.ts`, exactly:
 
 ```ts
 import { INSTANT_TASKS, JOB_TYPES } from "@waypoint/contracts";
@@ -1894,32 +1907,38 @@ import { TIERS } from "@waypoint/router";
 import { z } from "zod";
 import type { QueueBatch } from "./queue.ts";
 import type { Db } from "./storage.ts";
+import type { UsageEvent } from "./usage.ts";
 
 export const USAGE_QUEUE_NAME = "waypoint-usage";
-export const USAGE_TASKS = [...INSTANT_TASKS, ...JOB_TYPES] as const;
 
-// One finished cloud task, sent to the usage queue by the task and job code. Counts and names only, never text.
-// id is unique per task run (the hold id works) so a redelivered message is written once.
+// Checks a message on the usage queue. It is exactly the UsageEvent that src/usage.ts (PR 14) sends:
+// `satisfies` and the test's eventFits check fail to compile if the two drift apart.
 export const UsageEventSchema = z.strictObject({
+  v: z.literal(1),
   id: z.string().regex(/^[A-Za-z0-9_:-]{1,128}$/),
-  user_id: z.string().min(1).max(128),
-  task: z.enum(USAGE_TASKS),
-  bytes_sent: z.number().int().min(0),
-  credits: z.number().int().min(0),
-  route: z.enum(TIERS),
-  retention: z.enum(["standard", "zero"]),
   at: z.number().int().min(0),
-});
-
-export type UsageEvent = z.infer<typeof UsageEventSchema>;
+  user_id: z.string().min(1).max(128),
+  task: z.enum([...INSTANT_TASKS, ...JOB_TYPES]),
+  outcome: z.enum(["ok", "model_failed"]),
+  credits: z.number().int().min(0),
+  tier: z.enum(TIERS),
+  model: z.string().min(1).max(256),
+  retention: z.enum(["standard", "zero"]),
+  router: z.enum(["ok", "failed", "skipped"]),
+  bytes_sent: z.number().int().min(0),
+  tokens_in: z.number().int().min(0).nullable(),
+  tokens_out: z.number().int().min(0).nullable(),
+}) satisfies z.ZodType<UsageEvent>;
 
 // The part of an Analytics Engine dataset this Worker uses. AnalyticsEngineDataset satisfies this type.
 export type UsageDataset = { writeDataPoint(point: { indexes: string[]; blobs: string[]; doubles: number[] }): void };
 
-export type UsageEnv = { DB: Db; USAGE: UsageDataset };
+export type UsageEnv = { DB: Db; ANALYTICS: UsageDataset };
 
-// Writes each event to D1 activity (what GET /v1/activity shows the person) and, the first time only, one
-// Analytics Engine data point with no user id: index task; blobs task, route, retention; doubles credits, bytes_sent.
+// Writes each event to D1 activity (what GET /v1/activity shows the person; route is the tier) and, the first
+// time only, one Analytics Engine data point with no user id:
+//   indexes [task]; blobs [task, tier, retention, outcome, model, router];
+//   doubles [credits, bytes_sent, tokens_in, tokens_out] (a token count the model did not report is -1).
 export async function handleUsageBatch(batch: QueueBatch, env: UsageEnv): Promise<void> {
   for (const message of batch.messages) {
     const parsed = UsageEventSchema.safeParse(message.body);
@@ -1932,10 +1951,14 @@ export async function handleUsageBatch(batch: QueueBatch, env: UsageEnv): Promis
       const { meta } = await env.DB.prepare(
         "INSERT INTO activity (id, user_id, task, bytes_sent, credits, route, retention, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
       )
-        .bind(e.id, e.user_id, e.task, e.bytes_sent, e.credits, e.route, e.retention, e.at)
+        .bind(e.id, e.user_id, e.task, e.bytes_sent, e.credits, e.tier, e.retention, e.at)
         .run();
       if (meta.changes === 1) {
-        env.USAGE.writeDataPoint({ indexes: [e.task], blobs: [e.task, e.route, e.retention], doubles: [e.credits, e.bytes_sent] });
+        env.ANALYTICS.writeDataPoint({
+          indexes: [e.task],
+          blobs: [e.task, e.tier, e.retention, e.outcome, e.model, e.router],
+          doubles: [e.credits, e.bytes_sent, e.tokens_in ?? -1, e.tokens_out ?? -1],
+        });
       }
       message.ack();
     } catch {
@@ -1945,37 +1968,33 @@ export async function handleUsageBatch(batch: QueueBatch, env: UsageEnv): Promis
 }
 ```
 
-`src/env.ts`: add `import type { UsageEvent } from "./usage.ts";` and to `Env`:
+`src/env.ts`: add `ANALYTICS: AnalyticsEngineDataset;` to `Env` (PR 14 already added `USAGE_QUEUE`).
 
-```ts
-  USAGE_QUEUE: Queue<UsageEvent>;
-  USAGE: AnalyticsEngineDataset;
-```
-
-`wrangler.jsonc`: the `"queues"` block becomes:
+`wrangler.jsonc`: add the usage consumer to the `"queues"` block and the dataset at the top level, so they read:
 
 ```jsonc
   "queues": {
     "producers": [
-      { "binding": "PUSH_QUEUE", "queue": "waypoint-push" },
-      { "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }
+      { "binding": "USAGE_QUEUE", "queue": "waypoint-usage" },
+      { "binding": "PUSH_QUEUE", "queue": "waypoint-push" }
     ],
     "consumers": [
       { "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 },
       { "queue": "waypoint-usage", "max_batch_size": 100, "max_batch_timeout": 30, "max_retries": 10 }
     ]
   },
-  "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "waypoint_usage" }]
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "waypoint_usage" }]
 ```
 
-`src/index.ts`: add `import { handleUsageBatch, USAGE_QUEUE_NAME } from "./usage.ts";` and, in `queue`, after the push line: `if (batch.queue === USAGE_QUEUE_NAME) return handleUsageBatch(batch, env);`. (Part B gives the whole file.)
+`src/index.ts`: add `import { handleUsageBatch, USAGE_QUEUE_NAME } from "./usage-consumer.ts";` and, in `queue`, after the push line: `if (batch.queue === USAGE_QUEUE_NAME) return handleUsageBatch(batch, env);`. (Part B gives the whole file.)
 
-Tests (`test/usage.test.ts`), with `createTestDb()` and user `u1`, a `USAGE` stub that records data points, and hand-made `QueueMessage` objects:
-- Compile-time check: `export const aeFits: (dataset: AnalyticsEngineDataset) => UsageDataset = (dataset) => dataset;`
-- A good event → one `activity` row with exactly its fields; one data point `{ indexes: [task], blobs: [task, route, retention], doubles: [credits, bytes_sent] }`; acked.
+Tests (`test/usage.test.ts`), with `createTestDb()` and user `u1`, an `ANALYTICS` stub that records data points, hand-made `QueueMessage` objects, and a good event `{ v: 1, id: "explain:u1:abcdefghijklmnop", at: 1000, user_id: "u1", task: "explain", outcome: "ok", credits: 1, tier: "light", model: "@cf/example/light", retention: "standard", router: "ok", bytes_sent: 40, tokens_in: 120, tokens_out: 9 }`:
+- Compile-time checks: `export const aeFits: (dataset: AnalyticsEngineDataset) => UsageDataset = (dataset) => dataset;` and `export const eventFits: (event: UsageEvent) => z.infer<typeof UsageEventSchema> = (event) => event;` (with `satisfies` in the schema, this checks the type and the schema in both directions).
+- The good event → one `activity` row equal to `{ id, user_id: "u1", task: "explain", bytes_sent: 40, credits: 1, route: "light", retention: "standard", at: 1000 }`; one data point `{ indexes: ["explain"], blobs: ["explain", "light", "standard", "ok", "@cf/example/light", "ok"], doubles: [1, 40, 120, 9] }`; acked.
 - The same event twice in one batch → one row, one data point, both acked.
-- An event with an extra `text` key → acked, no row, no data point.
-- An event with task `"summarize"` → acked, nothing written. With route `"gpt"` → acked, nothing written.
+- `outcome: "model_failed"`, `credits: 0`, `tokens_in: null`, `tokens_out: null` → a row with credits 0; doubles `[0, 40, -1, -1]`.
+- A job event (`task: "overview_script"`, `router: "skipped"`) → written.
+- An event with an extra `text` key → acked, no row, no data point. `task: "summarize"` → acked, nothing written. `tier: "gpt"` → acked, nothing written. `v: 2` → acked, nothing written. An `id` with a space → acked, nothing written.
 - An event for a user that does not exist (foreign key fails) → `retry({ delaySeconds: 30 })`, no data point.
 - No data point holds the user id.
 
@@ -1985,7 +2004,7 @@ Run the checks, commit, push.
 
 Files: `apps/api/src/cleanup.ts`, `apps/api/src/apple/allowance.ts`, `apps/api/src/index.ts`, `apps/api/src/env.ts`, `apps/api/wrangler.jsonc`, `apps/api/test/cleanup.test.ts`, `apps/api/test/allowance.test.ts`. No other files.
 
-Every hour: delete `results/` objects older than 7 days and `tmp/audio/` objects older than 24 hours (the second transcript deletes its own audio when the job ends; this catches what a failed job left), delete `idempotency` rows older than 24 hours (the PR 11 table), and give Plus yearly subscribers their monthly reset.
+Every hour: delete `results/` objects older than 7 days and `tmp/audio/` objects older than 24 hours (the second transcript deletes its own audio when the job ends; this catches what a failed job left), delete `idempotency` rows older than 24 hours (the PR 11 table) and `request_nonces` rows whose window has passed (the S1A table), and give Plus yearly subscribers their monthly reset.
 
 `src/cleanup.ts`, exactly:
 
@@ -2027,11 +2046,16 @@ export async function deleteOlderThan(bucket: CleanupBucket, prefix: string, cut
 
 export type CleanupEnv = { DB: Db; BUCKET: CleanupBucket };
 
-export async function cleanup(env: CleanupEnv, now: number): Promise<{ results: number; tmp_audio: number; idempotency: number }> {
+export async function cleanup(
+  env: CleanupEnv,
+  now: number,
+): Promise<{ results: number; tmp_audio: number; idempotency: number; request_nonces: number }> {
   const results = await deleteOlderThan(env.BUCKET, "results/", now - RESULTS_KEEP_MS);
   const tmpAudio = await deleteOlderThan(env.BUCKET, "tmp/audio/", now - TMP_AUDIO_KEEP_MS);
-  const { meta } = await env.DB.prepare("DELETE FROM idempotency WHERE created_at < ?").bind(now - IDEMPOTENCY_ROWS_KEEP_MS).run();
-  return { results, tmp_audio: tmpAudio, idempotency: meta.changes };
+  const idempotency = await env.DB.prepare("DELETE FROM idempotency WHERE created_at < ?").bind(now - IDEMPOTENCY_ROWS_KEEP_MS).run();
+  // Nonces of signed requests (S1A) whose timestamp has left the 5-minute window.
+  const nonces = await env.DB.prepare("DELETE FROM request_nonces WHERE expires_at < ?").bind(now).run();
+  return { results, tmp_audio: tmpAudio, idempotency: idempotency.meta.changes, request_nonces: nonces.meta.changes };
 }
 ```
 
@@ -2091,7 +2115,7 @@ import { cleanup } from "./cleanup.ts";
 import type { Env } from "./env.ts";
 import { apnsJwtSource } from "./push/apns.ts";
 import { handlePushBatch, PUSH_QUEUE_NAME, type PushDeps } from "./push/consumer.ts";
-import { handleUsageBatch, USAGE_QUEUE_NAME } from "./usage.ts";
+import { handleUsageBatch, USAGE_QUEUE_NAME } from "./usage-consumer.ts";
 
 export { GroupRoom } from "./room/object.ts";
 export { Wallet } from "./wallet/object.ts";
@@ -2130,7 +2154,7 @@ Tests (`test/cleanup.test.ts`), with a `CleanupBucket` stub over an in-memory li
 - `results/` objects 8 days old are deleted, 6 days old kept; `tmp/audio/` 25 hours old deleted, 23 hours kept; objects under `groups/` are never listed or deleted.
 - 2,500 old `results/` objects over three pages → all 2,500 deleted, `cursor` passed back each time.
 - 25 pages of old objects → only 20 pages are listed in one run.
-- `idempotency` rows 25 hours old are deleted, 23 hours old kept; the return value counts each kind.
+- `idempotency` rows 25 hours old are deleted, 23 hours old kept; `request_nonces` rows with `expires_at` 1 ms before now are deleted, at now kept; the return value counts each kind.
 
 Tests (`test/allowance.test.ts`), with `createTestDb()`, user `u1`, a `purchases` row and an entitlement inserted by hand, and a wallet stub recording commands:
 - A yearly row bought `Date.UTC(2026, 0, 31, 10)`, entitlement `plus` / `purchase` open, now `Date.UTC(2026, 10, 19, 12)` → one `reset` `{ id: "plus-month:<transaction id>:9", credits: 2000, resets_at: addMonths(start, 10) }`.
@@ -2143,7 +2167,7 @@ Tests (`test/allowance.test.ts`), with `createTestDb()`, user `u1`, a `purchases
 - Two yearly rows for one original id → only the newest is used.
 - A monthly Plus row → no command.
 
-Not in this PR: sending usage events from task code (their cards), Analytics Engine queries or dashboards, deleting `apple_notifications` rows, deleting `jobs` rows.
+Not in this PR: sending usage events from task code (their cards), Analytics Engine queries or dashboards, deleting `apple_notifications` rows, deleting `jobs` rows, cleaning up after deleted accounts (open question in `docs/build-plan.md`).
 
 ---
 
@@ -2157,12 +2181,13 @@ Not in this PR: sending usage events from task code (their cards), Analytics Eng
 6. **APNs from production.** Confirmed by a workerd maintainer and community clients, not by Cloudflare's docs. If the first production push fails (for example HTTP 500 with no `apns-id`), the options are: a small HTTP/2 relay outside Cloudflare, or Firebase Cloud Messaging's HTTP v1 API (which accepts HTTP/1.1 and forwards to APNs, but adds Google as an outside service).
 7. **APNs provider token refresh.** APNs refuses tokens refreshed more than once per 20 minutes. Many isolates each sign their own token; PR 31 rounds `iat` down to a shared 30-minute step so they all present the same `iat`. If APNs still answers `TooManyProviderTokenUpdates`, the token would need to be kept in one place (a Durable Object).
 8. **Push text.** The fixed alert strings in `src/push/messages.ts` are placeholders for copy review.
-9. **Push tokens and devices.** `push_tokens.device_id` is the app's own install id and does not reference `devices` because device registration (S1) is waiting for the security review. When S1 lands, decide whether a push token must belong to a registered device. `docs/architecture.md` section 5 should also list the two new tables (`apple_notifications`, `push_tokens`); this pull request does not edit section 5.
-10. **Usage events from other cards.** PR 14, 15 and 20 must send a `UsageEvent` (PR 33) to `USAGE_QUEUE` and not write `activity` themselves. Their cards are being written at the same time; check they agree before they are built.
+9. **Push tokens and devices.** Decided in the integration pass: `push_tokens.device_id` is the device's `devices.id` (the app registers its device, S1B, before it registers for push), with no foreign key; S1F deletes a removed device's token. Still open: should `POST /v1/push-tokens` refuse a `device_id` that is not an approved device of the user? `docs/architecture.md` section 5 now lists the new tables.
+10. **Usage events from other cards.** Resolved: PR 14 defines `UsageEvent` and sends it to `USAGE_QUEUE`; PR 33 consumes it with a schema checked against that type.
 
 ## What the owner sets up
 
-- **App Store Connect:** the six products with the ids above (Plus monthly and yearly in one subscription group); App Store Server Notifications **Version 2** with production URL `https://<api host>/webhooks/apple` and the sandbox URL the same (or a staging host); the app's numeric Apple id into `APPLE_APP_APPLE_ID`; the bundle id into `APPLE_BUNDLE_ID` and `APNS_TOPIC`.
+- **App Store Connect:** the six products with the ids above (Plus monthly and yearly in one subscription group); App Store Server Notifications **Version 2** with production URL `https://<api host>/webhooks/apple` and the sandbox URL the same (or a staging host); the app's numeric Apple id into `APPLE_APP_APPLE_ID`; the bundle id into `APPLE_BUNDLE_ID`, `APNS_TOPIC` and `apps/mobile/app.json` (all three use the placeholder `app.waypoint.ios` until then).
 - **App:** set `appAccountToken` to the signed-in user's id on every purchase; send `Transaction.jwsRepresentation` to `POST /v1/purchases/apple` for every purchase and every update from `Transaction.updates`; register the APNs token with `POST /v1/push-tokens` (lowercase hex, and `sandbox` for development builds).
 - **Apple developer account:** an APNs auth key (`.p8`); its 10-character key id into `APNS_KEY_ID`, the team id into `APNS_TEAM_ID`; the key itself only with `npx wrangler secret put APNS_PRIVATE_KEY`.
-- **Cloudflare:** queues `waypoint-push` and `waypoint-usage`; the Analytics Engine dataset `waypoint_usage` (created on first write); the R2 bucket `waypoint`; the real D1 and KV ids (already placeholders from wave 2).
+- **Cloudflare:** queues `waypoint-push` and `waypoint-usage`; the Analytics Engine dataset `waypoint_usage` (binding `ANALYTICS`, created on first write); the R2 bucket `waypoint` (binding `BUCKET`); the real D1 and KV ids (already placeholders from wave 2).
+- The full owner list for every card set is "Owner setup" in `docs/build-plan.md`.
