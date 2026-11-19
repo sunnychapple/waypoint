@@ -125,6 +125,11 @@ Instant task and account rules decided on 19 Nov 2026 (cards in `docs/cards/wave
 - Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows (entitlements, devices with their key envelopes and pairings, recovery, memberships, jobs, activity, push tokens, stored replies). The wallet is kept as the money record and holds no personal data; its credits are forfeited. Groups the user created, their room data and R2 objects are not cleaned up yet (open question in `docs/build-plan.md`).
 - Every cloud task, instant or job, sends one usage event (`UsageEvent` in `apps/api/src/usage.ts`: task, outcome, credits, tier, model, retention, router, bytes sent, token counts; id = the hold id) to the usage queue. Its consumer writes the `activity` row (route = tier) and an Analytics Engine data point with no user id.
 
+Job rules decided on 19 Nov 2026 (cards in `docs/cards/wave-3-jobs.md`):
+
+- A job's text is locked in R2 `tmp/input/{job}` with a one-off key that only the Workflow's params hold, so Workflows never store it readable; the object is deleted when the job ends.
+- Cancelling a queued or running job (`DELETE /v1/jobs/:id`) releases its hold: nothing is charged. A result that cannot be sealed (its device was removed) fails the job, with nothing charged. `GET /v1/jobs/:id/result` is signed and answers only the device the result is sealed to.
+
 ## 5. Data
 
 ### D1, the directory
@@ -154,6 +159,7 @@ Added by later migrations (numbers fixed in `docs/build-plan.md`, "Build order")
      device_pairings     (device_id, commitment, approver_id, approver_nonce, device_nonce, expires_at)
      request_nonces      (device_id, nonce, expires_at)                              -- signed requests, kept for the 5-minute window
      jobs                + device_id                                                 -- the device a result is sealed to
+0006 jobs                + command_key, model, retention, bytes_sent, deadline_at, finished_at   -- PR 20
 ```
 
 ### Group room (one Durable Object per group, SQLite storage)
@@ -210,6 +216,7 @@ groups/{group}/media/{blob}  locked audio, photo
 results/{job}                sealed to one device, deleted after 7 days
 links/{link}/data            locked for the viewer
 tmp/audio/{job}              second transcript only, deleted when the job ends
+tmp/input/{job}              a job's text, locked; the key is only in the Workflow's params; deleted when the job ends
 packs/voices/{version}       on-device voice model
 ```
 
