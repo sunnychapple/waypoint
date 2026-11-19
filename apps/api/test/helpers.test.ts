@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { createTestDb } from "./helpers/d1.ts";
 import { createTestStore } from "./helpers/sql.ts";
-import type { Db, SqlStore } from "../src/storage.ts";
+import type { BatchDb, Db, SqlStore } from "../src/storage.ts";
 
 export const d1Fits: (db: D1Database) => Db = (db) => db;
+export const d1BatchFits: (db: D1Database) => BatchDb = (db) => db;
 export const doStorageFits: (storage: DurableObjectStorage) => SqlStore = (storage) => storage;
 
 describe("createTestDb", () => {
@@ -70,5 +71,33 @@ describe("createTestStore", () => {
       }),
     ).toThrow("boom");
     expect(store.sql.exec("SELECT id FROM items").toArray()).toEqual([]);
+  });
+});
+
+describe("createTestDb batch", () => {
+  const insertUser = (db: Db, id: string) =>
+    db
+      .prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES (?, ?, ?, ?)")
+      .bind(id, `clerk-${id}`, 1, `billing-${id}`);
+
+  test("a batch of two inserts commits both", async () => {
+    const db = createTestDb();
+    await db.batch([insertUser(db, "u1"), insertUser(db, "u2")]);
+    const result = await db.prepare("SELECT id FROM users ORDER BY id").all<{ id: string }>();
+    expect(result.results.map((row) => row.id)).toEqual(["u1", "u2"]);
+  });
+
+  test("a batch whose second statement violates a primary key rejects and leaves neither row", async () => {
+    const db = createTestDb();
+    await insertUser(db, "u1").run();
+    await expect(db.batch([insertUser(db, "u2"), insertUser(db, "u1")])).rejects.toThrow();
+    const result = await db.prepare("SELECT id FROM users ORDER BY id").all<{ id: string }>();
+    expect(result.results.map((row) => row.id)).toEqual(["u1"]);
+  });
+
+  test("a statement from another createTestDb() makes batch throw TypeError", async () => {
+    const db = createTestDb();
+    const other = createTestDb();
+    await expect(db.batch([insertUser(other, "u1")])).rejects.toThrow(TypeError);
   });
 });
