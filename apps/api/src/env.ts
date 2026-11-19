@@ -1,4 +1,5 @@
 import type { SessionUser } from "./auth/users.ts";
+import type { GroupRoom } from "./room/object.ts";
 import type { Wallet } from "./wallet/object.ts";
 
 export type Env = {
@@ -7,5 +8,6 @@ export type Env = {
   CLERK_ISSUER: string;
   CLERK_AUTHORIZED_PARTIES: string;
   WALLET: DurableObjectNamespace<Wallet>;
+  GROUP_ROOM: DurableObjectNamespace<GroupRoom>;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
