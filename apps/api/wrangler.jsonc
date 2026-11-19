@@ -12,7 +12,13 @@
     }
   ],
   "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
-  "vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "", "AI_GATEWAY_ID": "waypoint" },
+  "vars": {
+    "CLERK_ISSUER": "https://clerk.example.com",
+    "CLERK_AUTHORIZED_PARTIES": "",
+    "AI_GATEWAY_ID": "waypoint",
+    "APPLE_BUNDLE_ID": "app.waypoint.ios",
+    "APPLE_ENVIRONMENTS": "Production,Sandbox"
+  },
   "ai": { "binding": "AI" },
   "durable_objects": {
     "bindings": [
