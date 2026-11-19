@@ -18,16 +18,18 @@
     "AI_GATEWAY_ID": "waypoint",
     "APNS_KEY_ID": "XXXXXXXXXX",
     "APNS_TEAM_ID": "XXXXXXXXXX",
-    "APNS_TOPIC": "app.waypoint.ios"
-  },
-  "queues": {
-    "producers": [{ "binding": "PUSH_QUEUE", "queue": "waypoint-push" }],
-    "consumers": [{ "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 }]
+    "APNS_TOPIC": "app.waypoint.ios",
     "APPLE_BUNDLE_ID": "app.waypoint.ios",
     "APPLE_ENVIRONMENTS": "Production,Sandbox"
   },
   "ai": { "binding": "AI" },
-  "queues": { "producers": [{ "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }] },
+  "queues": {
+    "producers": [
+      { "binding": "PUSH_QUEUE", "queue": "waypoint-push" },
+      { "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }
+    ],
+    "consumers": [{ "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 }]
+  },
   "durable_objects": {
     "bindings": [
       { "name": "WALLET", "class_name": "Wallet" },

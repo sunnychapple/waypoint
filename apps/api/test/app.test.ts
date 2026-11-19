@@ -236,6 +236,9 @@ describe("activity through createApp", () => {
   test("GET /v1/activity with no Authorization header gives 401 through createApp", async () => {
     const res = await setup().request("/v1/activity", {}, env);
     expect(res.status).toBe(401);
+  });
+});
+
 describe("Apple purchase route through createApp", () => {
   test("POST /v1/purchases/apple with no Authorization header gives 401 through createApp", async () => {
     const res = await setup().request("/v1/purchases/apple", { method: "POST", body: "{}" }, env);
