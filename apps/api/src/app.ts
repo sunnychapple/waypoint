@@ -6,6 +6,7 @@ import { applePurchaseRoute } from "./apple/route.ts";
 import { appleWebhookRoute } from "./apple/webhook.ts";
 import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
+import { groupKeyRoutes } from "./keys/routes.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
@@ -48,5 +49,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", devicesRoute({ now: deps.now }));
   app.route("/", pairingRoutes({ now: deps.now }));
   app.route("/", recoveryRoute({ now: deps.now }));
+  app.route("/", groupKeyRoutes({ now: deps.now }));
   return app;
 }
