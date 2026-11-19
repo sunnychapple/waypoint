@@ -1,5 +1,1 @@
-import { Placeholder } from "../../ui/Placeholder.tsx";
-
-export default function ReviewScreen() {
-  return <Placeholder title="Review" />;
-}
+export { default } from "../../features/study/ReviewHomeScreen.tsx";
