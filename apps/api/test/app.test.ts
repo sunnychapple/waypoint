@@ -246,3 +246,11 @@ describe("Apple purchase route through createApp", () => {
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
 });
+
+describe("Apple webhook through createApp", () => {
+  test("POST /webhooks/apple with no Authorization, no Idempotency-Key and body {} gives 400 bad_request, not 401", async () => {
+    const res = await setup().request("/webhooks/apple", { method: "POST", body: "{}" }, env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ code: "bad_request", message: "invalid notification", retry_after: null });
+  });
+});

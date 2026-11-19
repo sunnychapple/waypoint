@@ -20,7 +20,8 @@
     "APNS_TEAM_ID": "XXXXXXXXXX",
     "APNS_TOPIC": "app.waypoint.ios",
     "APPLE_BUNDLE_ID": "app.waypoint.ios",
-    "APPLE_ENVIRONMENTS": "Production,Sandbox"
+    "APPLE_ENVIRONMENTS": "Production,Sandbox",
+    "APPLE_APP_APPLE_ID": "0"
   },
   "ai": { "binding": "AI" },
   "queues": {

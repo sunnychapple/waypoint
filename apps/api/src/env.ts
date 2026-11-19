@@ -23,5 +23,6 @@ export type Env = {
   USAGE_QUEUE: Queue<UsageEvent>;
   APPLE_BUNDLE_ID: string;
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
+  APPLE_APP_APPLE_ID: string; // the app's numeric Apple id from App Store Connect
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };
