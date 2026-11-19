@@ -20,15 +20,22 @@
     "APNS_TEAM_ID": "XXXXXXXXXX",
     "APNS_TOPIC": "app.waypoint.ios",
     "APPLE_BUNDLE_ID": "app.waypoint.ios",
-    "APPLE_ENVIRONMENTS": "Production,Sandbox"
+    "APPLE_ENVIRONMENTS": "Production,Sandbox",
+    "APPLE_APP_APPLE_ID": "0"
   },
   "ai": { "binding": "AI" },
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "waypoint_usage" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "waypoint" }],
+  "triggers": { "crons": ["0 * * * *"] },
   "queues": {
     "producers": [
       { "binding": "PUSH_QUEUE", "queue": "waypoint-push" },
       { "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }
     ],
-    "consumers": [{ "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 }]
+    "consumers": [
+      { "queue": "waypoint-push", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5 },
+      { "queue": "waypoint-usage", "max_batch_size": 100, "max_batch_timeout": 30, "max_retries": 10 }
+    ]
   },
   "durable_objects": {
     "bindings": [
