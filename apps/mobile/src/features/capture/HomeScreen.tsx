@@ -4,9 +4,11 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import { dateLine, greeting } from "../../core/capture/labels.ts";
 import { latestSession } from "../../core/capture/sessions.ts";
 import { formatClock } from "../../core/format.ts";
+import { countDue } from "../../core/study/cards.ts";
+import { minutesLabel } from "../../core/study/labels.ts";
 import { useProfile } from "../../platform/auth.tsx";
 import { useQuery } from "../../platform/db.ts";
-import { Body, Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { SavingToPill } from "./SavingToPill.tsx";
 
@@ -16,6 +18,7 @@ export default function HomeScreen() {
   const colors = useColors();
   const profile = useProfile();
   const latest = useQuery(latestSession);
+  const due = useQuery((db) => countDue(db, Date.now()));
   const offset = -new Date().getTimezoneOffset();
   const hello = greeting(new Date().getHours());
 
@@ -35,6 +38,14 @@ export default function HomeScreen() {
           <Text style={styles.avatarText}>{profile?.initial ?? "?"}</Text>
         </Pressable>
       </View>
+
+      {due > 0 ? (
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+          <Text style={[styles.cardTitle, { color: colors.ink }]}>{`${due} cards due`}</Text>
+          <Body>{minutesLabel(due)}</Body>
+          <PrimaryButton label="Start" onPress={() => router.push("/study/review")} />
+        </View>
+      ) : null}
 
       {latest ? (
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>

@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { DeviceViewSchema, PutRecoveryRequestSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
+import {
+  ApproveDeviceRequestSchema,
+  DeviceViewSchema,
+  PairingNonceRequestSchema,
+  PutRecoveryRequestSchema,
+  RegisterDeviceRequestSchema,
+} from "../src/keys.ts";
+import vectors from "../../crypto/test/vectors/waypoint-v1.json";
 
 const SIGN_PUB = "A".repeat(87);
 const BOX_PUB = "B".repeat(87);
@@ -70,10 +77,25 @@ describe("RegisterDeviceRequestSchema", () => {
   });
 });
 
+describe("S1C pairing and approval schemas", () => {
+  test("PairingNonceRequestSchema takes a 43-character nonce and refuses 42", () => {
+    expect(PairingNonceRequestSchema.safeParse({ nonce: "N".repeat(43) }).success).toBe(true);
+    expect(PairingNonceRequestSchema.safeParse({ nonce: "N".repeat(42) }).success).toBe(false);
+  });
+
+  test("ApproveDeviceRequestSchema refuses 501 envelopes and key_version 0", () => {
+    const envelope = { group_id: "g1", key_version: 1, wrapped_key: "E".repeat(10) };
+    const base = { cert: CERT, account_envelope: "E".repeat(10) };
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [envelope] }).success).toBe(true);
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: Array.from({ length: 501 }, () => envelope) }).success).toBe(false);
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [{ ...envelope, key_version: 0 }] }).success).toBe(false);
+  });
+});
+
 describe("PutRecoveryRequestSchema", () => {
-  // The recovery entry of packages/crypto/test/vectors/waypoint-v1.json, copied here: this package has no Node types to read the file with.
-  const VECTOR_ACCOUNT_DEVICE_ID = "acct_1";
-  const VECTOR_BLOB = "AWBhYmNkZWZnaGlqawkZ0TxRxE900CVwSTC66NBj7QsnzLy22zRjTQG3VUZ7pmn7E4xkxUg0IjD-Ja-jCE-UZu98zzQPNoO5OyfnjtIPnD7K9Ul6BIYxwY2J9vEA";
+  // The recovery entry of the published vectors, read from the file so the test follows any change to it.
+  const VECTOR_ACCOUNT_DEVICE_ID = vectors.recovery.account_device_id;
+  const VECTOR_BLOB = vectors.recovery.blob;
 
   test("takes the blob of waypoint-v1.json and refuses 123 characters", () => {
     const body = { account_device_id: VECTOR_ACCOUNT_DEVICE_ID, wrapped_account_key: VECTOR_BLOB, verified: true };

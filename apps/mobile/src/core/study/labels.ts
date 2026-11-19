@@ -1,0 +1,43 @@
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+// The model states that are not "available". The caller narrows ModelAvailability to these.
+export type Unavailable = "device_not_eligible" | "apple_intelligence_off" | "model_not_ready" | "unavailable";
+
+// "<1m" up to one minute, minutes under an hour, hours under a day, days under 60 days, else months.
+export function intervalLabel(ms: number): string {
+  if (ms <= MINUTE_MS) return "<1m";
+  const minutes = Math.round(ms / MINUTE_MS);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(ms / HOUR_MS);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(ms / DAY_MS);
+  if (days < 60) return `${days}d`;
+  return `${Math.round(ms / (30 * DAY_MS))}mo`;
+}
+
+// Thirty seconds a card, rounded up to whole minutes.
+export function minutesLabel(cards: number): string {
+  return `About ${Math.ceil((cards * 30) / 60)} min`;
+}
+
+export function madeSummary(cards: { kind: "term" | "problem" | "question" }[]): { terms: number; problems: number } {
+  return {
+    terms: cards.filter((card) => card.kind === "term").length,
+    problems: cards.filter((card) => card.kind === "problem").length,
+  };
+}
+
+export function availabilityMessage(availability: Unavailable): string {
+  switch (availability) {
+    case "device_not_eligible":
+      return "Flashcards, quizzes and help are made by Apple Intelligence, which this iPhone doesn't have. Recording, pages and search still work.";
+    case "apple_intelligence_off":
+      return "Turn on Apple Intelligence in Settings to make flashcards on this iPhone.";
+    case "model_not_ready":
+      return "Apple Intelligence is still getting ready on this iPhone. Try again in a little while.";
+    case "unavailable":
+      return "Flashcards can't be made on this iPhone right now.";
+  }
+}
