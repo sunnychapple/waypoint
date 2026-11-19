@@ -9,5 +9,7 @@ export type Env = {
   CLERK_AUTHORIZED_PARTIES: string;
   WALLET: DurableObjectNamespace<Wallet>;
   GROUP_ROOM: DurableObjectNamespace<GroupRoom>;
+  AI: Ai;
+  AI_GATEWAY_ID: string;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
