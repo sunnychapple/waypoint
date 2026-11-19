@@ -8,6 +8,7 @@ import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
+import { requireDeviceSignature } from "./auth/signature.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
 import { privacyRoutes } from "./privacy/routes.ts";
 import { pushTokenRoute } from "./push/route.ts";
@@ -18,6 +19,10 @@ import { quoteRoute } from "./tasks/quote.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
 
+// The routes merged before S1A that spend or buy credits. Routes written after S1A put
+// requireDeviceSignature on the route itself instead (docs/cards/security.md, S1A).
+export const SIGNED_BEFORE_S1A = ["/v1/tasks/explain", "/v1/tasks/more-detail", "/v1/tasks/double-check", "/v1/purchases/apple"];
+
 export function createApp(deps: SessionDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.onError(handleError);
@@ -25,6 +30,8 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   // Middleware, in this order.
   app.use("/v1/*", requireSession(deps));
   app.use("/v1/*", requireIdempotencyKey);
+  // Device signature (S1E). Before the routes, so it runs before a route's own idempotent() store.
+  app.on("POST", SIGNED_BEFORE_S1A, requireDeviceSignature(deps));
   // Routes go below this line.
   app.route("/", configRoute);
   app.route("/", quoteRoute);
