@@ -86,9 +86,22 @@ describe("jwksKeySource", () => {
     expect(fetchJwks).toHaveBeenCalledTimes(2);
   });
 
-  test("gives no keys for a bad response", async () => {
+  test("gives no keys for a bad response when there were no keys before", async () => {
     const fetchJwks = vi.fn(async (_url: string): Promise<unknown> => ({ nope: true }));
     await expect(jwksKeySource(ISSUER, fetchJwks, () => 0)("k1")).resolves.toBeUndefined();
+  });
+
+  test("keeps the old keys when a later response is bad", async () => {
+    const time = clock(1_000_000);
+    const fetchJwks = vi.fn(async (_url: string): Promise<unknown> => {
+      if (fetchJwks.mock.calls.length > 1) return { nope: true };
+      return { keys: [KEY] };
+    });
+    const getKey = jwksKeySource(ISSUER, fetchJwks, time.now);
+    await getKey("k1");
+    time.advance(10 * MINUTE);
+    await expect(getKey("k1")).resolves.toEqual(KEY);
+    expect(fetchJwks).toHaveBeenCalledTimes(2);
   });
 
   test("gives no keys when the response is not an object", async () => {

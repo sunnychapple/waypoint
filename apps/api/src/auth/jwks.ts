@@ -18,9 +18,10 @@ export function jwksKeySource(
     } catch {
       return;
     }
-    const list: unknown[] = typeof body === "object" && body !== null && "keys" in body && Array.isArray(body.keys)
+    const list: unknown[] | null = typeof body === "object" && body !== null && "keys" in body && Array.isArray(body.keys)
       ? body.keys
-      : [];
+      : null;
+    if (list === null) return;
     const next = new Map<string, JsonWebKey>();
     const isRsaKey = (item: unknown): item is JsonWebKey & { kid: string } =>
       typeof item === "object" && item !== null && "kty" in item && item.kty === "RSA" &&
