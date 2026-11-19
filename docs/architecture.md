@@ -55,14 +55,14 @@ Deliberately not used: Containers, Vectorize, Stream, Images, Hyperdrive. Cloudf
 
 | Part | Built with | Ships through |
 |---|---|---|
-| Host shell (navigation, sign-in, update loader) | React Native, Hermes, Metro, `@module-federation/metro` | App Store |
-| Feature bundles: Capture, Explain, Study, Share, Settings, Plans | Metro remotes built with `zephyr-metro-plugin` | Over the air. Checked by SHA-256, cached by `zephyr-native-cache`, applied on the next cold start, never during a recording. |
-| Native modules: audio capture and background recording, speech to text, on-device voices, on-device model, crypto and key storage, SQLite with vector index, StoreKit 2, camera with page detection | Swift | App Store |
+| Host shell (navigation, sign-in, update loader) | Expo SDK 58 (React Native 0.88, Hermes, Metro, Expo Router), Clerk Expo SDK, `@module-federation/metro`. Development builds from `expo prebuild` and Xcode; no Expo Go. | App Store |
+| Feature bundles: Capture, Explain, Study, Share, Settings, Plans | Metro remotes built with `zephyr-metro-plugin`, one per `apps/mobile/src/features/*` folder | Over the air. Checked by SHA-256, cached by `zephyr-native-cache`, applied on the next cold start, never during a recording. Until card M2 lands they ship inside the store build. |
+| Native modules: audio capture and background recording, speech to text, on-device voices, on-device model, crypto and key storage, SQLite with vector index, StoreKit 2, camera with page detection | Swift, as local Expo modules (Expo Modules API) in `apps/mobile/modules`; SQLite is `expo-sqlite` with FTS5 | App Store |
 | System targets: widgets, Live Activity and Dynamic Island, share extension (shared state through an App Group) | Swift, SwiftUI | App Store |
 | Web viewer | Static web app | Workers static assets, any time |
 | Voice pack | Core ML model file | Fetched from R2 on first use, checked by hash. Not in the app binary. |
 
-Release rules: one Zephyr environment per native version (each store build reads its own tag, for example `ios-1.4`). Release to an internal tag, check it, then move the production tag. Rolling back moves the tag one version back. New features go through store builds; over-the-air is for fixes, copy and iteration.
+Release rules: one Zephyr environment per native version (each store build reads its own tag, for example `ios-1.4`; the native version is `expo.version` in `apps/mobile/app.json`). Zephyr is the only over-the-air path; `expo-updates` (EAS Update) is not used. Release to an internal tag, check it, then move the production tag. Rolling back moves the tag one version back. New features go through store builds; over-the-air is for fixes, copy and iteration.
 
 ## 3. Flows
 
