@@ -1,5 +1,1 @@
-import { Placeholder } from "../ui/Placeholder.tsx";
-
-export default function SettingsScreen() {
-  return <Placeholder title="Settings" />;
-}
+export { default } from "../features/settings/SettingsScreen.tsx";
