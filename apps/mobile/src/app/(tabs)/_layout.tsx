@@ -1,6 +1,8 @@
 import type { ColorValue } from "react-native";
 import { Tabs, router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
+import { useIndexer } from "../../platform/indexer.ts";
+import { usePageReader } from "../../platform/pageReading.ts";
 import { useColors } from "../../ui/theme.ts";
 
 function icon(name: SFSymbol) {
@@ -9,6 +11,8 @@ function icon(name: SFSymbol) {
 
 export default function TabsLayout() {
   const colors = useColors();
+  useIndexer();
+  usePageReader();
   return (
     <Tabs
       screenOptions={{

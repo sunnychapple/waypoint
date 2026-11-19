@@ -206,6 +206,18 @@ describe("explain route through createApp", () => {
   });
 });
 
+describe("follow-up routes through createApp", () => {
+  test("POST /v1/tasks/more-detail with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/tasks/more-detail", { method: "POST" }, env);
+    expect(res.status).toBe(401);
+  });
+
+  test("POST /v1/tasks/double-check with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/tasks/double-check", { method: "POST" }, env);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("wallet", () => {
   test("GET /v1/wallet with no Authorization header gives 401 through createApp", async () => {
     const res = await setup().request("/v1/wallet", {}, env);

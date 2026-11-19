@@ -1,0 +1,71 @@
+import { describe, expect, test } from "vitest";
+import { DeviceViewSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
+
+const SIGN_PUB = "A".repeat(87);
+const BOX_PUB = "B".repeat(87);
+const COMMITMENT = "C".repeat(43);
+const CERT = "D".repeat(86);
+
+const FIRST_DEVICE = {
+  id: "device_1",
+  name: "Mina's iPhone",
+  platform: "ios",
+  sign_pub: SIGN_PUB,
+  box_pub: BOX_PUB,
+  account: { id: "account_1", sign_pub: SIGN_PUB, box_pub: BOX_PUB, cert: CERT },
+};
+
+const NEW_DEVICE = {
+  id: "device_2",
+  name: "Sam's iPad",
+  platform: "ios",
+  sign_pub: SIGN_PUB,
+  box_pub: BOX_PUB,
+  commitment: COMMITMENT,
+};
+
+describe("RegisterDeviceRequestSchema", () => {
+  test("a first-device body and a new-device body both parse", () => {
+    expect(RegisterDeviceRequestSchema.safeParse(FIRST_DEVICE).success).toBe(true);
+    expect(RegisterDeviceRequestSchema.safeParse(NEW_DEVICE).success).toBe(true);
+  });
+
+  test("a body with both commitment and account fails", () => {
+    expect(RegisterDeviceRequestSchema.safeParse({ ...FIRST_DEVICE, commitment: COMMITMENT }).success).toBe(false);
+  });
+
+  test("a body with neither commitment nor account fails", () => {
+    const { commitment: _unused, ...neither } = NEW_DEVICE;
+    expect(RegisterDeviceRequestSchema.safeParse(neither).success).toBe(false);
+  });
+
+  test("an sign_pub of 86 characters fails", () => {
+    expect(RegisterDeviceRequestSchema.safeParse({ ...NEW_DEVICE, sign_pub: "A".repeat(86) }).success).toBe(false);
+  });
+
+  test("platform android fails", () => {
+    expect(RegisterDeviceRequestSchema.safeParse({ ...NEW_DEVICE, platform: "android" }).success).toBe(false);
+  });
+
+  test("an extra key fails", () => {
+    expect(RegisterDeviceRequestSchema.safeParse({ ...NEW_DEVICE, extra: 1 }).success).toBe(false);
+  });
+
+  test("DeviceViewSchema accepts a pending row (nulls) and an approved one", () => {
+    const pending = {
+      id: "device_2",
+      kind: "device",
+      name: "Sam's iPad",
+      platform: "ios",
+      sign_pub: SIGN_PUB,
+      box_pub: BOX_PUB,
+      cert: null,
+      account_envelope: null,
+      added_at: 1,
+      approved_at: null,
+      approved_by: null,
+    };
+    expect(DeviceViewSchema.safeParse(pending).success).toBe(true);
+    expect(DeviceViewSchema.safeParse({ ...pending, cert: CERT, approved_at: 2, approved_by: "account_1" }).success).toBe(true);
+  });
+});

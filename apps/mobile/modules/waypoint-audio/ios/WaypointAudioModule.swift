@@ -2,13 +2,19 @@ import ExpoModulesCore
 
 public class WaypointAudioModule: Module {
   private let recorder = AudioRecorder()
+  private let transcriber = LiveTranscriber()
+  private let downloadLock = NSLock()
+  private var downloading = false  // downloadLock
 
   public func definition() -> ModuleDefinition {
     Name("WaypointAudio")
-    Events("onState", "onPart", "onLevel")
+    Events("onState", "onPart", "onLevel", "onTranscript", "onSpeechError", "onSpeechPack")
 
     OnCreate {
       self.recorder.onEvent = { [weak self] name, body in self?.sendEvent(name, body) }
+      self.recorder.sink = self.transcriber
+      self.transcriber.onEvent = { [weak self] name, body in self?.sendEvent(name, body) }
+      Task { await self.transcriber.configure(locale: await SpeechSetup.installedLocale()) }
     }
 
     AsyncFunction("getMicPermission") { () -> String in AudioRecorder.micPermission() }
@@ -18,5 +24,40 @@ public class WaypointAudioModule: Module {
     AsyncFunction("resume") { () throws in try self.recorder.resume() }
     AsyncFunction("stop") { () throws -> Double in try self.recorder.stop() }
     Function("getStatus") { () -> [String: Any] in self.recorder.status() }
+
+    AsyncFunction("getSpeechStatus") { () async -> [String: Any] in await self.speechStatus() }
+    AsyncFunction("downloadSpeechPack") { () async throws -> [String: Any] in
+      guard let locale = await SpeechSetup.chooseLocale() else { return await self.speechStatus() }
+      if await SpeechSetup.isInstalled(locale) { return await self.speechStatus() }
+      self.setDownloading(true)
+      defer { self.setDownloading(false) }
+      try await SpeechSetup.download(locale: locale) { fraction in
+        self.sendEvent("onSpeechPack", ["fraction": fraction])
+      }
+      await self.transcriber.configure(locale: locale)
+      return await self.speechStatus()
+    }
+    AsyncFunction("transcribeFile") { (file: String, startMs: Double) async throws -> [[String: Any]] in
+      try await SpeechSetup.transcribeFile(file: file, startMs: startMs)
+    }
   }
+
+  private func speechStatus() async -> [String: Any] {
+    let locale = await SpeechSetup.chooseLocale()
+    let pack: String
+    if locale == nil {
+      pack = "unsupported"
+    } else if isDownloading() {
+      pack = "downloading"
+    } else if let locale, await SpeechSetup.isInstalled(locale) {
+      pack = "installed"
+    } else {
+      pack = "not_installed"
+    }
+    return ["engine": SpeechSetup.engine, "locale": locale?.identifier ?? "", "pack": pack]
+  }
+
+  private func isDownloading() -> Bool { downloadLock.withLock { downloading } }
+
+  private func setDownloading(_ value: Bool) { downloadLock.withLock { downloading = value } }
 }
