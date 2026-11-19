@@ -114,6 +114,15 @@ POST /v1/tasks/quote
 
 The price is fixed per task, whichever route the router picks.
 
+Instant task and account rules decided on 19 Nov 2026 (cards in `docs/cards/wave-3-ai-wallet.md`):
+
+- An instant task holds its price and, once the answer is delivered, settles at that price. The real model cost goes only into the usage event.
+- If the model fails before or during the answer, the hold is released and nothing is charged. A streamed answer then ends with an `error` event. The app's Try again sends a new Idempotency-Key.
+- A zero-retention user's text is never sent to the router; their explain routes as "unsure". With no zero-retention route for the task, the reply is 403 `forbidden` and no model is called.
+- More detail and double-check send the word, the transcript excerpt and the explanation shown. Double-check answers in one JSON reply, not a stream.
+- The 25 starter credits go to the purchased bucket (they never expire), granted once per user from Clerk's `user.created` webhook.
+- Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows. The wallet is kept as the money record and holds no personal data; its credits are forfeited.
+
 ## 5. Data
 
 ### D1, the directory
