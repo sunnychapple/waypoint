@@ -4,6 +4,7 @@ import type { AppEnv } from "./env.ts";
 import { APPLE_ROOT_CA_G3_SHA256 } from "./apple/jws.ts";
 import { applePurchaseRoute } from "./apple/route.ts";
 import { configRoute } from "./config/route.ts";
+import { devicesRoute } from "./devices/register.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
 import { privacyRoutes } from "./privacy/routes.ts";
@@ -29,5 +30,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", clerkWebhookRoute(deps));
   app.route("/", privacyRoutes({ now: deps.now }));
   app.route("/", pushTokenRoute({ now: deps.now }));
+  app.route("/", devicesRoute({ now: deps.now }));
   return app;
 }
