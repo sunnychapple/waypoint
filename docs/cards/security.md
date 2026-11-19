@@ -1,29 +1,34 @@
 # Security cards: S0A to S4
 
-The design is `docs/security.md`; read it first (sections 4 to 15 are what these cards build). These cards replace the "Blocked until a security owner signs off" rows S1 to S4 in `docs/build-plan.md`. The product owner decided on 19 Nov 2026 to build them now, with only well-known algorithms and platform crypto, and to have the design reviewed by an outside security reviewer before real students use it. If a card and `docs/security.md` disagree, stop and ask in the pull request.
+The design is `docs/security.md`; read it first (sections 4 to 15 are what these cards build). These cards replace the old "Blocked until a security owner signs off" rows S1 to S4 in `docs/build-plan.md`; when each card is built relative to the other card sets is "Build order" in `docs/build-plan.md`. The product owner decided on 19 Nov 2026 to build them now, with only well-known algorithms and platform crypto, and to have the design reviewed by an outside security reviewer before real students use it. If a card and `docs/security.md` disagree, stop and ask in the pull request.
 
 ## Order and ownership
 
 ```
-S0A → S0B → S1A → S1B → S1C → S1D
-                   │            └→ S2 (needs src/keys/envelopes.ts from S1C)
-                   ├→ S3
-                   └→ S4
+S0A → S0B → S1A → S1B → S1C → S1D ──→ S1F (also needs PR 31)
+                   │      │      └→ S2 (needs src/keys/envelopes.ts from S1C)
+                   │      └→ S3 (after S1B, so keys.ts is created once)
+                   ├→ S4
+                   └→ S1E (also needs PR 14, 15 and 17)
 ```
 
 | What | Owner |
 |---|---|
 | `packages/crypto` (all formats, HPKE, signatures, test vectors) | S0A, S0B |
-| Migration `0003_security.sql` (new `devices` columns, `device_pairings`, `request_nonces`, `jobs.device_id`), `BatchDb`, the test D1's `batch`, `requireDeviceSignature`, `apps/api/test/helpers/signing.ts` | S1A |
+| Migration `0005_security.sql` (new `devices` columns, `device_pairings`, `request_nonces`, `jobs.device_id`), `BatchDb`, the test D1's `batch`, `requireDeviceSignature`, `apps/api/test/helpers/signing.ts` | S1A |
+| The device signature on the four paid routes merged before S1A (explain, more detail, double-check, Apple purchases) | S1E |
+| Push notices for device pairing; deleting a removed device's push token | S1F (outline below, written in full after S1D) |
 | `packages/contracts/src/keys.ts`: created by S1B; S1C, S1D, S2 and S3 each append their own block | S1B to S3 |
 | `POST /v1/devices`, `GET /v1/devices` | S1B |
 | `GET`/`POST /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing/reveal`, `POST /v1/devices/:id/approve`, `src/keys/envelopes.ts` | S1C |
 | `DELETE /v1/devices/:id` (with the account key rotation and the key version bump for the user's groups) | S1D |
 | `key_envelopes` rows (except the ones `approve` inserts), `GET /v1/groups/:id/devices`, `GET /v1/groups/:id/keys`, `POST /v1/groups/:id/keys` | S2 |
-| `groups`, `memberships`, `invites` rows; `POST /v1/groups`; `DELETE /v1/groups/:id/members/:user`, which increments `groups.key_version` in the same D1 batch that ends the membership (use `BUMP_ONE_GROUP_SQL` below) | PR 27 |
+| `groups`, `memberships`, `invites` rows; `POST /v1/groups`; `DELETE /v1/groups/:id/members/:user`, which increments `groups.key_version` in the same D1 batch that ends the membership (with the SQL below) | PR 27 |
 | `PUT /v1/recovery`, `GET /v1/recovery` | S3 |
 | `sealJobResult` (sealing to the device, R2 `results/{job}`, `jobs.result_key`) | S4 |
-| The R2 binding, writing `jobs.device_id` in `POST /v1/jobs`, `GET /v1/jobs/:id/result` | PR 20 |
+| The R2 binding `BUCKET` (bucket `waypoint`) | PR 33 |
+| Writing `jobs.device_id` in `POST /v1/jobs`, `GET /v1/jobs/:id/result` | PR 20 |
+| Deleting old `request_nonces` rows in the hourly cron | PR 33 |
 | Calling `sealJobResult` from each workflow | PR 22 to 25 |
 
 PR 27 bumps a group's key version with exactly:
@@ -32,7 +37,7 @@ PR 27 bumps a group's key version with exactly:
 UPDATE groups SET key_version = key_version + 1 WHERE id = ?
 ```
 
-**Migration number.** S1A adds `db/d1/migrations/0003_security.sql`. If another merged card already uses `0003`, use the next free number and keep the rest of the name; say so in the pull request.
+**Migration number.** S1A adds `db/d1/migrations/0005_security.sql`. The number is fixed by the build order: `0003_push_tokens.sql` (PR 31) and `0004_apple_notifications.sql` (PR 18) merge before it.
 
 ## Rules for every security card
 
@@ -1308,11 +1313,11 @@ Not in this PR: anything in `apps/api`; the viewer (V1); BIP-39 words (they are 
 
 ## S1A · Migration, `BatchDb` and the device signature check
 
-Branch `pr/s1a-signatures`. Builds on S0B. Files: `db/d1/migrations/0003_security.sql`, `db/d1/test/schema.test.mjs`, `apps/api/package.json`, `apps/api/src/storage.ts`, `apps/api/src/env.ts`, `apps/api/src/auth/signature.ts`, `apps/api/test/helpers/d1.ts`, `apps/api/test/helpers/signing.ts`, `apps/api/test/helpers.test.ts`, `apps/api/test/signature.test.ts`, `package-lock.json`. No other files.
+Branch `pr/s1a-signatures`. Builds on S0B. Merged after PR 31 and PR 18, whose migrations `0003` and `0004` come first; if PR 18 is not merged when you start, still name the file `0005_security.sql`. Files: `db/d1/migrations/0005_security.sql`, `db/d1/test/schema.test.mjs`, `apps/api/package.json`, `apps/api/src/storage.ts`, `apps/api/src/env.ts`, `apps/api/src/auth/signature.ts`, `apps/api/test/helpers/d1.ts`, `apps/api/test/helpers/signing.ts`, `apps/api/test/helpers.test.ts`, `apps/api/test/signature.test.ts`, `package-lock.json`. No other files.
 
 Dependencies: add `"@waypoint/crypto": "0.0.0"` to `apps/api` `dependencies`.
 
-`db/d1/migrations/0003_security.sql`, exactly:
+`db/d1/migrations/0005_security.sql`, exactly:
 
 ```sql
 -- Device keys, device pairing and signed requests (docs/security.md). Holds public keys, signatures,
@@ -1355,7 +1360,7 @@ ALTER TABLE jobs ADD COLUMN device_id TEXT REFERENCES devices(id) ON DELETE SET 
 - `EXPECTED.devices` gains, after `removed_at`: `kind`, `approved_at`, `approved_by`, `cert`, `account_envelope`. `EXPECTED_TYPES.devices` gains `kind: "TEXT"`, `approved_at: "INTEGER?"`, `approved_by: "TEXT?"`, `cert: "TEXT?"`, `account_envelope: "TEXT?"`.
 - `EXPECTED.jobs` gains `device_id` at the end; `EXPECTED_TYPES.jobs` gains `device_id: "TEXT?"`.
 - New entries `device_pairings: ["device_id", "commitment", "approver_id", "approver_nonce", "device_nonce", "expires_at"]` (types `TEXT`, `TEXT`, `TEXT?`, `TEXT?`, `TEXT?`, `INTEGER`) and `request_nonces: ["device_id", "nonce", "expires_at"]` (types `TEXT`, `TEXT`, `INTEGER`).
-- The table-count test is renamed "creates exactly the 12 directory tables, idempotency, device_pairings and request_nonces" and expects 15.
+- The table-count test keeps its name "creates exactly the expected tables" and has no fixed count (PR 31 removed it); adding the two tables to `EXPECTED` is enough.
 - `REQUIRED_INDEXES` gains `["request_nonces", ["expires_at"]]`.
 - New tests: `devices.kind` rejects `'other'`; a second active `kind = 'account'` row for the same user is rejected, and is allowed once the first has `removed_at` set; deleting a device deletes its `device_pairings` row; deleting a device sets `jobs.device_id` to NULL.
 
@@ -1497,7 +1502,7 @@ export function requireDeviceSignature(deps: { now: () => number }, options: Sig
 }
 ```
 
-How routes use it (later cards): `requireDeviceSignature(deps, options)` goes on the route, before `idempotent(deps)` from PR 11, so a retry with a fresh signature still gets the stored reply. It is never registered with `app.use`; each route opts in.
+How routes use it (later cards): `requireDeviceSignature(deps, options)` goes on the route, before `idempotent(deps)` from PR 11, so a retry with a fresh signature still gets the stored reply. It is never registered with `app.use`; each route opts in. The one exception is S1E, which adds it in `createApp` for four routes merged before this card, so their route files and tests stay as they are.
 
 `apps/api/test/helpers/signing.ts`, exactly (later cards reuse it and must not write their own):
 
@@ -1794,7 +1799,7 @@ Tests (`apps/api/test/devices.test.ts`), with `makeTestDevice`, `signedInit` (`a
 - `GET /v1/devices` lists the user's non-removed rows ordered by `added_at` then `id`, passes `DeviceListSchema`, and does not list another user's or a removed device;
 - through `createApp`, `POST /v1/devices` without a session is 401.
 
-Not in this PR: pairing and approval (S1C), removal (S1D), push to the user's other devices (PR 31 adds it to this route).
+Not in this PR: pairing and approval (S1C), removal (S1D), push to the user's other devices (S1F adds it to this route).
 
 ---
 
@@ -2061,7 +2066,7 @@ Tests (`apps/api/test/pairing.test.ts`). Set up with `insertDevice` (an account 
 - recovery: with no pairing at all, approve signed by the account row (`Waypoint-Device: acct_1`, envelopes signed by `acct_1`) → 200;
 - every route above except `GET` needs a signature: without one → 401.
 
-Not in this PR: removal (S1D), group key first sets (S2), push notices (PR 31).
+Not in this PR: removal (S1D), group key first sets (S2), push notices (S1F).
 
 ---
 
@@ -2218,7 +2223,7 @@ Tests (`apps/api/test/remove-device.test.ts`), with an account row, two approved
 - an empty request body counts as `{}`; invalid JSON → 400;
 - without a signature → 401.
 
-Not in this PR: revoking the removed device's Clerk session (open question R13), the new recovery key prompt (iOS), envelopes of old group versions for the new account row (the device posts them with S2).
+Not in this PR: revoking the removed device's Clerk session (open question R13), deleting the device's push token (S1F), the new recovery key prompt (iOS), envelopes of old group versions for the new account row (the device posts them with S2).
 
 ---
 
@@ -2420,15 +2425,13 @@ Tests (`apps/api/test/group-keys.test.ts`), with two users in group `g1` (key ve
 - after a member's removal is simulated by setting `left_at` and running `UPDATE groups SET key_version = key_version + 1 WHERE id = ?`, the removed member's devices are not targets and a first set for the new version must leave them out;
 - `POST` without a signature → 401.
 
-Not in this PR: creating groups, invites, membership changes and the key version bump on removal (PR 27); refusing changes with an old key version in sync (PR 28); push notices that a key is needed (PR 31).
+Not in this PR: creating groups, invites, membership changes and the key version bump on removal (PR 27); refusing changes with an old key version in sync (PR 28); push notices that a key is needed (not planned yet; PR 31 has no such kind).
 
 ---
 
 ## S3 · `PUT /v1/recovery` and `GET /v1/recovery`
 
-Branch `pr/s3-recovery`. Builds on S1A. Tests insert devices with `insertDevice`. Files: `packages/contracts/src/keys.ts` (append), `packages/contracts/test/keys.test.ts` (add), `apps/api/src/recovery/route.ts`, `apps/api/src/app.ts` (one import, one line), `apps/api/test/recovery.test.ts`. No other files. No new dependencies.
-
-If S1B is not merged yet, create `packages/contracts/src/keys.ts` with only `import { z } from "zod";`, the five schemas at its top (`KeyIdSchema` to `EnvelopeTextSchema`) and the block below, and add the index line; the merge keeps one copy.
+Branch `pr/s3-recovery`. Builds on S1B (so `packages/contracts/src/keys.ts` already exists). Tests insert devices with `insertDevice`. Files: `packages/contracts/src/keys.ts` (append), `packages/contracts/test/keys.test.ts` (add), `apps/api/src/recovery/route.ts`, `apps/api/src/app.ts` (one import, one line), `apps/api/test/recovery.test.ts`. No other files. No new dependencies.
 
 `packages/contracts/src/keys.ts`: append, exactly:
 
@@ -2532,7 +2535,7 @@ Not in this PR: the words, the key derivation and the "type 3 words back" check 
 
 Branch `pr/s4-seal-results`. Builds on S1A. Files: `apps/api/src/jobs/seal.ts`, `apps/api/test/seal.test.ts`. No other files. No new dependencies.
 
-This card adds a function only. It adds no route and no R2 binding: PR 20 adds the bucket binding and writes `jobs.device_id` from `c.get("device").id`; PR 22 to 25 call this function from the workflow step that produces the result.
+This card adds a function only. It adds no route and no R2 binding: PR 33 adds the R2 binding `BUCKET`, PR 20 writes `jobs.device_id` from `c.get("device").id`, and PR 22 to 25 call this function from the workflow step that produces the result.
 
 `apps/api/src/jobs/seal.ts`, exactly:
 
@@ -2596,7 +2599,7 @@ How a workflow must call it (put this in PR 22 to 25):
 // Inside ONE step: generate, seal, return only the key. Workflows persist what a step returns.
 const { result_key } = await step.do("write and seal", async () => {
   const text = await generateScript(/* ... */);
-  return sealJobResult({ db: env.DB, bucket: env.BLOBS }, { jobId, plaintext: new TextEncoder().encode(text) });
+  return sealJobResult({ db: env.DB, bucket: env.BUCKET }, { jobId, plaintext: new TextEncoder().encode(text) });
 });
 ```
 
@@ -2607,4 +2610,54 @@ Tests (`apps/api/test/seal.test.ts`), with an in-memory `ResultBucket` that reco
 - exactly 4 MiB is sealed; 4 MiB + 1 byte → `too_large`, nothing put;
 - if `put` rejects, the error propagates and `result_key` stays null.
 
-Not in this PR: the R2 binding, `GET /v1/jobs/:id/result`, the 7-day cleanup (PR 33), what to do with the credits when sealing fails because the device was removed (question for the owner).
+Not in this PR: the R2 binding (PR 33), `GET /v1/jobs/:id/result` (PR 20), the 7-day cleanup (PR 33), what to do with the credits when sealing fails because the device was removed (question for the owner).
+
+---
+
+## S1E · Device signatures on the paid routes merged before S1A
+
+Branch `pr/s1e-signed-paid-routes`. Builds on S1A, PR 14, PR 15 and PR 17 (branch after all four are merged). Files: `apps/api/src/app.ts`, `apps/api/test/app.test.ts` (new tests only). No other files. No new dependencies.
+
+Why it looks like this: `docs/security.md` section 7 requires a device signature on every request that spends or buys credits. `POST /v1/tasks/explain`, `/v1/tasks/more-detail`, `/v1/tasks/double-check` (PR 14, 15) and `POST /v1/purchases/apple` (PR 17) were built before `requireDeviceSignature` existed. Registering it once in `createApp` adds it to all four without touching their route files or their route tests, which mount the routes on a fresh app without `createApp`. Every route written after S1A puts `requireDeviceSignature(deps)` on the route itself (the S1A rule); this card is the only exception. Hono runs a handler registered with `app.on` before the handlers of the same method and path mounted later with `app.route`, and only continues when it calls `next()` (checked in a prototype with a stand-in middleware, together with PR 14's route).
+
+`src/app.ts`: add `import { requireDeviceSignature } from "./auth/signature.ts";`, then above `createApp`, exactly:
+
+```ts
+// The routes merged before S1A that spend or buy credits. Routes written after S1A put
+// requireDeviceSignature on the route itself instead (docs/cards/security.md, S1A).
+export const SIGNED_BEFORE_S1A = ["/v1/tasks/explain", "/v1/tasks/more-detail", "/v1/tasks/double-check", "/v1/purchases/apple"];
+```
+
+and in `createApp`, right after the `requireIdempotencyKey` line and above "Routes go below this line", exactly:
+
+```ts
+  // Device signature (S1E). Before the routes, so it runs before a route's own idempotent() store.
+  app.on("POST", SIGNED_BEFORE_S1A, requireDeviceSignature(deps));
+```
+
+`deps` is the `SessionDeps` that `createApp` already takes; it has `now`. A request to one of these paths now goes: session, Idempotency-Key header, device signature, then the route (for Apple purchases, PR 17's `idempotent()` store, then the handler).
+
+**Consequence:** after this card, running a paid task or recording a purchase needs a registered, approved device (S1B, and S1C for a second device); a session alone gets 401 "device signature required". The mobile app registers its first device right after sign-in (mobile cards M26 and M27a, stage 2, before Explain and purchases).
+
+Tests (`test/app.test.ts`, add; change nothing else), through `createApp` with the file's `setup()` and `authed()`. Before these tests: make one authed `GET /v1/x` so the session user exists, read its id with `SELECT id FROM users WHERE clerk_id = 'user_123'`, make `phone = await makeTestDevice("dev_phone")` and `insertDevice(env.DB, phone, { userId })` (from `test/helpers/signing.ts`). A signed request is `await signedInit(phone, { method: "POST", path, body: {}, now: NOW })` with `Authorization` added to its headers. Each bullet is one test:
+- Each of the four paths, signed in, with a valid `Idempotency-Key` and no `Waypoint-*` headers → 401 exactly `{ code: "unauthorized", message: "device signature required", retry_after: null }`.
+- `POST /v1/tasks/explain` signed by the phone, body `{}` → 400 `bad_request` "invalid request" (it reached the route).
+- `POST /v1/purchases/apple` signed by the phone, body `{}` → 400 "invalid request".
+- `POST /v1/tasks/explain` signed by a device of another user (insert a second user and an approved device for them) → 401.
+- `POST /v1/tasks/quote` with a valid key, no `Waypoint-*` headers and body `{}` → 400 "invalid request", not 401 (a quote spends nothing).
+- `POST /v1/x` (the file's throwaway route) with a valid key and no `Waypoint-*` headers → 200.
+
+Not in this PR: signatures on routes written after S1A (each card adds its own), changes to the four route files or their tests.
+
+---
+
+## S1F · Device pushes and push-token cleanup (outline; written in full after S1D)
+
+Builds on S1D and PR 31. Files: `apps/api/src/devices/register.ts`, `apps/api/src/devices/pairing.ts`, `apps/api/src/devices/remove.ts` and their tests (`devices.test.ts`, `pairing.test.ts`, `remove-device.test.ts`, which get a `PUSH_QUEUE` stub in `env`). What it adds, and nothing else:
+
+- `POST /v1/devices` for a new waiting device sends `{ user_id, kind: "device_request", ref: <new device id>, device_id: <approved device id> }` to `PUSH_QUEUE` once for each of the user's approved devices (flow 7: "API pushes to an old device").
+- `POST /v1/devices/:id/approve` sends `{ user_id, kind: "device_approved", ref: <device id>, device_id: <device id> }`.
+- `DELETE /v1/devices/:id` deletes that device's `push_tokens` rows (`WHERE user_id = ? AND device_id = ?`) in the same D1 batch that marks it removed.
+- A failed queue send never fails the request (catch and drop, like `sendUsage`).
+
+`push_tokens.device_id` is the device's `devices.id` (decided in the integration pass; see PR 31).

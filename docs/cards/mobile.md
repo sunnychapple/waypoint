@@ -14,9 +14,11 @@ Stages used here:
 | Stage | What works |
 |---|---|
 | 1 | One iPhone. Sign in. Record with a live transcript, snap pages, flashcards, quiz, help with a problem, search, settings. Everything is on the device. |
-| 2 | Talks to the API: typed client, credits and purchases, Explain, questions for later, second transcript, research. |
+| 2 | Talks to the API: typed client, device keys and registering this iPhone, credits and purchases, Explain, questions for later, second transcript, research. |
 | 3 | Audio and video overviews and the on-device voices. |
-| 4 | Keys, sync, sharing, more devices, over-the-air bundles, widgets, Live Activity, share extension. |
+| 4 | Sync, sharing, adding more devices, the recovery key, over-the-air bundles, widgets, Live Activity, share extension. |
+
+Where these cards sit next to the server cards is "Build order" in `docs/build-plan.md`. Every paid request (tasks, jobs, purchases) must be signed by an approved device (`docs/security.md` section 7; server card S1E), so the device keys module and registering the first device are in stage 2, before anything that spends or buys credits.
 
 ---
 
@@ -2357,16 +2359,18 @@ One line each. Full cards are written when the stage starts, against the code th
 
 | Card | Title |
 |---|---|
-| M3 | `packages/api-client`: typed client on `fetch` using `packages/contracts` schemas — Clerk token per request, `Idempotency-Key` on every write, the one error shape, 402 shortfall, streaming for explain; tested in Node with a fake `fetch` |
+| M3 | `packages/api-client`: typed client on `fetch` using `packages/contracts` schemas — Clerk token per request, `Idempotency-Key` on every write, device signature headers (`docs/security.md` section 7) on the writes that need them through an injected signer, a new nonce and timestamp on every retry, the one error shape, 402 shortfall, streaming for explain; tested in Node with a fake `fetch` and a software signer, against the `waypoint-v1.json` request vectors from S0B |
+| M26 | Native `modules/waypoint-keys`: device signing and encryption keys in the Secure Enclave / Keychain, request signing, sealing and opening, per `docs/security.md` section 19 (needs iOS 17; the app's minimum is 26). Built now: the owner decided on 19 Nov 2026 to build the security cards, with an outside review before real students use the app |
+| M27a | Register this iPhone after sign-in: the first device makes the account key and calls `POST /v1/devices` with `account` (S1B); the API client signs with M26's keys. Comes before M14, M16, M18 and M19, which all spend or buy credits. The recovery key prompt comes with M27b; until stage 4 nothing on the server is locked with the account key, so nothing is lost without it |
 | M13 | `GET /v1/config` on launch and the minimum-native-version check ("Update Waypoint" screen) |
-| M14 | Native `modules/waypoint-store`: StoreKit 2 products, purchase, `Transaction.updates`, restore, Family Sharing flag; sends the signed transaction to `POST /v1/purchases/apple` |
+| M14 | Native `modules/waypoint-store`: StoreKit 2 products, purchase with `appAccountToken` set to the signed-in user's id, `Transaction.updates`, restore, Family Sharing flag; sends the signed transaction to `POST /v1/purchases/apple` (signed request) |
 | M15 | Plans bundle (`src/features/plans`): O1–O14 — choose a plan, Own it, Plus, buy credits, before you run it (quote), out of credits and retry, restore |
 | M16 | Explain bundle (`src/features/explain`): D1–D8 — tap a word, quote, stream the answer, peek/half/full thread, saved vs ephemeral, "What was sent" (`sent_log`), offline → questions for later; adds the `explanations`, `terms` and `sent_log` tables |
 | M17 | Questions for later: flags get answers (D9, R5), the Home row (B1) |
 | M18 | Second transcript (flow 3): opt-in sheet that says audio leaves the phone, signed upload, job polling, changed-words view |
 | M19 | Research the web screens (D10–D12) on the jobs API |
-| M20 | Push notifications (`expo-notifications`): token to `POST /v1/push-tokens`, "your overview is ready" |
-| M21 | Cloud activity and zero-retention settings (J5, K2's Plus switch) |
+| M20 | Push notifications (`expo-notifications`): token to `POST /v1/push-tokens` with `device_id` = this device's `devices.id` (after M27a), lowercase hex, `sandbox` in development builds; "your overview is ready" |
+| M21 | Cloud activity and zero-retention settings (J5, K2's Plus switch). Until the server has a zero-retention route, turning the switch on makes every cloud task fail with 403; the sheet must say so (or hide the switch, see the open questions in `docs/build-plan.md`) |
 
 **Stage 3: overviews and voices**
 
@@ -2381,8 +2385,7 @@ One line each. Full cards are written when the stage starts, against the code th
 
 | Card | Title |
 |---|---|
-| M26 | Native `modules/waypoint-keys`: device signing and encryption keys in the Secure Enclave / Keychain, sealing and opening, per `docs/security.md` (being written in parallel; nothing here is built before the security owner signs off) |
-| M27 | Devices: add and approve a phone with the 6-digit code, recovery key (A4–A6, J1–J3), on top of S1–S3 |
+| M27b | Devices: add and approve another device with the 6-digit code, remove a device, recovery key (A4–A6, J1–J3), on top of S1C, S1D and S3 |
 | M28 | Sync engine: `outbox` table, locked changes to the group room socket, catch-up by sequence, media upload on paid plans |
 | M29 | Share bundle (`src/features/share`): groups, invites, shared links, move a note, access ending, key history (I1–I9, E9) |
 | M2 | Zephyr: `zephyr-metro-plugin`, `@module-federation/metro`, one remote per `src/features/*` folder plus `src/shell`, tag per native version, `zephyr-native-cache`, apply on next cold start, never during a recording. Starts with a spike: `@module-federation/metro` 2.9.3 declares Metro `^0.82` while SDK 58 ships 0.87, and expo-router with remotes is not documented |

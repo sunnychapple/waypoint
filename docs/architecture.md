@@ -30,7 +30,7 @@ Sync and sharing cross the trust boundary only as locked data. A cloud task cros
 | Workers static assets | The shared-link web viewer. |
 | Analytics Engine | Cost and usage per task type and route, with no content. |
 | Turnstile, rate limits | Protect shared links and passcode attempts. |
-| Secrets Store | Search, Apple and push keys. |
+| Worker secrets | Clerk webhook signing secret, APNs key, search API key, link passcode pepper (`wrangler secret put`). |
 
 Deliberately not used: Containers, Vectorize, Stream, Images, Hyperdrive. Cloudflare has no Apple push product, so a queue consumer calls Apple directly.
 
@@ -84,8 +84,8 @@ One versioned REST surface on the API Worker plus one socket per group. Every re
 | Area | Endpoints | Backed by |
 |---|---|---|
 | Config | `GET /v1/config` | KV: price table, routes version, flags, minimum native version, voice pack |
-| Devices and keys | `POST /v1/devices`, `GET /v1/devices`, `POST /v1/devices/:id/approve`, `DELETE /v1/devices/:id`, `PUT /v1/recovery`, `POST /v1/push-tokens` | D1 |
-| Groups | `POST /v1/groups`, `GET /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`, `POST /v1/groups/:id/keys` | D1, group room |
+| Devices and keys | `POST /v1/devices`, `GET /v1/devices`, `GET /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing/reveal`, `POST /v1/devices/:id/approve`, `DELETE /v1/devices/:id`, `PUT /v1/recovery`, `GET /v1/recovery`, `POST /v1/push-tokens` | D1 |
+| Groups | `POST /v1/groups`, `GET /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`, `GET /v1/groups/:id/devices`, `GET /v1/groups/:id/keys`, `POST /v1/groups/:id/keys` | D1, group room |
 | Sync | `GET /v1/groups/:id/sync` (socket), `GET /v1/groups/:id/changes?after=`, `POST /v1/groups/:id/changes`, `POST /v1/blobs` (returns a signed upload URL), `GET /v1/blobs/:id` | Group room, R2 |
 | Shared links | `POST /v1/links`, `DELETE /v1/links/:id`, `GET /l/:id` (viewer page), `GET /v1/links/:id/data` | D1, R2, static assets |
 | Instant tasks | `POST /v1/tasks/quote`, `POST /v1/tasks/explain` (stream), `POST /v1/tasks/more-detail` (stream), `POST /v1/tasks/double-check`, `POST /v1/tasks/read-link` | Wallet, router, Workers AI through AI Gateway, Browser Run |
@@ -101,6 +101,7 @@ Rules every endpoint follows:
 - **402 when credits run out.** The reply carries the shortfall. The app shows Out of credits and retries the same request after a purchase.
 - **One error shape:** `code`, `message`, `retry_after`.
 - **No readable notes outside a task.** The server never accepts readable note content except inside a task request.
+- **Device signatures** (`docs/security.md` section 7; decided 19 Nov 2026): the writes that change keys, devices, group membership or money carry a signature from an approved device. This includes every paid task and job and `POST /v1/purchases/apple`. So a person must have a registered, approved device before they can spend or buy credits; the app registers its first device right after sign-in. A session alone can read and can quote.
 
 A quote:
 
@@ -118,10 +119,11 @@ Instant task and account rules decided on 19 Nov 2026 (cards in `docs/cards/wave
 
 - An instant task holds its price and, once the answer is delivered, settles at that price. The real model cost goes only into the usage event.
 - If the model fails before or during the answer, the hold is released and nothing is charged. A streamed answer then ends with an `error` event. The app's Try again sends a new Idempotency-Key.
-- A zero-retention user's text is never sent to the router; their explain routes as "unsure". With no zero-retention route for the task, the reply is 403 `forbidden` and no model is called.
+- A zero-retention user's text is never sent to the router; their explain routes as "unsure". With no zero-retention route for the task, the reply is 403 `forbidden` and no model is called. No route is zero-retention yet (section 6), but a Plus user can still turn the switch on (`PUT /v1/settings/zero-retention`); until a zero-retention route is in KV, that person gets 403 for every cloud task. The app says so beside the switch.
 - More detail and double-check send the word, the transcript excerpt and the explanation shown. Double-check answers in one JSON reply, not a stream.
 - The 25 starter credits go to the purchased bucket (they never expire), granted once per user from Clerk's `user.created` webhook.
-- Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows. The wallet is kept as the money record and holds no personal data; its credits are forfeited.
+- Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows (entitlements, devices with their key envelopes and pairings, recovery, memberships, jobs, activity, push tokens, stored replies). The wallet is kept as the money record and holds no personal data; its credits are forfeited. Groups the user created, their room data and R2 objects are not cleaned up yet (open question in `docs/build-plan.md`).
+- Every cloud task, instant or job, sends one usage event (`UsageEvent` in `apps/api/src/usage.ts`: task, outcome, credits, tier, model, retention, router, bytes sent, token counts; id = the hold id) to the usage queue. Its consumer writes the `activity` row (route = tier) and an Analytics Engine data point with no user id.
 
 ## 5. Data
 
@@ -141,6 +143,17 @@ purchases    (transaction_id PK, original_id, billing_account_id, product_id, ki
 jobs         (id, user_id, type, state, quoted, spent, route, result_key, created_at, expires_at)
 activity     (id, user_id, task, bytes_sent, credits, route, retention, at)
 idempotency  (user_id, key, request_hash, state, status, body, created_at)  -- replies to repeated writes, 24 h
+```
+
+Added by later migrations (numbers fixed in `docs/build-plan.md`, "Build order"):
+
+```
+0003 push_tokens         (user_id, device_id, token, environment, updated_at)       -- PR 31; device_id is devices.id, no foreign key
+0004 apple_notifications (notification_uuid, notification_type, received_at)        -- PR 18; App Store notices already handled
+0005 devices             + kind, approved_at, approved_by, cert, account_envelope   -- S1A; kind 'account' is the account key row
+     device_pairings     (device_id, commitment, approver_id, approver_nonce, device_nonce, expires_at)
+     request_nonces      (device_id, nonce, expires_at)                              -- signed requests, kept for the 5-minute window
+     jobs                + device_id                                                 -- the device a result is sealed to
 ```
 
 ### Group room (one Durable Object per group, SQLite storage)
@@ -261,7 +274,7 @@ route
 | Standard cloud | Everyone | Sent for this task only |
 | Zero-retention cloud (Plus only) | Plus | Not stored in the cloud |
 
-Zero-retention routes are only models with a written zero-retention commitment: models Cloudflare hosts itself, or outside models through AI Gateway with zero retention on. Never route student content to a lab's own API. **Open:** which catalog models Cloudflare hosts itself is not confirmed, so no route is marked zero-retention yet.
+Zero-retention routes are only models with a written zero-retention commitment: models Cloudflare hosts itself, or outside models through AI Gateway with zero retention on. Never route student content to a lab's own API. **Open:** which catalog models Cloudflare hosts itself is not confirmed, so no route is marked zero-retention yet. Until one is, a Plus user who turns zero retention on gets 403 for every cloud task (section 4).
 
 ## 7. Credits
 
