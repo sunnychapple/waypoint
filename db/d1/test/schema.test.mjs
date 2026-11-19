@@ -28,6 +28,7 @@ const EXPECTED = {
   push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"],
   device_pairings: ["device_id", "commitment", "approver_id", "approver_nonce", "device_nonce", "expires_at"],
   request_nonces: ["device_id", "nonce", "expires_at"],
+  apple_notifications: ["notification_uuid", "notification_type", "received_at"],
 };
 
 // "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
@@ -50,6 +51,7 @@ const EXPECTED_TYPES = {
   push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" },
   device_pairings: { device_id: "TEXT", commitment: "TEXT", approver_id: "TEXT?", approver_nonce: "TEXT?", device_nonce: "TEXT?", expires_at: "INTEGER" },
   request_nonces: { device_id: "TEXT", nonce: "TEXT", expires_at: "INTEGER" },
+  apple_notifications: { notification_uuid: "TEXT", notification_type: "TEXT", received_at: "INTEGER" },
 };
 
 // Indexes the card requires, as [table, indexed columns in order].
@@ -432,4 +434,13 @@ test("deleting a device sets jobs.device_id to NULL", () => {
   db.prepare("DELETE FROM devices WHERE id = 'd1'").run();
   const job = db.prepare("SELECT device_id FROM jobs WHERE id = 'j1'").get();
   assert.equal(job.device_id, null);
+});
+
+test("rejects the same notification_uuid for two rows", () => {
+  const db = freshDb();
+  const insert = db.prepare(
+    "INSERT INTO apple_notifications (notification_uuid, notification_type, received_at) VALUES (?, ?, ?)",
+  );
+  insert.run("n1", "REFUND", 1);
+  assert.throws(() => insert.run("n1", "REFUND", 2), /UNIQUE constraint failed/);
 });
