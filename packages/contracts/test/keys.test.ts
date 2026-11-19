@@ -5,6 +5,7 @@ import {
   PairingNonceRequestSchema,
   PutRecoveryRequestSchema,
   RegisterDeviceRequestSchema,
+  RemoveDeviceRequestSchema,
 } from "../src/keys.ts";
 import vectors from "../../crypto/test/vectors/waypoint-v1.json";
 
@@ -101,5 +102,25 @@ describe("PutRecoveryRequestSchema", () => {
     const body = { account_device_id: VECTOR_ACCOUNT_DEVICE_ID, wrapped_account_key: VECTOR_BLOB, verified: true };
     expect(PutRecoveryRequestSchema.safeParse(body).success).toBe(true);
     expect(PutRecoveryRequestSchema.safeParse({ ...body, wrapped_account_key: VECTOR_BLOB.slice(0, 123) }).success).toBe(false);
+  });
+});
+
+describe("RemoveDeviceRequestSchema", () => {
+  const ROTATION = {
+    account: { id: "account_2", sign_pub: SIGN_PUB, box_pub: BOX_PUB },
+    devices: [{ id: "device_1", cert: CERT, account_envelope: "E".repeat(10) }],
+  };
+
+  test("{} and a full rotation body parse", () => {
+    expect(RemoveDeviceRequestSchema.safeParse({}).success).toBe(true);
+    expect(RemoveDeviceRequestSchema.safeParse(ROTATION).success).toBe(true);
+  });
+
+  test("account without devices fails", () => {
+    expect(RemoveDeviceRequestSchema.safeParse({ account: ROTATION.account }).success).toBe(false);
+  });
+
+  test("devices: [] fails", () => {
+    expect(RemoveDeviceRequestSchema.safeParse({ ...ROTATION, devices: [] }).success).toBe(false);
   });
 });
