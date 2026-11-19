@@ -44,7 +44,7 @@ Deliberately not used: Containers, Vectorize, Stream, Images, Hyperdrive. Cloudf
 | Flashcards, quiz, Help me with a problem | iPhone (on-device model) | Free |
 | Search and the search index | iPhone. The index never leaves the device. | Free |
 | Explain, more detail, double-check | Cloud, open models on Workers AI | 1 to 4 credits |
-| Research the web | Cloud: search API, Browser Run, open models | 15 to 125 credits |
+| Research the web | Cloud: Cloudflare Web Search API (provider Ceramic.ai, zero data retention), Browser Run, open models | 15 to 125 credits |
 | Audio overview: the script | Cloud, strong model writes a two-host script | 40 credits |
 | Audio overview: the voices | iPhone: Kokoro-82M (Core ML, Neural Engine, iOS 18+). Downloaded on first use; Apple system voices until then. | Free |
 | Voices on an older phone | Cloud fallback: MeloTTS on Workers AI | +2 credits |
@@ -69,8 +69,8 @@ Release rules: one Zephyr environment per native version (each store build reads
 Every paid flow follows one money pattern: **quote, hold, run, settle at the real cost, never above the quote.**
 
 1. **Explain a word (instant, streamed).** App `POST /v1/tasks/explain` with the word and about 54 s of transcript. API asks the wallet to hold 1 credit. The router (Clef-flash) scores the request and picks light, standard or strong. The model call goes through AI Gateway with logging off, streaming. The answer streams back through the Worker. API settles at the real cost. A usage event goes to a queue (task, size, route, no content). Nothing is written to storage. If the model fails, the hold is released and the app offers Try again or Ask later.
-2. **Audio overview.** App `POST /v1/jobs` type `overview_script` with the transcript text. Hold 40 credits. Start a Workflow; the app gets a job id. A strong model writes the two-host script. The script is stored in R2 sealed to the requesting device, 7-day life. Settle the hold. Queue sends push "your overview is ready". The app fetches the script, speaks it with two on-device voices and saves the audio locally, then `DELETE`s the result. Research and video slides use the same shape.
-3. **Second transcript (opt-in).** App `POST /v1/jobs` type `retranscribe`, quoted at 1 credit per minute. App uploads the audio for this job with a signed URL to R2 `tmp/audio/{job}`. Workflow runs Whisper large v3 turbo in chunks, deletes the audio, stores the text sealed to the device, settles. The app compares with the on-device transcript and marks changed words. This is the only flow where audio leaves the phone; it is held unlocked only for the length of the job. The sheet that turns it on must say so.
+2. **Audio overview.** App `POST /v1/jobs` type `overview_script` with the transcript text. Hold 40 credits. The text waits in R2 `tmp/input/{job}`, encrypted with a key that only the job's Workflow params hold (Workflows store params and step results, so no note text goes into them), and is deleted when the job ends. Start a Workflow; the app gets a job id. A strong model writes the two-host script. The script is stored in R2 sealed to the requesting device, 7-day life. Settle the hold. Queue sends push "your overview is ready". The app fetches the script, speaks it with two on-device voices and saves the audio locally, then `DELETE`s the result. Research and video slides use the same shape.
+3. **Second transcript (opt-in).** App `POST /v1/jobs` type `retranscribe`, quoted at 1 credit per minute. App uploads the audio for this job one recording part at a time with `PUT /v1/jobs/:id/audio/:n` (a Worker route that streams each part to R2 `tmp/audio/{job}/{n}`; the R2 binding cannot make presigned URLs, so no R2 API token is needed), then `POST /v1/jobs/:id/audio/done`. Workflow runs Whisper large v3 turbo on each part, deletes the audio, stores the text sealed to the device, settles at 1 credit per started minute of audio, never above the quote. The app compares with the on-device transcript and marks changed words. This is the only flow where audio leaves the phone; it is held unlocked only for the length of the job. The sheet that turns it on must say so.
 4. **Sync and sharing.** Device A locks the change with the group key, opens the socket `/v1/groups/:id/sync`, appends the locked change. The room gives it the next sequence number and broadcasts to connected devices; offline ones get a push. Device B fetches changes after its last number. Locked media is uploaded to R2 with a signed URL, paid plans only. The room orders changes but cannot read them. Removing a member bumps the key version; only remaining devices get the new wrapped key.
 5. **Purchases and credits.** StoreKit 2 purchase on the device; app `POST /v1/purchases/apple` with the signed transaction. API verifies Apple's signature, wallet grants credits once per transaction id. Apple server notices (renewal, refund, revoke) arrive at `POST /webhooks/apple`; the wallet adds the monthly allowance or claws back. A family member who gets Own it through Family Sharing gets access only; the 2,000 credits go to the buyer, once. The app sets the purchase's `appAccountToken` to the user id, and the app's request and Apple's notice for the same transaction share one wallet command id, so either may arrive first. Plus yearly renews once a year; an hourly cron resets its monthly credits each month.
 6. **Releasing an update.** CI builds feature bundles and uploads to Zephyr, which stores an immutable version in our Cloudflare account. CI moves the internal tag, checks, then moves the tag for the native version. At launch the app asks what its tag points to, verifies SHA-256, caches, uses it on the next cold start. Roll back by moving the tag.
@@ -89,7 +89,7 @@ One versioned REST surface on the API Worker plus one socket per group. Every re
 | Sync | `GET /v1/groups/:id/sync` (socket), `GET /v1/groups/:id/changes?after=`, `POST /v1/groups/:id/changes`, `POST /v1/blobs` (returns a signed upload URL), `GET /v1/blobs/:id` | Group room, R2 |
 | Shared links | `POST /v1/links`, `DELETE /v1/links/:id`, `GET /l/:id` (viewer page), `GET /v1/links/:id/data` | D1, R2, static assets |
 | Instant tasks | `POST /v1/tasks/quote`, `POST /v1/tasks/explain` (stream), `POST /v1/tasks/more-detail` (stream), `POST /v1/tasks/double-check`, `POST /v1/tasks/read-link` | Wallet, router, Workers AI through AI Gateway, Browser Run |
-| Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id` | Workflows, wallet, R2 |
+| Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id`, `PUT /v1/jobs/:id/audio/:n`, `POST /v1/jobs/:id/audio/done` | Workflows, wallet, R2 |
 | Wallet | `GET /v1/wallet` (balance, plan, entitlements), `GET /v1/wallet/ledger` | Wallet |
 | Privacy | `PUT /v1/settings/zero-retention` (Plus only) | D1 |
 | Purchases | `POST /v1/purchases/apple`, `POST /webhooks/apple`, `POST /webhooks/clerk` | Wallet, D1, Queues |
@@ -125,10 +125,14 @@ Instant task and account rules decided on 19 Nov 2026 (cards in `docs/cards/wave
 - Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows (entitlements, devices with their key envelopes and pairings, recovery, memberships, jobs, activity, push tokens, stored replies). The wallet is kept as the money record and holds no personal data; its credits are forfeited. Groups the user created, their room data and R2 objects are not cleaned up yet (open question in `docs/build-plan.md`).
 - Every cloud task, instant or job, sends one usage event (`UsageEvent` in `apps/api/src/usage.ts`: task, outcome, credits, tier, model, retention, router, bytes sent, token counts; id = the hold id) to the usage queue. Its consumer writes the `activity` row (route = tier) and an Analytics Engine data point with no user id.
 
-Job rules decided on 19 Nov 2026 (cards in `docs/cards/wave-3-jobs.md`):
+Job rules decided on 19 Nov 2026 (cards in `docs/cards/wave-3-jobs.md` for PR 20 and 21, `docs/cards/wave-3-workflows.md` for PR 22 to 25):
 
-- A job's text is locked in R2 `tmp/input/{job}` with a one-off key that only the Workflow's params hold, so Workflows never store it readable; the object is deleted when the job ends.
-- Cancelling a queued or running job (`DELETE /v1/jobs/:id`) releases its hold: nothing is charged. A result that cannot be sealed (its device was removed) fails the job, with nothing charged. `GET /v1/jobs/:id/result` is signed and answers only the device the result is sealed to.
+- The job id is made from the user id and the Idempotency-Key, so a request that is run again finds its own job and never holds twice.
+- A job's text is encrypted (AES-256-GCM, a fresh key per job) into R2 `tmp/input/{job}`; the key is only in the Workflow's params. Params and step results hold ids, keys, credits and sizes, never note text. The Workflow seals the result in the same step that makes it; only that step sees the text. The input and any uploaded audio are deleted when the job ends or is cancelled, and by the hourly cleanup after 24 hours.
+- A job settles at its quote, except the second transcript, which settles per started minute of audio, never above the quote. Any failure (model, sealing to a removed device, no upload, time limit) releases the hold: nothing is charged. Cancelling a queued or running job (`DELETE /v1/jobs/:id`) releases its hold: nothing is charged. A result whose hold is gone is deleted and the job fails. A job cancelled after it settled stays charged; its result is deleted.
+- `GET /v1/jobs/:id/result` is signed and answers only the device the result is sealed to. Only a job that succeeded sends the `job_ready` push, to that device.
+- One usage event per job: `ok` or `model_failed` from the Workflow, `cancelled` (0 credits) from `DELETE`.
+- Web search uses the Cloudflare Web Search API through AI Gateway with provider Ceramic.ai (zero data retention); pages are read with Browser Run's markdown quick action. Neither needs a Worker secret.
 
 ## 5. Data
 
@@ -215,8 +219,8 @@ groups/{group}/snap/{seq}    locked snapshot
 groups/{group}/media/{blob}  locked audio, photo
 results/{job}                sealed to one device, deleted after 7 days
 links/{link}/data            locked for the viewer
-tmp/audio/{job}              second transcript only, deleted when the job ends
-tmp/input/{job}              a job's text, locked; the key is only in the Workflow's params; deleted when the job ends
+tmp/audio/{job}/{n}          second transcript only, one object per recording part, deleted when the job ends
+tmp/input/{job}              the text sent with a job, encrypted (key only in the Workflow's params), deleted when the job ends
 packs/voices/{version}       on-device voice model
 ```
 

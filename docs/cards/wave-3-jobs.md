@@ -6,17 +6,19 @@ These cards follow `AGENTS.md`, the wave 2 rules (top of "Wave 2" in `docs/build
 |---|---|---|---|
 | PR 20 | `pr/20-jobs` | S1A, S4, PR 31, PR 33 (all merged) | Part A, commit and push; then Part B |
 | PR 21 | `pr/21-job-events` | PR 20 | one |
-| S1F | `pr/s1f-device-pushes` | S1D and PR 20 (PR 20 Part A adds `sendPush`) | one |
+| S1F | `pr/s1f-device-pushes` | S1D and PR 20 Part A (which adds `sendPush`) | one |
 
-Where they go in "Build order" (`docs/build-plan.md`): PR 20 in batch 6 now; S1F in batch 6 once S1D is merged; PR 21 in batch 7. Migration number: PR 20 adds `0006_jobs.sql`, the next free number on `main` when this was written. If another card has merged a `0006` first, rename to the next free number and change nothing else.
+Where they go: "Build order" in `docs/build-plan.md` (batches 6 to 8). Migration number: PR 20 adds `0006_jobs.sql`; the "Shared files" table in `docs/build-plan.md` fixes every number from 0006 on (the groups cards take 0007 to 0009).
 
-Every code block marked "exactly" was built and run against `main` at `57d1577` (typecheck, every test, `npm run bundle -w @waypoint/api`). Copy those blocks as they are. Code not marked "exactly" may differ in style, not in behaviour.
+**Ownership between this file and `docs/cards/wave-3-workflows.md`** (reconciled 19 Nov 2026). PR 20 owns the jobs core: the contracts, the migration, the locked job input (`jobs/input.ts`), the Workflow params and registry (`jobs/start.ts`: `JobRunInput`, `JobWorkflow`, `JOB_WORKFLOWS`, `jobWorkflow`, `JOB_RETENTION`, `WHISPER_MODEL`, `jobTimeLimitMs`), the job row, `JobDeps`, `deleteJobInputs` and `cancelJob` (`jobs/job.ts`), `sendPush`, the `cancelled` usage outcome, the `tmp/input/` cleanup, the four routes and the shared test helper `test/helpers/jobs.ts`. PR 22A owns everything a Workflow runs: `runJob` with its steps, `finishJob` (settle or release), `notifyJob` (push and usage event) and `callModel` (`jobs/run.ts`, `jobs/model.ts`), and appends `fakeSteps` and `makeJobFixture` to the helper. Nothing is defined in both.
+
+Every code block marked "exactly" was built and run against `main` at `57d1577` together with every block of `docs/cards/wave-3-workflows.md` and the groups migrations renumbered 0007 to 0009: `npm run typecheck`, every workspace's tests and `npm run bundle -w @waypoint/api` passed. Copy those blocks as they are. Code not marked "exactly" may differ in style, not in behaviour.
 
 ## What was checked during planning
 
-- **Workflows types** (`@cloudflare/workers-types` 5.20261118.1, already in `apps/api`): `WorkflowStep` (from `cloudflare:workers`) is assignable to the small `JobStep` type below, `Workflow<JobParams>` to `JobWorkflow`, `R2Bucket` to `JobBucket`, `Queue<PushMessage>` to `PushQueue` (compile-time checks in the tests). `create()` takes `{ id, params, retention: { successRetention, errorRetention } }`; the instance has `terminate()`, `status()` and `delete()`.
-- **A Workflow ran for real.** A throwaway Workflow class using `runJob` below, with a `workflows` block in `wrangler.jsonc`, ran under `wrangler dev` (wrangler 4.164.0) against local D1, R2 and the Wallet Durable Object: the job went queued, running, succeeded; the result was sealed in R2 (97 bytes for an 18-byte text) and opened with the device key; the locked input was deleted; the hold was settled. The step results Workflows stored were the job row (ids and numbers), `{ ok, actual, tokens_in, tokens_out }` and `"succeeded"`: no text. `npm run bundle` passes with a Workflow class exported.
-- **A Workflow class exported from `src/index.ts` breaks `test/scheduled.test.ts`**, which mocks `cloudflare:workers` with only `DurableObject`. The first workflow card adds `WorkflowEntrypoint: class {}` to that mock (step 6 of "How PR 22 to 25 plug in").
+- **Workflows types** (`@cloudflare/workers-types` 5.20261118.1, already in `apps/api`): `Workflow<JobRunInput>` is assignable to `JobWorkflow`, `R2Bucket` to `JobBucket` (and to the bucket types of PR 22 to 24), `Queue<PushMessage>` to `PushQueue` (compile-time checks in the tests). `create()` takes `{ id, params, retention: { successRetention, errorRetention } }`; the instance has `terminate()`, `sendEvent()`, `status()` and `delete()`.
+- **A Workflow ran for real.** A throwaway Workflow class with a `workflows` block in `wrangler.jsonc` ran under `wrangler dev` (wrangler 4.164.0) against local D1, R2 and the Wallet Durable Object: the job went queued, running, succeeded; the result was sealed in R2 and opened with the device key; the locked input was deleted; the hold was settled. The step results Workflows stored held ids and numbers only. `npm run bundle` passes with the Workflow classes exported.
+- **A Workflow class exported from `src/index.ts` breaks `test/scheduled.test.ts`**, which mocks `cloudflare:workers` with only `DurableObject`. PR 22B (the first Workflow card) adds `WorkflowEntrypoint: class {}` to that mock.
 - **Server-sent events in Hono** (`streamSSE` from `hono/streaming`, as in PR 14): `stream.write(": keep-alive\n\n")` writes a comment line; `streamSSE` sets `Content-Type: text/event-stream` and `Cache-Control: no-cache` itself; the stream closes when the callback returns.
 - **S1F:** its three edits were applied to the merged S1B and S1C files and to S1D's `remove.ts` built from its card (`docs/cards/security.md`); the existing device and pairing tests still passed unchanged, and the register, approve and waiting-device removal tests below passed.
 - **R2 get for the result:** `R2ObjectBody` gives `body` (a stream) and `size`; the route streams `body` straight back.
@@ -24,55 +26,25 @@ Every code block marked "exactly" was built and run against `main` at `57d1577` 
 
 ## Decisions these cards make
 
-Recorded in `docs/architecture.md` sections 4 and 5 by this planning pull request.
+Recorded in `docs/architecture.md` sections 4 and 5.
 
 1. **The job id comes from the request.** `job_` + base64url of the first 16 bytes of SHA-256(`context("job-id", user id, Idempotency-Key)`): 26 characters, a valid Workflow instance id and push `ref`. A request whose stored reply was lost (the PR 11 row died while pending) finds its own job on the next try instead of holding twice.
-2. **Job text is never stored readable, and never in Workflows.** `POST /v1/jobs` locks the text (and research question) with a new random 32-byte key, `lockContent(key, 0, context("job-input", job id), …)` from `@waypoint/crypto`, and stores it at R2 `tmp/input/{job}`. Only the key goes into the Workflow's `params`. The generate step reads it back, writes the result and seals it in the same step; the object is deleted when the job ends (or is cancelled), and the hourly cleanup deletes any left after 24 hours. Neither store alone can read the text; after the job, nothing can. Instances are created with `retention` 1 day.
-3. **Route before money.** Each job type has a fixed tier (`routes.fixed`), so the route is picked before anything is held. A zero-retention user with no zero-retention route for the type gets 403 `forbidden` "no zero-retention route for this task" with nothing held and no model called. `retranscribe` always uses Whisper (`@cf/openai/whisper-large-v3-turbo`), which is not confirmed zero-retention, so a zero-retention user gets 403 for it too (open question 2 below).
-4. **Money.** Hold the quoted price (`quoteCredits`) with command id `job:<user id>:<Idempotency-Key>`, `expires_at` = deadline + `HOLD_MARGIN_MS`, deadline = now + `JOB_TIME_LIMIT_MS[type]`. When the result is sealed, settle at min(actual, quoted) (`job_settle:…`); on any failure release (`job_release:…`). A hold can be settled or released, never both, so the wallet decides a race between a cancel and a finishing job. **Cancelling** a queued or running job releases its hold: nothing is charged. Deleting a finished job keeps its charge. A job whose device was removed mid-job cannot be sealed, so it fails and nothing is charged (answers open question 13 in `docs/build-plan.md` for now).
-5. **States.** `queued` (row written, Workflow created) → `running` (the Workflow's first step) → `succeeded` | `failed` | `cancelled`. A queued or running job past its deadline + `HOLD_MARGIN_MS` is shown as `failed`, whatever the row says (its hold has expired). `succeeded` sets `expires_at` = finish + 7 days, when the hourly cleanup deletes the result.
-6. **Usage events.** One per job, `id` = the hold id, `router: "skipped"`, `tier`/`model` from the job's route, `bytes_sent` from `jobs.bytes_sent`. `UsageEvent.outcome` gains `"cancelled"` (credits 0); the consumer's schema follows. A late duplicate is harmless: the consumer keeps the first event per id.
-7. **The result goes to one device.** `GET /v1/jobs/:id/result` is signed (S1A) and answers only when the signing device is `jobs.device_id`; anything else is 404, the same as no result. This is stricter than "only the job's user" in `docs/security.md` section 15 and changes nothing there: only that device can open the sealed bytes anyway.
-8. **Pushes.** A finished job sends `job_ready` to `jobs.device_id` (none if that is null). A failed or cancelled job sends no push (there is no push kind for it); the app learns from the events stream or `GET /v1/jobs/:id`. `sendPush` never sends a message the push consumer would drop (an id outside `PushMessageSchema`), and never fails the request.
+2. **Job text is never stored readable, and never in Workflows.** `POST /v1/jobs` encrypts what the person sent (`{ text, prompt }`) with a new random AES-256-GCM key (`putJobInput`, the job id as additional data) and stores it at R2 `tmp/input/{job}`. Only the key goes into the Workflow's params (`JobRunInput.input_key`); the params hold ids, the route, credits and sizes, never text. The one Workflow step that makes the result reads it back; the runner's `cleanup` step deletes it (and any audio parts) when the job ends, `DELETE` deletes it on cancel, and the hourly cleanup deletes any left after 24 hours. Instances are created with `retention` 1 day.
+3. **Route before money.** Each job type has a fixed tier (`routes.fixed`), so the route is picked before anything is held. A zero-retention user with no zero-retention route for the type gets 403 `forbidden` "no zero-retention route for this task" with nothing held and no model called. `retranscribe` always uses Whisper (`WHISPER_MODEL`), which is not confirmed zero-retention, so a zero-retention user gets 403 for it too (open question in `docs/build-plan.md`).
+4. **Money.** Hold the quoted price (`quoteCredits`) with command id `job:<user id>:<Idempotency-Key>`, `expires_at` = deadline + `HOLD_MARGIN_MS`, deadline = now + `jobTimeLimitMs({ type, depth, minutes })`. PR 22A's `finishJob` settles at min(made credits, quote) (`job_settle:…`) when the result is sealed and releases (`job_release:…`) on any failure. A hold can be settled or released, never both, so the wallet decides a race between a cancel and a finishing job. **Cancelling** a queued or running job releases its hold: nothing is charged. Cancelling or deleting a finished job keeps its charge and deletes its result. A job whose device was removed mid-job cannot be sealed, so it fails and nothing is charged (answers open question 13 in `docs/build-plan.md` for now). If starting the Workflow fails, `POST` releases the hold, deletes the input, marks the row `failed` and answers 500; no usage event (nothing ran).
+5. **States.** `queued` (row written, Workflow created; a second transcript stays queued while its audio is uploaded) → `running` (the Workflow's `start` step) → `succeeded` | `failed` | `cancelled`. A queued or running job past its deadline + `HOLD_MARGIN_MS` is shown as `failed`, whatever the row says (its hold has expired). Every end sets `finished_at`; `succeeded` sets `expires_at` = finish + 7 days, when the hourly cleanup deletes the result.
+6. **Usage events.** One per job, `id` = the hold id, `router: "skipped"`, `tier`/`model` from the job's route. The Workflow sends `ok` or `model_failed` (PR 22A's `notifyJob`); `DELETE` sends `cancelled` with credits 0 for a job it stopped. `UsageEvent.outcome` gains `"cancelled"`; the consumer's schema follows. A late duplicate (a cancelled job's Workflow finishing anyway) is harmless: the consumer keeps the first event per id.
+7. **The result goes to one device.** `GET /v1/jobs/:id/result` is signed (S1A) and answers only when the signing device is `jobs.device_id`; anything else is 404, the same as no result. `docs/security.md` section 15 says so.
+8. **Pushes.** A finished job sends `job_ready` to `jobs.device_id` through `sendPush` (none if that is null). A failed or cancelled job sends no push (open question: a `job_failed` kind); the app learns from the events stream or `GET /v1/jobs/:id`. `sendPush` never sends a message the push consumer would drop (an id outside `PushMessageSchema`), and never fails the request or step.
 9. **The events stream** polls the jobs row every 2 s, sends a `state` event (the `JobView`) only when the state, `spent` or `result_ready` changes, writes a keep-alive comment after 20 s without one, and ends after a finished state or 10 minutes. The app opens a new stream if the job is still going.
-10. **A job type whose Workflow card is not merged yet** gets 400 `bad_request` "job type not available" before anything is held. After PR 20 alone, every type answers that.
+10. **A job type whose Workflow card is not merged yet** gets 400 `bad_request` "job type not available" before anything is held. After PR 20 alone, every type answers that; PR 22B to 25 each add their line to `JOB_WORKFLOWS`.
+11. **Input caps per type** (`JOB_TEXT_MAX_CHARS` in the contracts) keep a job's model cost under its price; the sizing is in `docs/cards/wave-3-workflows.md`, "Input caps". Research sends `question` (at most 500 characters) and optional notes as `text`; the written types send `text` and an optional `prompt` (an instruction, at most 500); `retranscribe` sends only `minutes`. What is stored is always `{ text, prompt }` (`text` `""` for research without notes).
 
 ## How PR 22 to 25 plug in
 
-PR 20 starts and stops Workflows only through `JobWorkflow` and the registry `jobWorkflow` in `src/jobs/workflows.ts`, and runs a job only through `runJob` in `src/jobs/run.ts`. A workflow card adds exactly these, and touches no other PR 20 file:
+PR 20 starts and stops Workflows only through `JobWorkflow` and `jobWorkflow` in `src/jobs/start.ts`. A Workflow card (full wiring in `docs/cards/wave-3-workflows.md`) adds: its plain module and a thin `WorkflowEntrypoint<Env, JobRunInput>` class that calls PR 22A's `runJob`; one `Env` line (`<NAME>_WORKFLOW: Workflow<JobRunInput>;`, PR 22B adds the `JobRunInput` import); one entry in the `workflows` array of `wrangler.jsonc` (PR 22B creates the block); one `export { … }` line in `src/index.ts`; one line per job type in `JOB_WORKFLOWS`. PR 22B also changes the `test/scheduled.test.ts` mock. No Workflow card changes any other PR 20 file.
 
-1. **The generator**, in a plain module tested in Node, for example `src/jobs/overview.ts`:
-   ```ts
-   export async function writeOverview(env: Env, job: JobRow, input: JobInput | null): Promise<Generated>
-   ```
-   It calls the models with `job.model` (the route PR 20 picked; the generator may read `env.CONFIG` for extra routes, as research's light reads) through AI Gateway with `gatewayOptions`, stops calling models once `Date.now() > job.deadline_at`, and returns `{ plaintext, actual, tokens_in, tokens_out }`: the UTF-8 bytes of the result, the credits to settle (the quote, or less, for example the real minutes of a second transcript), and token counts summed over every model call. It never logs, stores or returns text any other way: `runJob` seals `plaintext` inside the same step and zeroes it.
-2. **The Workflow class**, thin, in its own file that tests never import, for example `src/jobs/overview-workflow.ts`:
-   ```ts
-   import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-   import type { Env } from "../env.ts";
-   import { jobDeps } from "./job.ts";
-   import { writeOverview } from "./overview.ts";
-   import { runJob } from "./run.ts";
-   import type { JobParams } from "./workflows.ts";
-
-   export class OverviewWorkflow extends WorkflowEntrypoint<Env, JobParams> {
-     override async run(event: Readonly<WorkflowEvent<JobParams>>, step: WorkflowStep): Promise<void> {
-       await runJob(jobDeps(this.env, Date.now), event.payload, step, (job, input) => writeOverview(this.env, job, input));
-     }
-   }
-   ```
-3. **`src/env.ts`:** one line, `OVERVIEW_WORKFLOW: Workflow<JobParams>;` with `import type { JobParams } from "./jobs/workflows.ts";` (the first card adds the import).
-4. **`apps/api/wrangler.jsonc`:** the first workflow card adds one block, later ones add one entry each:
-   ```jsonc
-   "workflows": [{ "name": "waypoint-overview", "binding": "OVERVIEW_WORKFLOW", "class_name": "OverviewWorkflow" }],
-   ```
-5. **`src/index.ts`:** `export { OverviewWorkflow } from "./jobs/overview-workflow.ts";` under the Durable Object exports.
-6. **`test/scheduled.test.ts`:** the first workflow card changes its mock to `vi.mock("cloudflare:workers", () => ({ DurableObject: class {}, WorkflowEntrypoint: class {} }));`.
-7. **`src/jobs/workflows.ts`:** one `case` line in `jobWorkflow`, `case "overview_script": return env.OVERVIEW_WORKFLOW;`.
-8. A card may change its own type's value in `JOB_TIME_LIMIT_MS` (`src/jobs/job.ts`), one line, if its card says why.
-9. **Tests** call the generator with stand-ins (`makeTaskEnv`-style AI stubs) and run it through `runJob` with `fakeStep()` and `makeJobsWorld()` from `test/helpers/jobs.ts`; they check that no step result (`fakeStep().results`) contains the source text or the result text.
-
-`retranscribe` (PR 23) also: adds an `upload` object (its signed URL to `tmp/audio/{job}`) to the `POST /v1/jobs` reply for that type and extends `JobResponseSchema` to allow it; waits for the upload inside its Workflow; sets `jobs.bytes_sent` to the audio size before `finishJob` runs. `finishJob` and `cancelJob` already delete `tmp/audio/{job}`. A generator that needs more than one durable step (research, PR 24) may call `startJob` and `finishJob` itself instead of `runJob`, as long as no step returns text.
+`retranscribe` (PR 23) adds its own upload routes (`PUT /v1/jobs/:id/audio/:n`, `POST /v1/jobs/:id/audio/done`) that write `tmp/audio/{job}/{n}`; `deleteJobInputs` and `cancelJob` already delete everything under `tmp/audio/{job}/`.
 
 ---
 
@@ -82,14 +54,14 @@ Branch `pr/20-jobs`. Builds on S1A, S4, PR 31 and PR 33 (all merged). No new dep
 
 What the four endpoints do, in short:
 
-- `POST /v1/jobs` (signed, idempotent): check the body; load config; find the type's Workflow (400 if none yet); pick the route (403 for zero retention without one); price it; if this request already made its job, reply with it; hold the price; lock the text into R2; write the jobs row (`queued`, with `device_id` from the signature); create the Workflow instance; reply 201 `{ job }`.
+- `POST /v1/jobs` (signed, idempotent): check the body; load config; find the type's Workflow (400 if none yet); pick the route (403 for zero retention without one); price it; if this request already made its job, reply with it; hold the price; encrypt the text into R2 `tmp/input/{job}`; write the jobs row (`queued`, with `device_id` from the signature); create the Workflow instance with its `JobRunInput`; reply 201 `{ job }`. If any of the last three fails: release, delete the input, mark the row `failed`, 500.
 - `GET /v1/jobs/:id` (session): 200 `{ job }` for the user's own job, else 404.
 - `GET /v1/jobs/:id/result` (signed, never stored): the sealed bytes from R2 `results/{job}` as `application/octet-stream`, only to the job's device and only when the job succeeded.
 - `DELETE /v1/jobs/:id` (signed, idempotent): stop and release a queued or running job (`cancelled`, nothing charged), keep a finished job's charge, delete the result, the locked input and any uploaded audio; reply 200 `{ job }`.
 
 ### Part A
 
-Files: `packages/contracts/src/jobs.ts`, `packages/contracts/src/index.ts` (one line), `packages/contracts/test/jobs.test.ts`, `db/d1/migrations/0006_jobs.sql`, `db/d1/test/schema.test.mjs`, `apps/api/src/usage.ts`, `apps/api/src/usage-consumer.ts`, `apps/api/src/push/messages.ts`, `apps/api/src/cleanup.ts`, `apps/api/src/jobs/job.ts`, `apps/api/src/jobs/workflows.ts`, `apps/api/src/jobs/run.ts`, `apps/api/test/helpers/jobs.ts`, `apps/api/test/jobs-core.test.ts`, `apps/api/test/usage.test.ts` (one test), `apps/api/test/push.test.ts` (new tests), `apps/api/test/cleanup.test.ts` (two lines and one test). No other files.
+Files: `packages/contracts/src/jobs.ts`, `packages/contracts/src/index.ts` (one line), `packages/contracts/test/jobs.test.ts`, `db/d1/migrations/0006_jobs.sql`, `db/d1/test/schema.test.mjs`, `apps/api/src/usage.ts`, `apps/api/src/usage-consumer.ts`, `apps/api/src/push/messages.ts`, `apps/api/src/cleanup.ts`, `apps/api/src/jobs/start.ts`, `apps/api/src/jobs/input.ts`, `apps/api/src/jobs/job.ts`, `apps/api/test/helpers/jobs.ts`, `apps/api/test/jobs-core.test.ts`, `apps/api/test/usage.test.ts` (one test), `apps/api/test/push.test.ts` (new tests), `apps/api/test/cleanup.test.ts` (two lines and one test). No other files.
 
 `packages/contracts/src/jobs.ts`, exactly:
 
@@ -97,11 +69,21 @@ Files: `packages/contracts/src/jobs.ts`, `packages/contracts/src/index.ts` (one 
 import { z } from "zod";
 import { JOB_TYPES, RESEARCH_DEPTHS } from "./tasks.ts";
 
-// Limits on the text a job may send. Three hours of speech is about 160,000 characters.
-export const JOB_TEXT_MAX_CHARS = 200_000;
-export const JOB_QUESTION_MAX_CHARS = 1_000;
+// The most text each job type may send, in characters. Sized so a job's model cost stays under its price at about
+// 4 characters per token (docs/cards/wave-3-workflows.md, "Input caps"). Flow 8 revisits them with measured costs.
+export const JOB_TEXT_MAX_CHARS = {
+  overview_script: 40_000,
+  video_slides: 48_000,
+  diagram: 16_000,
+  mini_app: 24_000,
+  practice: 28_000,
+  research: 8_000,
+} as const;
+// The student's instruction for a written job, or the research question.
+export const JOB_PROMPT_MAX_CHARS = 500;
 
-const text = z.string().trim().min(1).max(JOB_TEXT_MAX_CHARS);
+const text = (max: number) => z.string().trim().min(1).max(max);
+const prompt = z.string().trim().min(1).max(JOB_PROMPT_MAX_CHARS);
 
 // POST /v1/jobs. The text is the part of a note the person chose to send; the server never stores it readable
 // (it is locked in R2 tmp/input/{job} until the job ends). retranscribe sends no text: its audio is uploaded
@@ -110,14 +92,24 @@ export const CreateJobRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("research"),
     depth: z.enum(RESEARCH_DEPTHS),
-    question: z.string().trim().min(1).max(JOB_QUESTION_MAX_CHARS),
-    text: text.optional(),
+    question: prompt,
+    text: text(JOB_TEXT_MAX_CHARS.research).optional(),
   }),
-  z.strictObject({ type: z.literal("overview_script"), text, fallback_voice: z.boolean().optional() }),
-  z.strictObject({ type: z.literal("video_slides"), text, fallback_voice: z.boolean().optional() }),
-  z.strictObject({ type: z.literal("diagram"), text }),
-  z.strictObject({ type: z.literal("mini_app"), text }),
-  z.strictObject({ type: z.literal("practice"), text }),
+  z.strictObject({
+    type: z.literal("overview_script"),
+    text: text(JOB_TEXT_MAX_CHARS.overview_script),
+    prompt: prompt.optional(),
+    fallback_voice: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("video_slides"),
+    text: text(JOB_TEXT_MAX_CHARS.video_slides),
+    prompt: prompt.optional(),
+    fallback_voice: z.boolean().optional(),
+  }),
+  z.strictObject({ type: z.literal("diagram"), text: text(JOB_TEXT_MAX_CHARS.diagram), prompt: prompt.optional() }),
+  z.strictObject({ type: z.literal("mini_app"), text: text(JOB_TEXT_MAX_CHARS.mini_app), prompt: prompt.optional() }),
+  z.strictObject({ type: z.literal("practice"), text: text(JOB_TEXT_MAX_CHARS.practice), prompt: prompt.optional() }),
   z.strictObject({ type: z.literal("retranscribe"), minutes: z.number().gt(0).max(600) }),
 ]);
 
@@ -162,7 +154,7 @@ ALTER TABLE jobs ADD COLUMN command_key TEXT;
 -- The model that writes the result (jobs.route is its tier) and the retention of that route.
 ALTER TABLE jobs ADD COLUMN model TEXT;
 ALTER TABLE jobs ADD COLUMN retention TEXT CHECK (retention IN ('standard', 'zero'));
--- UTF-8 bytes of the text sent (for retranscribe, the audio bytes, set by its workflow).
+-- UTF-8 bytes of the text sent (0 for retranscribe; its usage event carries the audio bytes).
 ALTER TABLE jobs ADD COLUMN bytes_sent INTEGER NOT NULL DEFAULT 0;
 -- Work stops at this time; the wallet hold expires HOLD_MARGIN_MS later.
 ALTER TABLE jobs ADD COLUMN deadline_at INTEGER;
@@ -237,58 +229,182 @@ export async function sendPush(queue: PushQueue, message: PushMessage): Promise<
  }
 ```
 
-`apps/api/src/jobs/job.ts`, exactly. The jobs core: limits, ids, the row and its view, the locked input, and the two functions that end a job (`finishJob` from a Workflow, `cancelJob` from `DELETE`).
+`apps/api/src/jobs/start.ts`, exactly. What a job's Workflow is started with, the registry PR 22 to 25 add their lines to, and the time limits:
 
 ```ts
-import type { JobState, JobType, JobView } from "@waypoint/contracts";
-import { context, fromBase64Url, importContentKey, lockContent, sha256, toBase64Url, unlockContent, utf8 } from "@waypoint/crypto";
+import type { JobType, ResearchDepth } from "@waypoint/contracts";
 import type { Tier } from "@waypoint/router";
-import type { WalletCommands } from "../apple/purchases.ts";
-import { RESULTS_KEEP_MS } from "../cleanup.ts";
 import type { Env } from "../env.ts";
-import { sendPush, type PushQueue } from "../push/messages.ts";
-import type { Db } from "../storage.ts";
-import { HOLD_MARGIN_MS } from "../tasks/instant.ts";
-import { sendUsage, type UsageQueue } from "../usage.ts";
+
+// The second transcript's model. Not in the route table: retranscribe is never routed.
+export const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
+
+// Everything a job's Workflow gets as params. Workflows store params, so this holds no note text: the text the
+// person sent is in R2 tmp/input/{job}, encrypted with input_key (see input.ts).
+export type JobRunInput = {
+  v: 1;
+  job_id: string;
+  type: JobType;
+  user_id: string;
+  billing_account_id: string;
+  // The quote, held.
+  credits: number;
+  // Wallet command ids: job:<user id>:<Idempotency-Key>, job_settle:..., job_release:...
+  hold_id: string;
+  settle_id: string;
+  release_id: string;
+  // created_at + jobTimeLimitMs(...). The hold expires at deadline + HOLD_MARGIN_MS.
+  deadline: number;
+  // The route POST /v1/jobs picked (retranscribe: "light", WHISPER_MODEL, "standard").
+  tier: Tier;
+  model: string;
+  retention: "standard" | "zero";
+  // The user's zero-retention switch when the job was made.
+  zero_retention: boolean;
+  depth: ResearchDepth | null; // research only
+  minutes: number | null; // retranscribe only: the quoted minutes
+  input_key: string | null; // base64url AES-256 key for tmp/input/{job}; null for retranscribe
+  bytes_sent: number; // UTF-8 bytes of text + prompt; 0 for retranscribe
+};
+
+// Workflows keep an instance's params and step results until its retention ends. A day is enough to look into a
+// failed job; the params hold only a key whose locked input is deleted when the job ends.
+export const JOB_RETENTION = { successRetention: "1 day", errorRetention: "1 day" } as const;
+
+// The parts of a Workflow binding the jobs code uses. Workflow<JobRunInput> satisfies this type.
+export type JobInstance = { terminate(): Promise<void>; sendEvent(event: { type: string; payload: unknown }): Promise<void> };
+export type JobWorkflow = {
+  create(options: { id: string; params: JobRunInput; retention: typeof JOB_RETENTION }): Promise<unknown>;
+  get(id: string): Promise<JobInstance>;
+};
+
+// Which Workflow runs each job type. PR 22 to 25 add one line each and change nothing else in this file.
+export const JOB_WORKFLOWS: Partial<Record<JobType, (env: Env) => JobWorkflow>> = {};
+
+// The Workflow for a job type, or null while its card is not merged (POST /v1/jobs then answers 400 "job type not
+// available" before any hold). The routes take this as a dependency, so tests pass their own.
+export type JobWorkflows = (env: Env, type: JobType) => JobWorkflow | null;
+export const jobWorkflow: JobWorkflows = (env, type) => JOB_WORKFLOWS[type]?.(env) ?? null;
 
 const MINUTE = 60_000;
 
-// How long each job may run. The hold lives this long plus HOLD_MARGIN_MS (decision D3); work stops at the deadline.
-export const JOB_TIME_LIMIT_MS: Record<JobType, number> = {
-  research: 20 * MINUTE,
-  overview_script: 10 * MINUTE,
-  video_slides: 10 * MINUTE,
-  diagram: 5 * MINUTE,
-  mini_app: 10 * MINUTE,
-  practice: 5 * MINUTE,
-  retranscribe: 60 * MINUTE,
+// How long a job may take. Its hold lives this long plus HOLD_MARGIN_MS (from tasks/instant.ts).
+export function jobTimeLimitMs(input: { type: JobType; depth: ResearchDepth | null; minutes: number | null }): number {
+  switch (input.type) {
+    case "research":
+      return input.depth === "deep" ? 60 * MINUTE : input.depth === "standard" ? 30 * MINUTE : 20 * MINUTE;
+    case "retranscribe":
+      // Up to an hour for the upload, then about 10 s per audio minute for Whisper.
+      return 90 * MINUTE + Math.ceil(input.minutes ?? 0) * 10_000;
+    case "diagram":
+    case "practice":
+      return 20 * MINUTE;
+    default:
+      return 30 * MINUTE;
+  }
+}
+```
+
+`apps/api/src/jobs/input.ts`, exactly. The locked job input; only `putJobInput` (the route), `readJobInput` (the step that makes the result) and `deleteJobInput` touch `tmp/input/`:
+
+```ts
+import { fromBase64Url, toBase64Url } from "@waypoint/crypto";
+
+// What the person sent with a job. Held in R2 only while the job runs, encrypted with a key that exists only in the
+// Workflow's params; never put in params, D1, KV, a queue or a log.
+export type JobInput = { text: string; prompt: string | null };
+
+export const JOB_INPUT_PREFIX = "tmp/input/";
+
+// The parts of R2 this module uses. R2Bucket satisfies this type.
+export type InputBucket = {
+  put(key: string, value: Uint8Array): Promise<unknown>;
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+  delete(key: string): Promise<void>;
 };
 
-// The second transcript is not routed by tier (architecture section 2). Its usage events say tier "light".
-export const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
+async function importKey(raw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
 
-// The parts of R2 the jobs code uses. R2Bucket satisfies this type, and so does sealJobResult's ResultBucket.
+// Encrypts the input with a fresh AES-256-GCM key (12-byte IV first, the job id as additional data), stores it at
+// tmp/input/{job} and returns the key as base64url for the Workflow's params.
+export async function putJobInput(bucket: InputBucket, jobId: string, input: JobInput): Promise<string> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plain = new TextEncoder().encode(JSON.stringify(input));
+  const sealed = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(jobId) }, await importKey(raw), plain),
+  );
+  const stored = new Uint8Array(iv.length + sealed.length);
+  stored.set(iv, 0);
+  stored.set(sealed, iv.length);
+  await bucket.put(`${JOB_INPUT_PREFIX}${jobId}`, stored);
+  return toBase64Url(raw);
+}
+
+// The job's input, or null if the object is gone or does not open with this key.
+export async function readJobInput(bucket: InputBucket, jobId: string, key: string): Promise<JobInput | null> {
+  const object = await bucket.get(`${JOB_INPUT_PREFIX}${jobId}`);
+  if (object === null) return null;
+  const stored = new Uint8Array(await object.arrayBuffer());
+  try {
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: stored.slice(0, 12), additionalData: new TextEncoder().encode(jobId) },
+      await importKey(fromBase64Url(key)),
+      stored.slice(12),
+    );
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(plain));
+    if (typeof parsed !== "object" || parsed === null || !("text" in parsed) || !("prompt" in parsed)) return null;
+    const { text, prompt } = parsed;
+    if (typeof text !== "string" || (prompt !== null && typeof prompt !== "string")) return null;
+    return { text, prompt };
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteJobInput(bucket: InputBucket, jobId: string): Promise<void> {
+  await bucket.delete(`${JOB_INPUT_PREFIX}${jobId}`);
+}
+```
+
+`apps/api/src/jobs/job.ts`, exactly. The jobs core: the row and its view, ids, `JobDeps` (used by `cancelJob` here and by PR 22A's runner), deleting what was sent, and `cancelJob` for `DELETE`:
+
+```ts
+import type { JobState, JobType, JobView } from "@waypoint/contracts";
+import { context, sha256, toBase64Url } from "@waypoint/crypto";
+import type { Tier } from "@waypoint/router";
+import type { WalletCommands } from "../apple/purchases.ts";
+import type { Env } from "../env.ts";
+import type { PushQueue } from "../push/messages.ts";
+import type { Db } from "../storage.ts";
+import { HOLD_MARGIN_MS } from "../tasks/instant.ts";
+import { sendUsage, type UsageQueue } from "../usage.ts";
+import { JOB_INPUT_PREFIX } from "./input.ts";
+
+// The parts of R2 the jobs code uses. R2Bucket satisfies this type.
 export type JobBucket = {
   get(key: string): Promise<{ body: ReadableStream; size: number; arrayBuffer(): Promise<ArrayBuffer> } | null>;
-  put(key: string, value: Uint8Array, options?: { customMetadata: Record<string, string> }): Promise<unknown>;
-  delete(keys: string[]): Promise<void>;
+  delete(keys: string | string[]): Promise<void>;
+  list(options: { prefix: string; limit: number }): Promise<{ objects: { key: string }[] }>;
 };
 
-// Everything that ends a job needs. Built from the Worker's env by jobDeps; tests build it by hand.
+// Everything that runs or ends a job needs: the routes (cancelJob) and every job Workflow (PR 22A's runJob).
 export type JobDeps = {
   db: Db;
   bucket: JobBucket;
-  wallet: (billingAccountId: string) => WalletCommands;
+  wallet: WalletCommands;
   usage: UsageQueue;
   push: PushQueue;
   now: () => number;
 };
 
-export function jobDeps(env: Env, now: () => number): JobDeps {
+export function jobDeps(env: Env, billingAccountId: string, now: () => number): JobDeps {
   return {
     db: env.DB,
     bucket: env.BUCKET,
-    wallet: (billingAccountId) => env.WALLET.get(env.WALLET.idFromName(billingAccountId)),
+    wallet: env.WALLET.get(env.WALLET.idFromName(billingAccountId)),
     usage: env.USAGE_QUEUE,
     push: env.PUSH_QUEUE,
     now,
@@ -341,8 +457,15 @@ export function jobWalletIds(userId: string, key: string): { hold: string; settl
 }
 
 export const resultObjectKey = (jobId: string): string => `results/${jobId}`;
-export const inputObjectKey = (jobId: string): string => `tmp/input/${jobId}`;
-export const audioObjectKey = (jobId: string): string => `tmp/audio/${jobId}`;
+// The second transcript's audio, one object per recording part: tmp/audio/{job}/{n} (PR 23).
+export const audioPrefix = (jobId: string): string => `tmp/audio/${jobId}/`;
+
+// Deletes what the person sent with a job: its locked input and any uploaded audio parts (at most 1,000, one
+// listing page; PR 23 allows 200). Every job Workflow calls it when the job ends, and so does cancelJob.
+export async function deleteJobInputs(bucket: JobBucket, jobId: string): Promise<void> {
+  const listed = await bucket.list({ prefix: audioPrefix(jobId), limit: 1000 });
+  await bucket.delete([`${JOB_INPUT_PREFIX}${jobId}`, ...listed.objects.map((object) => object.key)]);
+}
 
 // A queued or running job whose hold has expired has stopped, whatever its row says.
 export function isOverdue(job: Pick<JobRow, "state" | "deadline_at">, now: number): boolean {
@@ -365,123 +488,38 @@ export function jobView(job: JobRow, now: number): JobView {
   };
 }
 
-// What the person sent with the job. Only ever held in memory or locked.
-export type JobInput = { text: string | null; question: string | null };
-
-// Locks the input with a new random key and stores it at tmp/input/{job}. Returns the key (base64url), which goes
-// only into the Workflow's params. The R2 object alone and the params alone are unreadable; the object is deleted
-// when the job ends (and by the hourly cleanup after 24 hours).
-export async function lockJobInput(bucket: JobBucket, jobId: string, input: JobInput): Promise<string> {
-  const raw = crypto.getRandomValues(new Uint8Array(32));
-  const plaintext = utf8(JSON.stringify(input));
-  try {
-    const key = await importContentKey(raw);
-    const locked = await lockContent(key, 0, context("job-input", jobId), plaintext, crypto.getRandomValues(new Uint8Array(12)));
-    await bucket.put(inputObjectKey(jobId), locked);
-    return toBase64Url(raw);
-  } finally {
-    raw.fill(0);
-    plaintext.fill(0);
-  }
-}
-
-// Reads the locked input back. Call it only inside the Workflow step that writes and seals the result.
-export async function readJobInput(bucket: JobBucket, jobId: string, keyText: string): Promise<JobInput> {
-  const object = await bucket.get(inputObjectKey(jobId));
-  if (object === null) throw new Error("job input missing");
-  const key = await importContentKey(fromBase64Url(keyText));
-  const plaintext = await unlockContent(key, context("job-input", jobId), new Uint8Array(await object.arrayBuffer()));
-  const parsed: unknown = JSON.parse(new TextDecoder().decode(plaintext));
-  plaintext.fill(0);
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("text" in parsed) ||
-    !("question" in parsed) ||
-    (parsed.text !== null && typeof parsed.text !== "string") ||
-    (parsed.question !== null && typeof parsed.question !== "string")
-  ) {
-    throw new Error("job input unreadable");
-  }
-  return { text: parsed.text, question: parsed.question };
-}
-
-export type JobOutcome =
-  | { ok: true; actual: number; tokens_in: number | null; tokens_out: number | null }
-  | { ok: false; tokens_in: number | null; tokens_out: number | null };
-
-async function sendJobUsage(deps: JobDeps, job: JobRow, outcome: "ok" | "model_failed" | "cancelled", credits: number, tokens: { tokens_in: number | null; tokens_out: number | null }): Promise<void> {
-  await sendUsage(deps.usage, {
-    v: 1,
-    id: jobWalletIds(job.user_id, job.command_key).hold,
-    at: deps.now(),
-    user_id: job.user_id,
-    task: job.type,
-    outcome,
-    credits,
-    tier: job.route,
-    model: job.model,
-    retention: job.retention,
-    router: "skipped",
-    bytes_sent: job.bytes_sent,
-    tokens_in: tokens.tokens_in,
-    tokens_out: tokens.tokens_out,
-  });
-}
-
-// Ends a job: settles the hold at min(actual, quoted) when there is a result, else releases it; records the state;
-// sends the usage event, and for a result the job_ready push; deletes the locked input. The wallet decides the race
-// with a cancel: a hold can be settled or released, never both. Safe to run again (a Workflows step retry).
-// Wallet errors are thrown, so the step is retried.
-export async function finishJob(deps: JobDeps, jobId: string, outcome: JobOutcome): Promise<JobState> {
-  const job = await loadJob(deps.db, jobId);
-  if (job === null) {
-    await deps.bucket.delete([resultObjectKey(jobId), inputObjectKey(jobId), audioObjectKey(jobId)]);
-    return "failed";
-  }
-  const ids = jobWalletIds(job.user_id, job.command_key);
-  const wallet = deps.wallet(job.billing_account_id);
-  const now = deps.now();
-  if (outcome.ok) {
-    const settled = await wallet.apply({ type: "settle", id: ids.settle, hold_id: ids.hold, actual: Math.min(outcome.actual, job.quoted) });
-    if (settled.ok && "charged" in settled) {
-      await deps.db
-        .prepare("UPDATE jobs SET state = 'succeeded', spent = ?, finished_at = ?, expires_at = ? WHERE id = ? AND state IN ('queued', 'running')")
-        .bind(settled.charged, now, now + RESULTS_KEEP_MS, job.id)
-        .run();
-      await deps.bucket.delete([inputObjectKey(job.id), audioObjectKey(job.id)]);
-      await sendJobUsage(deps, job, "ok", settled.charged, outcome);
-      if (job.device_id !== null) await sendPush(deps.push, { user_id: job.user_id, kind: "job_ready", ref: job.id, device_id: job.device_id });
-      return "succeeded";
-    }
-    // The hold is gone (the job was cancelled, or the hold expired): nothing is charged and the result is not served.
-  } else {
-    await wallet.apply({ type: "release", id: ids.release, hold_id: ids.hold });
-  }
-  const { meta } = await deps.db
-    .prepare("UPDATE jobs SET state = 'failed', spent = 0, finished_at = ?, result_key = NULL WHERE id = ? AND state IN ('queued', 'running')")
-    .bind(now, job.id)
-    .run();
-  await deps.bucket.delete([resultObjectKey(job.id), inputObjectKey(job.id), audioObjectKey(job.id)]);
-  if (meta.changes === 1) await sendJobUsage(deps, job, "model_failed", 0, outcome);
-  return meta.changes === 1 ? "failed" : (await loadJob(deps.db, job.id))?.state ?? "failed";
-}
-
 // DELETE /v1/jobs/:id. A queued or running job is stopped (stop terminates its Workflow instance; errors ignored)
-// and its hold released: nothing is charged. A finished job keeps what it was charged. Either way the result, the
-// locked input and any uploaded audio are deleted.
+// and its hold released: nothing is charged, and one usage event says "cancelled". A finished job keeps what it was
+// charged. Either way the result, the locked input and any uploaded audio are deleted.
 export async function cancelJob(deps: JobDeps, job: JobRow, stop: () => Promise<void>): Promise<void> {
   const now = deps.now();
   if (job.state === "queued" || job.state === "running") {
     await stop().catch(() => undefined);
     const ids = jobWalletIds(job.user_id, job.command_key);
-    const released = await deps.wallet(job.billing_account_id).apply({ type: "release", id: ids.release, hold_id: ids.hold });
+    const released = await deps.wallet.apply({ type: "release", id: ids.release, hold_id: ids.hold });
     if (released.ok) {
       const { meta } = await deps.db
         .prepare("UPDATE jobs SET state = 'cancelled', spent = 0, finished_at = ? WHERE id = ? AND state IN ('queued', 'running')")
         .bind(now, job.id)
         .run();
-      if (meta.changes === 1) await sendJobUsage(deps, job, "cancelled", 0, { tokens_in: null, tokens_out: null });
+      if (meta.changes === 1) {
+        await sendUsage(deps.usage, {
+          v: 1,
+          id: ids.hold,
+          at: now,
+          user_id: job.user_id,
+          task: job.type,
+          outcome: "cancelled",
+          credits: 0,
+          tier: job.route,
+          model: job.model,
+          retention: job.retention,
+          router: "skipped",
+          bytes_sent: job.bytes_sent,
+          tokens_in: null,
+          tokens_out: null,
+        });
+      }
     } else if (isOverdue(job, now)) {
       // The hold expired with the job unfinished.
       await deps.db
@@ -491,164 +529,74 @@ export async function cancelJob(deps: JobDeps, job: JobRow, stop: () => Promise<
     }
     // Otherwise the job settled a moment ago; its Workflow marks it succeeded and the credits stay charged.
   }
-  await deps.bucket.delete([resultObjectKey(job.id), inputObjectKey(job.id), audioObjectKey(job.id)]);
+  await deleteJobInputs(deps.bucket, job.id);
+  await deps.bucket.delete(resultObjectKey(job.id));
   await deps.db.prepare("UPDATE jobs SET result_key = NULL WHERE id = ?").bind(job.id).run();
 }
 ```
 
-`apps/api/src/jobs/workflows.ts`, exactly. The one place PR 22 to 25 plug in (see "How PR 22 to 25 plug in"):
-
-```ts
-import type { JobType } from "@waypoint/contracts";
-import type { Env } from "../env.ts";
-
-// What a job's Workflow instance is started with: the job id and the key of its locked input (null when the job
-// sends no text). Everything else is read from the jobs row. Workflows keep params, so never put text here.
-export type JobParams = { job_id: string; input_key: string | null };
-
-// Workflows keep an instance's params and step results until its retention ends. A day is enough to look into a
-// failed job; the params hold only a key whose locked input is deleted when the job ends.
-export const JOB_RETENTION = { successRetention: "1 day", errorRetention: "1 day" } as const;
-
-// The part of a Workflow binding the jobs routes use. Workflow<JobParams> satisfies this type.
-export type JobWorkflow = {
-  create(options: { id: string; params: JobParams; retention: typeof JOB_RETENTION }): Promise<unknown>;
-  get(id: string): Promise<{ terminate(): Promise<void> }>;
-};
-
-export type JobWorkflows = (env: Env, type: JobType) => JobWorkflow | null;
-
-// The Workflow that runs each job type, or null while its card (PR 22 to 25) is not merged. Each of those cards adds
-// one case here, for example `case "overview_script": return env.OVERVIEW_WORKFLOW;`, and nothing else in this file.
-export const jobWorkflow: JobWorkflows = (env, type) => {
-  switch (type) {
-    default:
-      return null;
-  }
-};
-```
-
-`apps/api/src/jobs/run.ts`, exactly. What every job Workflow runs:
-
-```ts
-import type { JobState } from "@waypoint/contracts";
-import { finishJob, JOB_TIME_LIMIT_MS, loadJob, readJobInput, type JobDeps, type JobInput, type JobOutcome, type JobRow } from "./job.ts";
-import { sealJobResult } from "./seal.ts";
-import type { JobParams } from "./workflows.ts";
-
-// The part of a Workflow's step object runJob uses. WorkflowStep satisfies this type.
-export type JobStep = {
-  do<T extends JobStepResult>(name: string, config: JobStepConfig, callback: () => Promise<T>): Promise<T>;
-};
-export type JobStepResult = JobRow | null | JobOutcome | JobState;
-export type JobStepConfig = {
-  retries: { limit: number; delay: `${number} seconds`; backoff: "constant" | "linear" | "exponential" };
-  timeout: number;
-};
-
-// What a job type's generator returns. plaintext is sealed to the device at once and then zeroed; actual is the
-// credits to settle (at most the quote); tokens are summed over every model call (null if none reported).
-export type Generated = { plaintext: Uint8Array; actual: number; tokens_in: number | null; tokens_out: number | null };
-export type JobGenerator = (job: JobRow, input: JobInput | null) => Promise<Generated>;
-
-const FAILED: JobOutcome = { ok: false, tokens_in: null, tokens_out: null };
-const QUICK_STEP: JobStepConfig = { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" }, timeout: 60_000 };
-
-// Thrown inside the generate step when the job was cancelled or its deadline passed.
-export class JobStopped extends Error {
-  constructor() {
-    super("job stopped");
-    this.name = "JobStopped";
-  }
-}
-
-// Marks a queued job running. Returns the job if it may run, else null (cancelled, finished, overdue or gone).
-export async function startJob(deps: JobDeps, jobId: string): Promise<JobRow | null> {
-  await deps.db.prepare("UPDATE jobs SET state = 'running' WHERE id = ? AND state = 'queued'").bind(jobId).run();
-  const job = await loadJob(deps.db, jobId);
-  if (job === null || job.state !== "running" || deps.now() > job.deadline_at) return null;
-  return job;
-}
-
-// Runs one job inside a Workflow: start, then ONE step that reads the locked input, generates, seals and returns only
-// numbers, then finish. Workflows persist what a step returns, so plaintext never leaves the generate step.
-export async function runJob(deps: JobDeps, params: JobParams, step: JobStep, generate: JobGenerator): Promise<JobState> {
-  const job = await step.do("start", QUICK_STEP, () => startJob(deps, params.job_id));
-  let outcome: JobOutcome = FAILED;
-  if (job !== null) {
-    try {
-      outcome = await step.do(
-        "generate",
-        { retries: { limit: 2, delay: "30 seconds", backoff: "exponential" }, timeout: JOB_TIME_LIMIT_MS[job.type] },
-        async (): Promise<JobOutcome> => {
-          const current = await loadJob(deps.db, job.id);
-          if (current === null || current.state !== "running" || deps.now() > current.deadline_at) throw new JobStopped();
-          const input = params.input_key === null ? null : await readJobInput(deps.bucket, job.id, params.input_key);
-          const made = await generate(current, input);
-          await sealJobResult({ db: deps.db, bucket: deps.bucket }, { jobId: job.id, plaintext: made.plaintext });
-          return { ok: true, actual: made.actual, tokens_in: made.tokens_in, tokens_out: made.tokens_out };
-        },
-      );
-    } catch {
-      outcome = FAILED;
-    }
-  }
-  // Also when the job may not run (cancelled, or its deadline passed while queued): finishJob releases what is held.
-  return step.do("finish", QUICK_STEP, () => finishJob(deps, params.job_id, outcome));
-}
-```
-
-`apps/api/test/helpers/jobs.ts`, exactly. Reused by Part B, PR 21 and PR 22 to 25; never redefined.
+`apps/api/test/helpers/jobs.ts`, exactly. Reused by Part B, PR 21 and PR 22 to 25; PR 22A appends two functions and two imports to it, and nothing is ever redefined.
 
 ```ts
 // Stand-ins for the jobs code (PR 20): an R2 bucket in memory, Workflow bindings that record what they were asked,
-// a real wallet store on node:sqlite, and queues that record messages. Reused by PR 21 and PR 22 to 25.
+// a real wallet store on node:sqlite, and queues that record messages. PR 22A appends fakeSteps and makeJobFixture
+// below; PR 21 and PR 22 to 25 reuse this file and never redefine anything in it.
 import type { Command } from "@waypoint/ledger";
-import type { JobBucket, JobDeps } from "../../src/jobs/job.ts";
-import type { JobStep } from "../../src/jobs/run.ts";
-import type { JobParams, JobWorkflow } from "../../src/jobs/workflows.ts";
+import type { JobDeps } from "../../src/jobs/job.ts";
+import type { JobRunInput, JobWorkflow } from "../../src/jobs/start.ts";
 import type { PushMessage } from "../../src/push/messages.ts";
 import type { BatchDb } from "../../src/storage.ts";
 import type { UsageEvent } from "../../src/usage.ts";
 import { createWalletStore } from "../../src/wallet/store.ts";
 import { createTestDb } from "./d1.ts";
-import { configEntries } from "./tasks.ts";
 import { insertDevice, makeTestDevice, type TestDevice } from "./signing.ts";
 import { createTestStore } from "./sql.ts";
+import { configEntries } from "./tasks.ts";
 
 export const JOB_NOW = 1_763_560_000_000;
 
-export type MemoryBucket = JobBucket & { objects: Map<string, Uint8Array>; failPut: boolean };
+export type StoredObject = { value: Uint8Array; contentType: string | null };
 
-export function memoryBucket(): MemoryBucket {
-  const objects = new Map<string, Uint8Array>();
-  const bucket: MemoryBucket = {
-    objects,
+// An in-memory bucket with the R2 methods the jobs code uses. failPut makes put throw.
+export function memoryBucket() {
+  const objects = new Map<string, StoredObject>();
+  const bucket = {
     failPut: false,
-    async get(key) {
-      const bytes = objects.get(key);
-      if (bytes === undefined) return null;
-      return {
-        body: new Response(bytes.slice()).body ?? new ReadableStream(),
-        size: bytes.length,
-        arrayBuffer: async () => bytes.slice().buffer,
-      };
-    },
-    async put(key, value) {
+    async put(
+      key: string,
+      value: Uint8Array | ReadableStream<Uint8Array>,
+      options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
+    ) {
       if (bucket.failPut) throw new Error("r2 down");
-      objects.set(key, value.slice());
-      return {};
+      const bytes = value instanceof Uint8Array ? value.slice() : new Uint8Array(await new Response(value).arrayBuffer());
+      objects.set(key, { value: bytes, contentType: options?.httpMetadata?.contentType ?? null });
+      return { key, size: bytes.length };
     },
-    async delete(keys) {
-      for (const key of keys) objects.delete(key);
+    async get(key: string) {
+      const found = objects.get(key);
+      if (found === undefined) return null;
+      const copy = found.value.slice();
+      return { body: new Response(copy.slice()).body ?? new ReadableStream(), size: copy.length, arrayBuffer: async () => copy.buffer };
+    },
+    async head(key: string) {
+      const found = objects.get(key);
+      return found === undefined ? null : { size: found.value.length };
+    },
+    async delete(keys: string | string[]) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+    async list(options: { prefix: string; limit: number; cursor?: string }) {
+      const keys = [...objects.keys()].filter((key) => key.startsWith(options.prefix)).sort();
+      return { objects: keys.slice(0, options.limit).map((key) => ({ key })), truncated: false };
     },
   };
-  return bucket;
+  return { bucket, objects };
 }
 
 export type FakeWorkflow = JobWorkflow & {
-  created: { id: string; params: JobParams }[];
+  created: { id: string; params: JobRunInput }[];
   terminated: string[];
+  events: { id: string; type: string; payload: unknown }[];
   failCreate: boolean;
 };
 
@@ -656,6 +604,7 @@ export function fakeWorkflow(): FakeWorkflow {
   const workflow: FakeWorkflow = {
     created: [],
     terminated: [],
+    events: [],
     failCreate: false,
     async create(options) {
       if (workflow.failCreate) throw new Error("workflows down");
@@ -667,39 +616,16 @@ export function fakeWorkflow(): FakeWorkflow {
         terminate: async () => {
           workflow.terminated.push(id);
         },
+        sendEvent: async (event) => {
+          workflow.events.push({ id, ...event });
+        },
       };
     },
   };
   return workflow;
 }
 
-// A step object like Workflows' own: runs the callback, tries again up to config.retries.limit more times, and
-// records each step's name and what it returned (Workflows keep those, so tests check they hold no text).
-export function fakeStep(): JobStep & { names: string[]; results: unknown[]; calls: number } {
-  const step = {
-    names: [] as string[],
-    results: [] as unknown[],
-    calls: 0,
-    async do<T>(name: string, config: { retries: { limit: number } }, callback: () => Promise<T>): Promise<T> {
-      step.names.push(name);
-      let last: unknown = new Error("no attempt");
-      for (let attempt = 0; attempt <= config.retries.limit; attempt++) {
-        step.calls += 1;
-        try {
-          const result = await callback();
-          step.results.push(result);
-          return result;
-        } catch (error) {
-          last = error;
-        }
-      }
-      throw last;
-    },
-  };
-  return step;
-}
-
-// A user u1 (billing account ba_u1) with an approved phone, and a second user u2 with an approved device.
+// A user u1 (billing account ba_u1) with an approved phone and iPad, and a second user u2 with an approved device.
 export async function makeJobsWorld(options: { monthly?: number; zeroRetention?: boolean } = {}) {
   const db: BatchDb = createTestDb();
   for (const id of ["u1", "u2"]) {
@@ -729,7 +655,7 @@ export async function makeJobsWorld(options: { monthly?: number; zeroRetention?:
   });
   const usage: UsageEvent[] = [];
   const pushes: PushMessage[] = [];
-  const bucket = memoryBucket();
+  const { bucket, objects } = memoryBucket();
   const workflow = fakeWorkflow();
   const config = new Map(Object.entries(configEntries()));
 
@@ -741,15 +667,8 @@ export async function makeJobsWorld(options: { monthly?: number; zeroRetention?:
     USAGE_QUEUE: { send: async (event: UsageEvent) => void usage.push(event) },
     PUSH_QUEUE: { send: async (message: PushMessage) => void pushes.push(message) },
   };
-  const deps: JobDeps = {
-    db,
-    bucket,
-    wallet: walletFor,
-    usage: env.USAGE_QUEUE,
-    push: env.PUSH_QUEUE,
-    now: () => clock.now,
-  };
-  return { db, env, deps, store, commands, usage, pushes, bucket, workflow, clock, phone, ipad, other };
+  const deps: JobDeps = { db, bucket, wallet: walletFor("ba_u1"), usage: env.USAGE_QUEUE, push: env.PUSH_QUEUE, now: () => clock.now };
+  return { db, env, deps, store, commands, usage, pushes, bucket, objects, workflow, clock, phone, ipad, other };
 }
 
 // Inserts a job row for u1 as POST /v1/jobs would, holding its credits in the wallet.
@@ -776,8 +695,9 @@ export async function insertJob(
 Part A tests. Each bullet is one test.
 
 `packages/contracts/test/jobs.test.ts`:
-- One valid body for each of the seven types parses (research with and without `text`); `"  the cell  "` comes back as `"the cell"`.
-- Rejected: an unknown `type`; `overview_script` without `text`; `text` `""` and `"   "`; `text` of 200,001 characters (200,000 accepted); `research` without `depth`, without `question`, or with a 1,001-character question; `fallback_voice` on `diagram`; `minutes` on `overview_script`; `retranscribe` with `text`; `retranscribe` with `minutes` 0 or 601 (600 accepted); an extra key.
+- One valid body for each of the seven types parses (research with and without `text`; a written type with and without `prompt`); `"  the cell  "` comes back as `"the cell"`.
+- Rejected: an unknown `type`; `overview_script` without `text`; `text` `""` and `"   "`; `overview_script` `text` of 40,001 characters (40,000 accepted) and `diagram` of 16,001; `research` `text` of 8,001; `research` without `depth`, without `question`, or with a 501-character question; a 501-character `prompt`; `prompt` on `research`; `fallback_voice` on `diagram`; `minutes` on `overview_script`; `retranscribe` with `text`; `retranscribe` with `minutes` 0 or 601 (600 accepted); an extra key.
+- `JOB_TEXT_MAX_CHARS` is exactly `{ overview_script: 40000, video_slides: 48000, diagram: 16000, mini_app: 24000, practice: 28000, research: 8000 }`.
 - `JobViewSchema` accepts a full view and rejects an extra key, `tier: "huge"`, `quoted: 0` and `state: "paused"`; `JobResponseSchema` accepts `{ job: <view> }`.
 
 `db/d1/test/schema.test.mjs`: the new test above; the existing column and type tests now cover the six columns.
@@ -792,39 +712,26 @@ Part A tests. Each bullet is one test.
 
 `apps/api/test/cleanup.test.ts`: in "objects under groups/ are never listed or deleted", the allowed prefixes become `"results/"`, `"tmp/audio/"` and `"tmp/input/"`; in the request-nonces test the expected counts gain `tmp_input: 0`. Add: `tmp/input/` objects older than 24 hours are deleted and younger ones kept (`counts.tmp_input` 1).
 
-`apps/api/test/jobs-core.test.ts`, with `makeJobsWorld()`, `insertJob()`, `fakeStep()` and `memoryBucket()` from the helper (`w.store.read().monthly` is the free monthly balance; the world starts with 100):
-- Compile-time checks: `(bucket: R2Bucket) => JobBucket`, `(bucket: JobBucket) => ResultBucket` (from `src/jobs/seal.ts`), `(step: WorkflowStep) => JobStep` (`import type { WorkflowStep } from "cloudflare:workers"`), `(workflow: Workflow<JobParams>) => JobWorkflow`.
-- `jobWorkflow` returns null for each of the seven types (pass `{} as Env`).
+`apps/api/test/jobs-core.test.ts`, with `makeJobsWorld()`, `insertJob()` and `memoryBucket()` from the helper (`w.store.read().monthly` is the free monthly balance; the world starts with 100; `w.objects` holds what is in the bucket):
+- Compile-time checks: `(bucket: R2Bucket) => JobBucket`, `(bucket: R2Bucket) => InputBucket`, `(workflow: Workflow<JobRunInput>) => JobWorkflow`, and `(bucket: ReturnType<typeof memoryBucket>["bucket"]) => JobBucket & InputBucket & ResultBucket` (`ResultBucket` from `src/jobs/seal.ts`).
+- `jobWorkflow` returns null for each of the seven types (pass `{} as Env`); with `JOB_WORKFLOWS.diagram` set to a function for one test (restore it after), it returns what that function returns.
+- `jobTimeLimitMs`: research quick, standard, deep 20, 30, 60 minutes; `retranscribe` with 4.2 minutes 90 minutes + 50 s; diagram and practice 20 minutes; the other three 30 minutes.
 - `jobIdFor("u1", key)` matches `^job_[A-Za-z0-9_-]{22}$`, is the same twice, and differs for user `u2` and for another key.
 - `jobWalletIds` gives exactly `job:u1:K`, `job_settle:u1:K`, `job_release:u1:K`; with a 36-character user id and a 64-character key each is at most 128 characters.
-- `lockJobInput` then `readJobInput` gives the input back; the key is 43 characters; the stored bytes do not contain the text (use a marker string).
-- `readJobInput` with another job id, another key, one changed stored byte, or no object rejects (the last with "job input missing").
+- `putJobInput` then `readJobInput` gives `{ text, prompt }` back; the key is 43 characters; the stored bytes do not contain the text (use a marker string).
+- `readJobInput` with another job id, another key, one changed stored byte, or no object gives null; `deleteJobInput` removes the object.
+- `deleteJobInputs` deletes `tmp/input/{job}` and every `tmp/audio/{job}/{n}`, and keeps `results/{job}`, another job's input and `tmp/audio/{job}x/0`.
 - `loadJob` returns the row with `billing_account_id` `ba_u1`; with user `u2` it returns null; an unknown id gives null.
 - `jobView` maps the row (tier from `route`); `result_ready` is true for a succeeded job with a `result_key` before `expires_at`, false at `expires_at`, false with `result_key` null.
 - `isOverdue`: a running job at exactly deadline + 60,000 ms is not overdue, 1 ms later it is, and its view says `failed`; a succeeded job is never overdue.
-- `startJob`: a queued job becomes running and is returned; a cancelled job gives null and stays cancelled; a queued job past its deadline gives null; an unknown id gives null.
-- `finishJob` ok: returns `succeeded`; the row has `spent` 40, `finished_at` now and `expires_at` now + 7 days; the monthly balance is 60 with no open holds; `tmp/input/{job}` is deleted and `results/{job}` kept; one push `{ user_id: "u1", kind: "job_ready", ref: <job>, device_id: "dev_phone" }`; one usage event with `id` `job:u1:<key>`, `outcome` `ok`, `credits` 40, `task` `overview_script`, `tier` `strong`, `router` `skipped`, `bytes_sent` 12 and the given token counts.
-- `finishJob` ok with `actual` 50 on a quote of 40 charges 40; with `actual` 3 on a `retranscribe` quote of 5 charges 3 and the monthly balance is 97.
-- `finishJob` ok run twice: the second returns `succeeded`, the wallet ledger has one settle, the balance is unchanged.
-- `finishJob` ok for a job with `device_id` null sends no push.
-- `finishJob` failed: returns `failed`; hold released (balance 100); `spent` 0; `result_key` null; `results/`, `tmp/input/` and `tmp/audio/` objects of the job deleted; one usage event `model_failed` with credits 0; no push.
-- `finishJob` ok after the hold was released (as a cancel does; set the row `cancelled`): returns `cancelled`, nothing charged, `results/{job}` deleted, no usage event.
-- `finishJob` ok after the hold expired (`w.store.apply({ type: "release_expired", id: "x" }, later)`): returns `failed`, nothing charged, one `model_failed` event.
-- `finishJob` for an unknown job id returns `failed` and deletes that id's objects.
-- `finishJob` with a wallet whose `apply` throws rejects, and the row is unchanged (so the Workflow step is retried).
-- `cancelJob` on a running job: `stop` called once; balance 100; state `cancelled`, `spent` 0, `finished_at` now; one usage event `cancelled` with credits 0; the job's three objects deleted; `result_key` null.
+- `cancelJob` on a running job: `stop` called once; balance 100; state `cancelled`, `spent` 0, `finished_at` now; one usage event `{ id: "job:u1:<key>", outcome: "cancelled", credits: 0, task: "overview_script", tier: "strong", router: "skipped", bytes_sent: 12, tokens_in: null, tokens_out: null }`; the job's result, input and two audio parts deleted; `result_key` null.
 - `cancelJob` whose `stop` rejects still cancels.
 - `cancelJob` on a succeeded job: `stop` not called; no wallet command; `spent` kept; `results/{job}` deleted and `result_key` null.
-- `cancelJob` on a running job whose hold was already settled (settle it in the store first): the state stays `running`, the charge stays, the objects are deleted.
+- `cancelJob` on a running job whose hold was already settled (settle it in the store first): the state stays `running`, the charge stays, the objects are deleted, no usage event.
 - `cancelJob` on an overdue running job whose hold expired: state `failed`, nothing charged.
 - `cancelJob` twice: one usage event, one release in the ledger.
-- `runJob`, happy path: step names `["start", "generate", "finish"]`; the generator gets the locked input back; returns `succeeded`; `openResult(results/{job}, job, "dev_phone", phone.boxPrivate)` gives the generator's text; `JSON.stringify(step.results)` contains neither the input text nor the result text.
-- `runJob` with `input_key` null calls the generator with `null`.
-- `runJob` whose generator throws: the generate step is tried 3 times (`step.calls` 5 in all), the job fails, nothing is charged.
-- `runJob` for a job whose device was removed before sealing: `failed`, nothing charged, no `results/` object.
-- `runJob` for a job cancelled before it started: the generator is never called; returns `cancelled`.
-- `runJob` for a queued job whose deadline passed: the generator is never called; `failed`; balance 100.
-- `runJob` where the generator cancels the job (calls `cancelJob`) before returning: returns `cancelled`, nothing charged, no `results/` object.
+
+The runner (`runJob`, `finishJob`, `notifyJob`) and its tests are PR 22A's.
 
 ### Part B
 
@@ -843,20 +750,9 @@ import type { AppEnv } from "../env.ts";
 import { ApiFailure, InsufficientCredits } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
 import { HOLD_MARGIN_MS, readTaskBody, utf8Bytes } from "../tasks/instant.ts";
-import {
-  cancelJob,
-  finishJob,
-  JOB_TIME_LIMIT_MS,
-  jobDeps,
-  jobIdFor,
-  jobView,
-  jobWalletIds,
-  loadJob,
-  lockJobInput,
-  WHISPER_MODEL,
-  type JobInput,
-} from "./job.ts";
-import { JOB_RETENTION, type JobWorkflows } from "./workflows.ts";
+import { deleteJobInput, putJobInput, type JobInput } from "./input.ts";
+import { cancelJob, jobDeps, jobIdFor, jobView, jobWalletIds, loadJob } from "./job.ts";
+import { JOB_RETENTION, jobTimeLimitMs, WHISPER_MODEL, type JobRunInput, type JobWorkflows } from "./start.ts";
 
 type JobRoute = { tier: Tier; model: string; retention: "standard" | "zero" };
 
@@ -870,8 +766,8 @@ export function jobRoute(config: LoadedConfig, type: CreateJobRequest["type"], z
 
 function jobInput(request: CreateJobRequest): JobInput | null {
   if (request.type === "retranscribe") return null;
-  if (request.type === "research") return { text: request.text ?? null, question: request.question };
-  return { text: request.text, question: null };
+  if (request.type === "research") return { text: request.text ?? "", prompt: request.question };
+  return { text: request.text, prompt: request.prompt ?? null };
 }
 
 export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows }) {
@@ -905,7 +801,9 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
 
       const ids = jobWalletIds(user.id, key);
       const wallet = c.env.WALLET.get(c.env.WALLET.idFromName(user.billing_account_id));
-      const deadline = now + JOB_TIME_LIMIT_MS[request.type];
+      const depth = request.type === "research" ? request.depth : null;
+      const minutes = request.type === "retranscribe" ? request.minutes : null;
+      const deadline = now + jobTimeLimitMs({ type: request.type, depth, minutes });
       const held = await wallet.apply({
         type: "hold",
         id: ids.hold,
@@ -923,25 +821,45 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
       }
 
       const input = jobInput(request);
-      const bytesSent = input === null ? 0 : utf8Bytes(input.text ?? "", input.question ?? "");
-      let inputKey: string | null = null;
+      const bytesSent = input === null ? 0 : utf8Bytes(input.text, input.prompt ?? "");
       try {
-        if (input !== null) inputKey = await lockJobInput(c.env.BUCKET, id, input);
+        const inputKey = input === null ? null : await putJobInput(c.env.BUCKET, id, input);
         await db
           .prepare(
             "INSERT INTO jobs (id, user_id, type, state, quoted, route, model, retention, bytes_sent, command_key, device_id, created_at, deadline_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           )
           .bind(id, user.id, request.type, credits, route.tier, route.model, route.retention, bytesSent, key, device.id, now, deadline)
           .run();
+        const params: JobRunInput = {
+          v: 1,
+          job_id: id,
+          type: request.type,
+          user_id: user.id,
+          billing_account_id: user.billing_account_id,
+          credits,
+          hold_id: ids.hold,
+          settle_id: ids.settle,
+          release_id: ids.release,
+          deadline,
+          tier: route.tier,
+          model: route.model,
+          retention: route.retention,
+          zero_retention: user.zero_retention,
+          depth,
+          minutes,
+          input_key: inputKey,
+          bytes_sent: bytesSent,
+        };
+        await workflow.create({ id, params, retention: JOB_RETENTION });
       } catch {
+        // Nothing ran: release the hold, delete the locked input, and mark the row failed if it was written.
         await wallet.apply({ type: "release", id: ids.release, hold_id: ids.hold }).catch(() => undefined);
-        await c.env.BUCKET.delete([`tmp/input/${id}`]).catch(() => undefined);
-        throw new ApiFailure("internal", "job could not start");
-      }
-      try {
-        await workflow.create({ id, params: { job_id: id, input_key: inputKey }, retention: JOB_RETENTION });
-      } catch {
-        await finishJob(jobDeps(c.env, deps.now), id, { ok: false, tokens_in: null, tokens_out: null }).catch(() => undefined);
+        await deleteJobInput(c.env.BUCKET, id).catch(() => undefined);
+        await db
+          .prepare("UPDATE jobs SET state = 'failed', spent = 0, finished_at = ? WHERE id = ?")
+          .bind(now, id)
+          .run()
+          .catch(() => undefined);
         throw new ApiFailure("internal", "job could not start");
       }
       const job = await loadJob(db, id, user.id);
@@ -970,7 +888,7 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
       const job = await loadJob(c.env.DB, c.req.param("id"), user.id);
       if (job === null) throw new ApiFailure("not_found", "no such job");
       const workflow = deps.workflows(c.env, job.type);
-      await cancelJob(jobDeps(c.env, deps.now), job, async () => {
+      await cancelJob(jobDeps(c.env, job.billing_account_id, deps.now), job, async () => {
         if (workflow !== null) await (await workflow.get(job.id)).terminate();
       });
       const after = await loadJob(c.env.DB, job.id, user.id);
@@ -980,16 +898,17 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
 }
 ```
 
-The route order matters inside `POST`: route and price before the hold (nothing to release on 400 or 403); the existing-job check before the hold (a request run again must not hold twice); the jobs row before `create` (the Workflow's first step reads it). `GET /v1/jobs/:id/result` is never stored: it has no `idempotent()` and replies with content.
+The route order matters inside `POST`: route and price before the hold (nothing to release on 400 or 403); the existing-job check before the hold (a request run again must not hold twice); the input and the jobs row before `create` (the Workflow's first step reads the row, its `make` step the input). `GET /v1/jobs/:id/result` is never stored: it has no `idempotent()` and replies with content.
 
-`apps/api/src/app.ts`: `import { jobsRoutes } from "./jobs/routes.ts";`, `import { jobWorkflow } from "./jobs/workflows.ts";` and, at the end of the routes, `app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));`.
+`apps/api/src/app.ts`: `import { jobsRoutes } from "./jobs/routes.ts";`, `import { jobWorkflow } from "./jobs/start.ts";` and, at the end of the routes, `app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));`.
 
 Tests (`apps/api/test/jobs.test.ts`): a fresh app as in `docs/cards/security.md` ("Rules for every security card"), with the session user u1 (`billing_account_id` `ba_u1`), `jobsRoutes({ now: () => w.clock.now, workflows: () => w.workflow })` (or `() => null` where a test says so), and `w.env` from `makeJobsWorld()` as the env. Signed requests use `signedInit(w.phone, { method, path, body, now: w.clock.now, idempotencyKey })`. Each bullet is one test.
 
 `POST /v1/jobs`:
-- `overview_script` → 201; the body passes `JobResponseSchema`; `state` `queued`, `quoted` 40, `tier` `strong`, `result_ready` false; the job id is `jobIdFor("u1", key)`; one Workflow `create` with that id and `params` `{ job_id, input_key }` (43 characters) and `retention` `JOB_RETENTION`; one hold with id `job:u1:<key>`, credits 40 and `expires_at` now + 600,000 + 60,000; balance 60; the row has `device_id` `dev_phone`, `command_key` the key, `model` `workers-ai/kimi-k2.6`, `retention` `standard`, `bytes_sent` the UTF-8 bytes of the text, `deadline_at` now + 600,000; `tmp/input/{job}` exists, does not contain the text, and `readJobInput` with the params key gives `{ text, question: null }`.
-- Prices: `research` `deep` with a question only → 125 and `readJobInput` gives `{ text: null, question }`; `research` `quick` with text → 15; `video_slides` with `fallback_voice: true` → 52; `diagram` 18; `mini_app` 40; `practice` 8.
-- `retranscribe` with `minutes` 4.2 → `quoted` 5, `tier` `light`, the row's `model` `WHISPER_MODEL`, no `tmp/input/` object, `input_key` null.
+- `overview_script` → 201; the body passes `JobResponseSchema`; `state` `queued`, `quoted` 40, `tier` `strong`, `result_ready` false; the job id is `jobIdFor("u1", key)`; one Workflow `create` with that id, `retention` `JOB_RETENTION` and `params` equal to the full `JobRunInput` (`v` 1, `type`, `user_id` `u1`, `billing_account_id` `ba_u1`, `credits` 40, the three wallet ids, `deadline` now + 1,800,000, `tier` `strong`, `model` `workers-ai/kimi-k2.6`, `retention` `standard`, `zero_retention` false, `depth` and `minutes` null, a 43-character `input_key`, `bytes_sent` the UTF-8 bytes of the text), and `JSON.stringify(params)` does not contain the text; one hold with id `job:u1:<key>`, credits 40 and `expires_at` now + 1,800,000 + 60,000; balance 60; the row has `device_id` `dev_phone`, `command_key` the key, `model`, `retention`, `bytes_sent` as in the params and `deadline_at` now + 1,800,000; `tmp/input/{job}` exists, does not contain the text, and `readJobInput` with the params key gives `{ text, prompt: null }`.
+- With `prompt: "Focus on plants"` → `readJobInput` gives `{ text, prompt: "Focus on plants" }` and `bytes_sent` counts both.
+- Prices: `research` `deep` with a question only → 125, `params.depth` `deep`, `deadline` now + 3,600,000, and `readJobInput` gives `{ text: "", prompt: question }`; `research` `quick` with text → 15; `video_slides` with `fallback_voice: true` → 52; `diagram` 18; `mini_app` 40; `practice` 8.
+- `retranscribe` with `minutes` 4.2 → `quoted` 5, `tier` `light`, the row's `model` `WHISPER_MODEL`, no `tmp/input/` object, `params.input_key` null, `params.minutes` 4.2, `params.bytes_sent` 0, `deadline` now + 5,450,000.
 - Signed by the iPad → the row's `device_id` is `dev_ipad1`.
 - The same key and body again → the stored 201 with `Idempotent-Replayed: true`; still one `create` and one hold.
 - The same key after its idempotency row is deleted → 201 with the same job; still one `create` and one hold.
@@ -998,7 +917,7 @@ Tests (`apps/api/test/jobs.test.ts`): a fresh app as in `docs/cards/security.md`
 - `workflows` returning null → 400 "job type not available" and no wallet command.
 - Bad JSON, `{ "type": "nope" }`, `overview_script` without text, an extra key → 400 "invalid request"; no body contains the text sent.
 - `config:current` missing → 500 "config unavailable".
-- `create` fails (`w.workflow.failCreate = true`) → 500 "job could not start"; balance 100; the row is `failed`; no `tmp/input/` object; one usage event `model_failed`.
+- `create` fails (`w.workflow.failCreate = true`) → 500 "job could not start"; balance 100; the row is `failed` with `spent` 0 and `finished_at` now; no `tmp/input/` object; no usage event.
 - R2 `put` fails (`w.bucket.failPut = true`) → 500 "job could not start"; balance 100; no row.
 - A hold already used and released for this key, with no row (apply hold and release to `w.store` by hand) → 409 "request already finished".
 - Without `Waypoint-*` headers → 401 "device signature required".
@@ -1014,7 +933,7 @@ Tests (`apps/api/test/jobs.test.ts`): a fresh app as in `docs/cards/security.md`
 - Without a signature → 401.
 
 `DELETE /v1/jobs/:id`:
-- A running job → 200 with `state` `cancelled`; the fake Workflow's `terminated` is `[job id]`; balance 100; one usage event `cancelled`; no objects left for the job.
+- A running job with its input and two audio parts in R2 → 200 with `state` `cancelled`; the fake Workflow's `terminated` is `[job id]`; balance 100; one usage event `cancelled`; no objects left for the job.
 - A succeeded job → 200 with `state` `succeeded`, `spent` kept, `result_ready` false; then `GET .../result` → 404.
 - The same key again → the stored reply; `terminated` still has one entry.
 - With `workflows` returning null for the type, a running job is still cancelled.
@@ -1024,7 +943,7 @@ Tests (`apps/api/test/jobs.test.ts`): a fresh app as in `docs/cards/security.md`
 - `POST /v1/jobs` signed in, with a valid key and no `Waypoint-*` headers → 401 "device signature required".
 - `GET /v1/jobs/x` without `Authorization` → 401.
 
-Not in this PR: any Workflow class, binding or generator (PR 22 to 25); the signed upload URL for `retranscribe` (PR 23); `GET /v1/jobs/:id/events` (PR 21); a list of jobs; a push for a failed job; refunds after a job succeeded.
+Not in this PR: any Workflow class, binding, runner or generator (PR 22 to 25); the audio upload routes for `retranscribe` (PR 23); `GET /v1/jobs/:id/events` (PR 21); a list of jobs; a push for a failed job; refunds after a job succeeded.
 
 ---
 
@@ -1102,7 +1021,7 @@ export function jobEventsRoute(deps: { now: () => number; sleep: (ms: number) =>
 }
 ```
 
-`apps/api/src/app.ts`: `import { jobEventsRoute } from "./jobs/events.ts";` and, at the end of the routes, exactly:
+`apps/api/src/app.ts`: `import { jobEventsRoute } from "./jobs/events.ts";` and, at the end of the routes (after PR 20's line), exactly:
 
 ```ts
   app.route("/", jobEventsRoute({ now: deps.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }));
@@ -1126,7 +1045,7 @@ Not in this PR: Workflows' own `instance.subscribe()` (newer, and the D1 row is 
 
 ## S1F · Device pushes and push-token cleanup
 
-Branch `pr/s1f-device-pushes`. Builds on S1D, PR 31 and PR 20 (Part A adds `sendPush` to `src/push/messages.ts`; if S1F is built before PR 20, it adds that block exactly as PR 20 Part A gives it, and PR 20 then skips it). No new dependencies. Files: `apps/api/src/devices/register.ts`, `apps/api/src/devices/pairing.ts`, `apps/api/src/devices/remove.ts`, `apps/api/test/device-push.test.ts`. No other files; the existing device tests stay as they are (they pass no `PUSH_QUEUE`, and `sendPush` drops the send).
+Branch `pr/s1f-device-pushes`. Builds on S1D, PR 31 and PR 20 Part A (which adds `sendPush` and `PushQueue` to `src/push/messages.ts`; if S1F is built before PR 20, it adds that block exactly as PR 20 Part A gives it, and PR 20 then skips it). No new dependencies. Files: `apps/api/src/devices/register.ts`, `apps/api/src/devices/pairing.ts`, `apps/api/src/devices/remove.ts`, `apps/api/test/device-push.test.ts`. No other files; the existing device tests stay as they are (they pass no `PUSH_QUEUE`, and `sendPush` drops the send).
 
 What it adds, and nothing else (no note text in any push; the payload is the fixed text in `notificationFor`):
 
@@ -1255,10 +1174,4 @@ Not in this PR: a push to the other devices when a device is removed, revoking t
 
 ## Open questions for the product owner
 
-1. **Job inputs per type.** PR 20 takes `text` for every type except `retranscribe` (minutes only) and `research` (`depth`, `question`, optional `text`). If a type needs more (number of practice questions, diagram kind, slide count), its workflow card adds fields to its own variant in `CreateJobRequestSchema`; prices do not change.
-2. **Zero retention and the second transcript.** Whisper is not in the route table, so a zero-retention user gets 403 for `retranscribe`. Mark Whisper zero-retention (Cloudflare hosts it), or keep it refused?
-3. **Cancelling is free.** A cancelled job is never charged, even if the model already ran (the cost is in the usage event). Accept, or charge something once the generate step has started?
-4. **Time limits** per type (`JOB_TIME_LIMIT_MS`: research 20 min, overview script and video slides and mini app 10, diagram and practice 5, second transcript 60 including the upload) are guesses until PR 22 to 25 measure them.
-5. **Push ids.** `PushMessageSchema` allows `device_id` of 8 to 64 characters and `ref` up to 48 (to keep the APNs collapse id within 64 bytes), while device ids may be 1 to 64. S1B could require UUID device ids, or the push schema could hash long ids into the collapse id.
-6. **No push when a job fails.** The app sees it only while it is watching (events stream) or next time it asks. Add a `job_failed` push kind?
-7. **Migration number.** `0006_jobs.sql` was the next free number on `main`, but the groups cards being planned at the same time (PR 27 to 30) also want new migrations. Whichever merges second renames its file to the next free number (the content does not depend on it); the "Shared files" table in `docs/build-plan.md` should record the result.
+Moved to "Open questions" in `docs/build-plan.md` (job inputs per type, zero retention and the second transcript, free cancelling, time limits, push id limits, a `job_failed` push), with the workflow and groups questions, without repeats. The migration number is settled: `0006_jobs.sql`.
