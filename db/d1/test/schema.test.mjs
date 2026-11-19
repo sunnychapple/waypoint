@@ -14,7 +14,7 @@ const migrations = readdirSync(migrationsDir)
 const EXPECTED = {
   users: ["id", "clerk_id", "created_at", "plan", "billing_account_id", "zero_retention"],
   entitlements: ["user_id", "product", "source", "media_cap_gb", "granted_at", "ended_at"],
-  devices: ["id", "user_id", "name", "platform", "sign_pub", "box_pub", "can_approve", "added_at", "removed_at"],
+  devices: ["id", "user_id", "name", "platform", "sign_pub", "box_pub", "can_approve", "added_at", "removed_at", "kind", "approved_at", "approved_by", "cert", "account_envelope"],
   recovery: ["user_id", "wrapped_account_key", "verified_at"],
   groups: ["id", "kind", "name_locked", "key_version", "created_by"],
   memberships: ["group_id", "user_id", "role", "starts_at", "ends_at", "history_from", "left_at"],
@@ -22,10 +22,12 @@ const EXPECTED = {
   invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by"],
   links: ["id", "group_id", "blob_key", "passcode_hash", "expires_at", "revoked_at", "views"],
   purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
-  jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at"],
+  jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id"],
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
   idempotency: ["user_id", "key", "request_hash", "state", "status", "body", "created_at"],
   push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"],
+  device_pairings: ["device_id", "commitment", "approver_id", "approver_nonce", "device_nonce", "expires_at"],
+  request_nonces: ["device_id", "nonce", "expires_at"],
 };
 
 // "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
@@ -34,7 +36,7 @@ const EXPECTED = {
 const EXPECTED_TYPES = {
   users: { id: "TEXT", clerk_id: "TEXT", created_at: "INTEGER", plan: "TEXT", billing_account_id: "TEXT", zero_retention: "INTEGER" },
   entitlements: { user_id: "TEXT", product: "TEXT", source: "TEXT", media_cap_gb: "INTEGER", granted_at: "INTEGER", ended_at: "INTEGER?" },
-  devices: { id: "TEXT", user_id: "TEXT", name: "TEXT", platform: "TEXT", sign_pub: "TEXT", box_pub: "TEXT", can_approve: "INTEGER", added_at: "INTEGER", removed_at: "INTEGER?" },
+  devices: { id: "TEXT", user_id: "TEXT", name: "TEXT", platform: "TEXT", sign_pub: "TEXT", box_pub: "TEXT", can_approve: "INTEGER", added_at: "INTEGER", removed_at: "INTEGER?", kind: "TEXT", approved_at: "INTEGER?", approved_by: "TEXT?", cert: "TEXT?", account_envelope: "TEXT?" },
   recovery: { user_id: "TEXT", wrapped_account_key: "TEXT", verified_at: "INTEGER?" },
   groups: { id: "TEXT", kind: "TEXT", name_locked: "TEXT", key_version: "INTEGER", created_by: "TEXT?" },
   memberships: { group_id: "TEXT", user_id: "TEXT", role: "TEXT", starts_at: "INTEGER", ends_at: "INTEGER?", history_from: "INTEGER", left_at: "INTEGER?" },
@@ -42,10 +44,12 @@ const EXPECTED_TYPES = {
   invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?" },
   links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER" },
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
-  jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?" },
+  jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?" },
   activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
   idempotency: { user_id: "TEXT", key: "TEXT", request_hash: "TEXT", state: "TEXT", status: "INTEGER?", body: "TEXT?", created_at: "INTEGER" },
   push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" },
+  device_pairings: { device_id: "TEXT", commitment: "TEXT", approver_id: "TEXT?", approver_nonce: "TEXT?", device_nonce: "TEXT?", expires_at: "INTEGER" },
+  request_nonces: { device_id: "TEXT", nonce: "TEXT", expires_at: "INTEGER" },
 };
 
 // Indexes the card requires, as [table, indexed columns in order].
@@ -59,6 +63,7 @@ const REQUIRED_INDEXES = [
   ["links", ["group_id"]],
   ["key_envelopes", ["device_id"]],
   ["invites", ["group_id"]],
+  ["request_nonces", ["expires_at"]],
 ];
 
 function freshDb() {
@@ -382,4 +387,49 @@ test("deleting a user deletes their push token rows", () => {
   db.prepare("DELETE FROM users WHERE id = 'u1'").run();
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM push_tokens WHERE user_id = 'u1'"), 0);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM push_tokens WHERE user_id = 'u2'"), 1);
+});
+
+test("rejects a bad devices.kind", () => {
+  const db = freshDb();
+  seedUser(db);
+  assert.throws(
+    () =>
+      db.prepare(
+        "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, added_at, kind) VALUES ('d1', 'u1', 'phone', 'ios', 's', 'b', 1, 'other')",
+      ).run(),
+    /CHECK constraint failed/,
+  );
+});
+
+test("allows one active account row per user, and another once the first is removed", () => {
+  const db = freshDb();
+  seedUser(db);
+  const insertAccount = (id) =>
+    db.prepare(
+      "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, added_at, kind) VALUES (?, 'u1', 'Account key', 'account', 's', 'b', 1, 'account')",
+    ).run(id);
+  insertAccount("a1");
+  assert.throws(() => insertAccount("a2"), /UNIQUE constraint failed/);
+  db.prepare("UPDATE devices SET removed_at = 2 WHERE id = 'a1'").run();
+  insertAccount("a2");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM devices WHERE kind = 'account' AND removed_at IS NULL"), 1);
+});
+
+test("deleting a device deletes its device_pairings row", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.prepare(
+    "INSERT INTO device_pairings (device_id, commitment, expires_at) VALUES ('d1', 'c', 1)",
+  ).run();
+  db.prepare("DELETE FROM devices WHERE id = 'd1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM device_pairings WHERE device_id = 'd1'"), 0);
+});
+
+test("deleting a device sets jobs.device_id to NULL", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.prepare("INSERT INTO jobs (id, user_id, type, state, quoted, created_at, device_id) VALUES ('j1', 'u1', 'research', 'queued', 5, 1, 'd1')").run();
+  db.prepare("DELETE FROM devices WHERE id = 'd1'").run();
+  const job = db.prepare("SELECT device_id FROM jobs WHERE id = 'j1'").get();
+  assert.equal(job.device_id, null);
 });

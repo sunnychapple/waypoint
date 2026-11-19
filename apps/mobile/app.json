@@ -11,7 +11,11 @@
       "bundleIdentifier": "app.waypoint.ios",
       "buildNumber": "1",
       "supportsTablet": false,
-      "infoPlist": {},
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Waypoint records a class or a talk so it can write down what is said, on this iPhone.",
+        "UIBackgroundModes": ["audio"],
+        "NSCameraUsageDescription": "Waypoint uses the camera to snap pages of homework and books. Pages are read on this iPhone."
+      },
       "usesAppleSignIn": true
     },
     "plugins": [
