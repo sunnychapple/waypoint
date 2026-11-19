@@ -78,6 +78,16 @@ export const RecoveryViewSchema = z.strictObject({
   verified_at: z.number().int().nullable(),
 });
 
+// S1D: removing a device.
+export const RemoveDeviceRequestSchema = z.union([
+  z.strictObject({}),
+  z.strictObject({
+    account: z.strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema, box_pub: PublicKeySchema }),
+    devices: z.array(z.strictObject({ id: KeyIdSchema, cert: SignatureSchema, account_envelope: EnvelopeTextSchema })).min(1).max(50),
+  }),
+]);
+export const RemoveDeviceResponseSchema = z.strictObject({ removed: KeyIdSchema, account_id: KeyIdSchema.nullable() });
+
 // S2: group keys.
 export const GroupKeysRequestSchema = z.strictObject({
   key_version: z.number().int().min(1),

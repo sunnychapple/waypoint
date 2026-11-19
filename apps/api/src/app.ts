@@ -14,6 +14,7 @@ import { requireIdempotencyKey } from "./idempotency.ts";
 import { privacyRoutes } from "./privacy/routes.ts";
 import { pushTokenRoute } from "./push/route.ts";
 import { recoveryRoute } from "./recovery/route.ts";
+import { removeDeviceRoute } from "./devices/remove.ts";
 import { doubleCheckRoute } from "./tasks/double-check.ts";
 import { explainRoute } from "./tasks/explain.ts";
 import { moreDetailRoute } from "./tasks/more-detail.ts";
@@ -49,6 +50,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", devicesRoute({ now: deps.now }));
   app.route("/", pairingRoutes({ now: deps.now }));
   app.route("/", recoveryRoute({ now: deps.now }));
+  app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
   return app;
 }

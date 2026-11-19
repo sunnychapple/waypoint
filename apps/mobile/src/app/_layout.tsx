@@ -13,6 +13,8 @@ function RootStack() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
+        <Stack.Screen name="settings-permissions" />
+        <Stack.Screen name="settings-storage" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="new-space" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="space/[id]" options={{ presentation: "card" }} />
@@ -21,6 +23,9 @@ function RootStack() {
         <Stack.Screen name="session/[id]" />
         <Stack.Screen name="study/make" />
         <Stack.Screen name="study/review" />
+        <Stack.Screen name="study/quiz" />
+        <Stack.Screen name="study/help" />
+        <Stack.Screen name="study/help-steps" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />
