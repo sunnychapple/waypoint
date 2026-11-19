@@ -1,5 +1,7 @@
 import type { SessionUser } from "./auth/users.ts";
+import type { PushMessage } from "./push/messages.ts";
 import type { GroupRoom } from "./room/object.ts";
+import type { UsageEvent } from "./usage.ts";
 import type { Wallet } from "./wallet/object.ts";
 
 export type Env = {
@@ -12,6 +14,12 @@ export type Env = {
   GROUP_ROOM: DurableObjectNamespace<GroupRoom>;
   AI: Ai;
   AI_GATEWAY_ID: string;
+  PUSH_QUEUE: Queue<PushMessage>;
+  APNS_KEY_ID: string;
+  APNS_TEAM_ID: string;
+  APNS_TOPIC: string;
+  APNS_PRIVATE_KEY: string; // secret: wrangler secret put APNS_PRIVATE_KEY
+  USAGE_QUEUE: Queue<UsageEvent>;
   APPLE_BUNDLE_ID: string;
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
 };
