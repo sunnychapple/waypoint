@@ -311,6 +311,23 @@ describe("POST /webhooks/apple", () => {
     expect(commands).toEqual([]);
   });
 
+  test("a Production notice carrying a Sandbox transaction gives 400 and sends no wallet command", async () => {
+    await expectInvalid(await post(await notice("ONE_TIME_CHARGE", U1, transaction({ environment: "Sandbox", appAccountToken: A }))));
+    expect(commands).toEqual([]);
+  });
+
+  test("a Sandbox notice carrying a Production transaction gives 400 and sends no wallet command", async () => {
+    const data = await dataFor(transaction({ appAccountToken: A }), { environment: "Sandbox", appAppleId: undefined });
+    await expectInvalid(await post(await signJws(decoded("ONE_TIME_CHARGE", U1, data), chain)));
+    expect(commands).toEqual([]);
+  });
+
+  test("a Sandbox notice carrying a Sandbox transaction gives 400 when APPLE_ENVIRONMENTS is Production only", async () => {
+    const data = await dataFor(transaction({ environment: "Sandbox", appAccountToken: A }), { environment: "Sandbox", appAppleId: undefined });
+    await expectInvalid(await post(await signJws(decoded("ONE_TIME_CHARGE", U1, data), chain), envWith({ APPLE_ENVIRONMENTS: "Production" })));
+    expect(commands).toEqual([]);
+  });
+
   test("a signedPayload signed by another chain gives 400", async () => {
     const other = await makeChain();
     await expectInvalid(await post(await signJws(decoded("TEST", U1, await dataFor(null)), other)));

@@ -49,6 +49,7 @@ export function appleWebhookRoute(deps: AppleWebhookDeps): Hono<AppEnv> {
     if (data?.signedTransactionInfo !== undefined) {
       const txnParsed = AppleTransactionSchema.safeParse(await verified(data.signedTransactionInfo, deps.rootSha256));
       if (!txnParsed.success || txnParsed.data.bundleId !== c.env.APPLE_BUNDLE_ID) invalid();
+      if (txnParsed.data.environment !== data.environment) invalid();
       const txn = txnParsed.data;
       const product = appleProduct(txn.productId);
       const account = product === undefined ? null : await findAccount(db, txn);
