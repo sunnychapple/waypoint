@@ -62,3 +62,18 @@ export const ApproveDeviceRequestSchema = z.strictObject({
   account_envelope: EnvelopeTextSchema,
   envelopes: z.array(GroupEnvelopeSchema).max(500),
 });
+
+// S3: recovery.
+export const RecoveryBlobSchema = z.string().regex(/^[A-Za-z0-9_-]{124}$/); // 93 bytes
+export const PutRecoveryRequestSchema = z.strictObject({
+  account_device_id: KeyIdSchema,
+  wrapped_account_key: RecoveryBlobSchema,
+  verified: z.boolean(),
+});
+export const RecoveryViewSchema = z.strictObject({
+  account_device_id: KeyIdSchema,
+  sign_pub: PublicKeySchema,
+  box_pub: PublicKeySchema,
+  wrapped_account_key: RecoveryBlobSchema,
+  verified_at: z.number().int().nullable(),
+});

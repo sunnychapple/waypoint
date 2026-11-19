@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { ApproveDeviceRequestSchema, DeviceViewSchema, PairingNonceRequestSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
+import {
+  ApproveDeviceRequestSchema,
+  DeviceViewSchema,
+  PairingNonceRequestSchema,
+  PutRecoveryRequestSchema,
+  RegisterDeviceRequestSchema,
+} from "../src/keys.ts";
+import vectors from "../../crypto/test/vectors/waypoint-v1.json";
 
 const SIGN_PUB = "A".repeat(87);
 const BOX_PUB = "B".repeat(87);
@@ -82,5 +89,17 @@ describe("S1C pairing and approval schemas", () => {
     expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [envelope] }).success).toBe(true);
     expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: Array.from({ length: 501 }, () => envelope) }).success).toBe(false);
     expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [{ ...envelope, key_version: 0 }] }).success).toBe(false);
+  });
+});
+
+describe("PutRecoveryRequestSchema", () => {
+  // The recovery entry of the published vectors, read from the file so the test follows any change to it.
+  const VECTOR_ACCOUNT_DEVICE_ID = vectors.recovery.account_device_id;
+  const VECTOR_BLOB = vectors.recovery.blob;
+
+  test("takes the blob of waypoint-v1.json and refuses 123 characters", () => {
+    const body = { account_device_id: VECTOR_ACCOUNT_DEVICE_ID, wrapped_account_key: VECTOR_BLOB, verified: true };
+    expect(PutRecoveryRequestSchema.safeParse(body).success).toBe(true);
+    expect(PutRecoveryRequestSchema.safeParse({ ...body, wrapped_account_key: VECTOR_BLOB.slice(0, 123) }).success).toBe(false);
   });
 });
