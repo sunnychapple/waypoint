@@ -19,7 +19,7 @@ const EXPECTED = {
   groups: ["id", "kind", "name_locked", "key_version", "created_by"],
   memberships: ["group_id", "user_id", "role", "starts_at", "ends_at", "history_from", "left_at"],
   key_envelopes: ["group_id", "key_version", "device_id", "wrapped_key"],
-  invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by"],
+  invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by", "created_by", "history_from", "ends_at"],
   links: ["id", "group_id", "blob_key", "passcode_hash", "expires_at", "revoked_at", "views"],
   purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
   jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id"],
@@ -42,7 +42,7 @@ const EXPECTED_TYPES = {
   groups: { id: "TEXT", kind: "TEXT", name_locked: "TEXT", key_version: "INTEGER", created_by: "TEXT?" },
   memberships: { group_id: "TEXT", user_id: "TEXT", role: "TEXT", starts_at: "INTEGER", ends_at: "INTEGER?", history_from: "INTEGER", left_at: "INTEGER?" },
   key_envelopes: { group_id: "TEXT", key_version: "INTEGER", device_id: "TEXT", wrapped_key: "TEXT" },
-  invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?" },
+  invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?", created_by: "TEXT?", history_from: "INTEGER", ends_at: "INTEGER?" },
   links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER" },
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
   jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?" },
@@ -65,6 +65,7 @@ const REQUIRED_INDEXES = [
   ["links", ["group_id"]],
   ["key_envelopes", ["device_id"]],
   ["invites", ["group_id"]],
+  ["memberships", ["ends_at"]],
   ["request_nonces", ["expires_at"]],
 ];
 
@@ -443,4 +444,35 @@ test("rejects the same notification_uuid for two rows", () => {
   );
   insert.run("n1", "REFUND", 1);
   assert.throws(() => insert.run("n1", "REFUND", 2), /UNIQUE constraint failed/);
+});
+
+test("an invite inserted without history_from reads back 0", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.prepare("INSERT INTO invites (token_hash, group_id, role, expires_at) VALUES ('h1', 'g1', 'viewer', 1)").run();
+  const invite = db.prepare("SELECT history_from FROM invites WHERE token_hash = 'h1'").get();
+  assert.equal(invite.history_from, 0);
+});
+
+test("deleting the user in invites.created_by deletes that invite", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  seedUser(db, "u2", "clerk_2");
+  db.exec(`
+    INSERT INTO invites (token_hash, group_id, role, expires_at, created_by) VALUES ('h1', 'g1', 'viewer', 1, 'u2');
+    INSERT INTO invites (token_hash, group_id, role, expires_at, created_by) VALUES ('h2', 'g1', 'viewer', 1, 'u1');
+  `);
+  db.prepare("DELETE FROM users WHERE id = 'u2'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM invites WHERE token_hash = 'h1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM invites WHERE token_hash = 'h2'"), 1);
+});
+
+test("rejects an invite whose created_by is a missing user", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  assert.throws(
+    () =>
+      db.prepare("INSERT INTO invites (token_hash, group_id, role, expires_at, created_by) VALUES ('h1', 'g1', 'viewer', 1, 'missing')").run(),
+    /FOREIGN KEY constraint failed/,
+  );
 });

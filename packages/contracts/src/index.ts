@@ -9,3 +9,4 @@ export * from "./push.ts";
 export * from "./instant.ts";
 export * from "./purchases.ts";
 export * from "./keys.ts";
+export * from "./groups.ts";
