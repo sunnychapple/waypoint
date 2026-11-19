@@ -25,6 +25,7 @@ const EXPECTED = {
   jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at"],
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
   idempotency: ["user_id", "key", "request_hash", "state", "status", "body", "created_at"],
+  push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"],
 };
 
 // "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
@@ -44,6 +45,7 @@ const EXPECTED_TYPES = {
   jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?" },
   activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
   idempotency: { user_id: "TEXT", key: "TEXT", request_hash: "TEXT", state: "TEXT", status: "INTEGER?", body: "TEXT?", created_at: "INTEGER" },
+  push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" },
 };
 
 // Indexes the card requires, as [table, indexed columns in order].
@@ -90,13 +92,12 @@ function count(db, sql, ...args) {
   return db.prepare(sql).get(...args).n;
 }
 
-test("creates exactly the 12 directory tables and the idempotency table", () => {
+test("creates exactly the expected tables", () => {
   const db = freshDb();
   const rows = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all();
   assert.deepEqual(rows.map((r) => r.name), Object.keys(EXPECTED).sort());
-  assert.equal(rows.length, 13);
 });
 
 test("each table has exactly the columns in architecture section 5", () => {
@@ -344,4 +345,41 @@ test("has an index on idempotency(created_at)", () => {
     db.prepare(`PRAGMA index_info(${idx.name})`).all().map((c) => c.name).join(",") === "created_at",
   );
   assert.equal(found, true);
+});
+
+test("rejects a bad push_tokens.environment", () => {
+  const db = freshDb();
+  seedUser(db);
+  assert.throws(
+    () =>
+      db.prepare(
+        "INSERT INTO push_tokens (user_id, device_id, token, environment, updated_at) VALUES ('u1', 'd1', 't1', 'dev', 1)",
+      ).run(),
+    /CHECK constraint failed/,
+  );
+});
+
+test("rejects the same push token for two rows", () => {
+  const db = freshDb();
+  seedUser(db);
+  seedUser(db, "u2", "clerk_2");
+  db.prepare("INSERT INTO push_tokens (user_id, device_id, token, environment, updated_at) VALUES ('u1', 'd1', 't1', 'sandbox', 1)").run();
+  assert.throws(
+    () =>
+      db.prepare("INSERT INTO push_tokens (user_id, device_id, token, environment, updated_at) VALUES ('u2', 'd2', 't1', 'sandbox', 1)").run(),
+    /UNIQUE constraint failed/,
+  );
+});
+
+test("deleting a user deletes their push token rows", () => {
+  const db = freshDb();
+  seedUser(db);
+  seedUser(db, "u2", "clerk_2");
+  db.exec(`
+    INSERT INTO push_tokens (user_id, device_id, token, environment, updated_at) VALUES ('u1', 'd1', 't1', 'production', 1);
+    INSERT INTO push_tokens (user_id, device_id, token, environment, updated_at) VALUES ('u2', 'd2', 't2', 'production', 1);
+  `);
+  db.prepare("DELETE FROM users WHERE id = 'u1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM push_tokens WHERE user_id = 'u1'"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM push_tokens WHERE user_id = 'u2'"), 1);
 });

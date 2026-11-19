@@ -1,17 +1,32 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { AuthProvider, useGate } from "../platform/auth.tsx";
 import { useColors } from "../ui/theme.ts";
 
-export default function RootLayout() {
+function RootStack() {
   const colors = useColors();
+  const gate = useGate();
+  if (gate === "wait") return null;
   return (
-    <>
-      <StatusBar style="auto" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+      <Stack.Protected guard={gate === "app"}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
-      </Stack>
-    </>
+      </Stack.Protected>
+      <Stack.Protected guard={gate === "sign_in"}>
+        <Stack.Screen name="sign-in" />
+        <Stack.Screen name="check-email" />
+      </Stack.Protected>
+    </Stack>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <StatusBar style="auto" />
+      <RootStack />
+    </AuthProvider>
   );
 }
