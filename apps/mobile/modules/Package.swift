@@ -9,5 +9,7 @@ let package = Package(
   targets: [
     .target(name: "AudioCore", path: "waypoint-audio/ios/Core"),
     .testTarget(name: "AudioCoreTests", dependencies: ["AudioCore"], path: "waypoint-audio/ios/Tests"),
+    .target(name: "PagesCore", path: "waypoint-pages/ios/Core"),
+    .testTarget(name: "PagesCoreTests", dependencies: ["PagesCore"], path: "waypoint-pages/ios/Tests"),
   ]
 )
