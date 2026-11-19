@@ -71,7 +71,7 @@ Every paid flow follows one money pattern: **quote, hold, run, settle at the rea
 1. **Explain a word (instant, streamed).** App `POST /v1/tasks/explain` with the word and about 54 s of transcript. API asks the wallet to hold 1 credit. The router (Clef-flash) scores the request and picks light, standard or strong. The model call goes through AI Gateway with logging off, streaming. The answer streams back through the Worker. API settles at the real cost. A usage event goes to a queue (task, size, route, no content). Nothing is written to storage. If the model fails, the hold is released and the app offers Try again or Ask later.
 2. **Audio overview.** App `POST /v1/jobs` type `overview_script` with the transcript text. Hold 40 credits. Start a Workflow; the app gets a job id. A strong model writes the two-host script. The script is stored in R2 sealed to the requesting device, 7-day life. Settle the hold. Queue sends push "your overview is ready". The app fetches the script, speaks it with two on-device voices and saves the audio locally, then `DELETE`s the result. Research and video slides use the same shape.
 3. **Second transcript (opt-in).** App `POST /v1/jobs` type `retranscribe`, quoted at 1 credit per minute. App uploads the audio for this job with a signed URL to R2 `tmp/audio/{job}`. Workflow runs Whisper large v3 turbo in chunks, deletes the audio, stores the text sealed to the device, settles. The app compares with the on-device transcript and marks changed words. This is the only flow where audio leaves the phone; it is held unlocked only for the length of the job. The sheet that turns it on must say so.
-4. **Sync and sharing.** Device A locks the change with the group key, opens the socket `/v1/groups/:id/sync`, appends the locked change. The room gives it the next sequence number and broadcasts to connected devices; offline ones get a push. Device B fetches changes after its last number. Locked media is uploaded to R2 with a signed URL, paid plans only. The room orders changes but cannot read them. Removing a member bumps the key version; only remaining devices get the new wrapped key.
+4. **Sync and sharing.** Device A locks the change with the group key and sends it with `POST /v1/groups/:id/changes`. The room gives it the next sequence number and tells every device with an open socket (`/v1/groups/:id/sync`, notices only, no content) that the log moved; devices without a socket get a silent push, at most one a minute. Device B fetches changes after its last number with `GET /v1/groups/:id/changes?after=`. Locked media is uploaded through the API Worker to R2 (`POST /v1/blobs`), paid plans only, at most 3 GB per person. The room orders changes but cannot read them. Who may read from when is the membership's `history_from` (decided 19 Nov 2026, `docs/cards/wave-3-groups.md`). The room orders changes but cannot read them. Removing a member bumps the key version; only remaining devices get the new wrapped key.
 5. **Purchases and credits.** StoreKit 2 purchase on the device; app `POST /v1/purchases/apple` with the signed transaction. API verifies Apple's signature, wallet grants credits once per transaction id. Apple server notices (renewal, refund, revoke) arrive at `POST /webhooks/apple`; the wallet adds the monthly allowance or claws back. A family member who gets Own it through Family Sharing gets access only; the 2,000 credits go to the buyer, once. The app sets the purchase's `appAccountToken` to the user id, and the app's request and Apple's notice for the same transaction share one wallet command id, so either may arrive first. Plus yearly renews once a year; an hourly cron resets its monthly credits each month.
 6. **Releasing an update.** CI builds feature bundles and uploads to Zephyr, which stores an immutable version in our Cloudflare account. CI moves the internal tag, checks, then moves the tag for the native version. At launch the app asks what its tag points to, verifies SHA-256, caches, uses it on the next cold start. Roll back by moving the tag.
 7. **Adding a device.** New device `POST /v1/devices` with its public keys. API pushes to an old device. The person compares a 6-digit code on both and approves; old device `POST /v1/devices/:id/approve` with group keys wrapped for the new device. Push "approved"; the new device fetches wrapped keys, then syncs. Signing in proves who you are; it never unlocks notes. Without a trusted device, the 12-word recovery key unwraps the same keys.
@@ -79,14 +79,14 @@ Every paid flow follows one money pattern: **quote, hold, run, settle at the rea
 
 ## 4. API
 
-One versioned REST surface on the API Worker plus one socket per group. Every request carries the Clerk session, except `GET /v1/config`, which the app reads before sign-in and which holds no personal data. Requests that change keys, devices or money are also signed by the device key.
+One versioned REST surface on the API Worker plus one socket per group. Every request carries the Clerk session, except `GET /v1/config`, which the app reads before sign-in and which holds no personal data, and `GET /v1/links/:id/data`, which the shared-link viewer reads with no account (rate limited; a passcode link also needs the passcode and a Turnstile token). Requests that change keys, devices or money are also signed by the device key.
 
 | Area | Endpoints | Backed by |
 |---|---|---|
 | Config | `GET /v1/config` | KV: price table, routes version, flags, minimum native version, voice pack |
 | Devices and keys | `POST /v1/devices`, `GET /v1/devices`, `GET /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing/reveal`, `POST /v1/devices/:id/approve`, `DELETE /v1/devices/:id`, `PUT /v1/recovery`, `GET /v1/recovery`, `POST /v1/push-tokens` | D1 |
 | Groups | `POST /v1/groups`, `GET /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`, `GET /v1/groups/:id/devices`, `GET /v1/groups/:id/keys`, `POST /v1/groups/:id/keys` | D1, group room |
-| Sync | `GET /v1/groups/:id/sync` (socket), `GET /v1/groups/:id/changes?after=`, `POST /v1/groups/:id/changes`, `POST /v1/blobs` (returns a signed upload URL), `GET /v1/blobs/:id` | Group room, R2 |
+| Sync | `GET /v1/groups/:id/sync` (socket), `GET /v1/groups/:id/changes?after=`, `POST /v1/groups/:id/changes`, `POST /v1/blobs?group=&id=` (uploads the locked file through the Worker), `GET /v1/blobs/:id` | Group room, R2 |
 | Shared links | `POST /v1/links`, `DELETE /v1/links/:id`, `GET /l/:id` (viewer page), `GET /v1/links/:id/data` | D1, R2, static assets |
 | Instant tasks | `POST /v1/tasks/quote`, `POST /v1/tasks/explain` (stream), `POST /v1/tasks/more-detail` (stream), `POST /v1/tasks/double-check`, `POST /v1/tasks/read-link` | Wallet, router, Workers AI through AI Gateway, Browser Run |
 | Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id` | Workflows, wallet, R2 |
@@ -154,6 +154,9 @@ Added by later migrations (numbers fixed in `docs/build-plan.md`, "Build order")
      device_pairings     (device_id, commitment, approver_id, approver_nonce, device_nonce, expires_at)
      request_nonces      (device_id, nonce, expires_at)                              -- signed requests, kept for the 5-minute window
      jobs                + device_id                                                 -- the device a result is sealed to
+0006 invites             + created_by, history_from, ends_at                         -- PR 27; the new member's terms
+0007 blobs               (id, group_id, user_id, bytes, created_at, stored_at)       -- PR 29; locked media in R2, sizes for the 3 GB cap
+0008 links               + created_by, created_at                                    -- PR 30
 ```
 
 ### Group room (one Durable Object per group, SQLite storage)
@@ -162,6 +165,7 @@ Added by later migrations (numbers fixed in `docs/build-plan.md`, "Build order")
 changes  (seq PK, device_id, key_version, kind, locked_bytes, blob_key, at)
 cursors  (device_id PK, last_seq, seen_at)
 presence (device_id, user_id, since)   -- memory only
+pushes   (device_id PK, pushed_at)    -- PR 28: at most one sync push a minute per device
 ```
 
 ### Wallet (one Durable Object per billing account, SQLite storage)
