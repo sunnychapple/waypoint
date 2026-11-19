@@ -6,14 +6,20 @@ describe("isValidIdempotencyKey", () => {
     expect(IDEMPOTENCY_KEY_HEADER).toBe("Idempotency-Key");
   });
 
-  test("accepts lengths 16 and 128", () => {
+  test("accepts length 16", () => {
     expect(isValidIdempotencyKey("a".repeat(16))).toBe(true);
-    expect(isValidIdempotencyKey("a".repeat(128))).toBe(true);
   });
 
-  test("rejects lengths 15 and 129", () => {
+  test("accepts length 64", () => {
+    expect(isValidIdempotencyKey("a".repeat(64))).toBe(true);
+  });
+
+  test("rejects length 15", () => {
     expect(isValidIdempotencyKey("a".repeat(15))).toBe(false);
-    expect(isValidIdempotencyKey("a".repeat(129))).toBe(false);
+  });
+
+  test("rejects length 65", () => {
+    expect(isValidIdempotencyKey("a".repeat(65))).toBe(false);
   });
 
   test("accepts letters, digits, underscore and hyphen", () => {

@@ -34,10 +34,10 @@ export type RouteDecision =
 
 export type DecideRouteInput = {
   task: string;
-  answers?: RouterAnswers;
+  answers?: RouterAnswers | undefined;
   zeroRetention: boolean;
   routes: RouteTable;
-  minConfidence?: number;
+  minConfidence?: number | undefined;
 };
 
 function pickEntry(
@@ -62,9 +62,8 @@ export function decideRoute(input: DecideRouteInput): RouteDecision {
   checkMinConfidence(minConfidence);
   const { answers } = input;
 
-  const fixedTier = Object.hasOwn(input.routes.fixed, input.task)
-    ? input.routes.fixed[input.task]
-    : undefined;
+  const fixed: Readonly<Record<string, Tier | undefined>> = input.routes.fixed;
+  const fixedTier = Object.hasOwn(fixed, input.task) ? fixed[input.task] : undefined;
   let requestedTier: Tier;
   if (fixedTier !== undefined) {
     requestedTier = fixedTier;

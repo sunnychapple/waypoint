@@ -58,4 +58,40 @@ describe("RouteTableSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  test("rejects a typo in a fixed task name", () => {
+    const { double_check: strong, ...rest } = DEFAULT_ROUTES.fixed;
+    const result = RouteTableSchema.safeParse({
+      ...DEFAULT_ROUTES,
+      fixed: { ...rest, doble_check: strong },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an empty fixed object", () => {
+    const result = RouteTableSchema.safeParse({ ...DEFAULT_ROUTES, fixed: {} });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects fixed without double_check", () => {
+    const { double_check: _omitted, ...rest } = DEFAULT_ROUTES.fixed;
+    const result = RouteTableSchema.safeParse({ ...DEFAULT_ROUTES, fixed: rest });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects fixed that lists explain", () => {
+    const result = RouteTableSchema.safeParse({
+      ...DEFAULT_ROUTES,
+      fixed: { ...DEFAULT_ROUTES.fixed, explain: "light" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects fixed that lists retranscribe", () => {
+    const result = RouteTableSchema.safeParse({
+      ...DEFAULT_ROUTES,
+      fixed: { ...DEFAULT_ROUTES.fixed, retranscribe: "light" },
+    });
+    expect(result.success).toBe(false);
+  });
 });
