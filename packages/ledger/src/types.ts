@@ -36,7 +36,8 @@ export type CommandResult =
   | { ok: true; released: readonly string[] }
   | { ok: true; removed: number; owed: number }
   | { ok: false; shortfall: number }
-  | { ok: false; reason: "unknown_hold" };
+  | { ok: false; reason: "unknown_hold" }
+  | { ok: false; reason: "hold_closed" };
 
 export type WalletState = {
   balances: {
@@ -52,7 +53,7 @@ export type WalletState = {
 };
 
 export type Command =
-  | { type: "grant"; id: string; bucket: WalletBucket; credits: number; ref: string; user_id?: string }
+  | { type: "grant"; id: string; bucket: WalletBucket; credits: number; ref: string; user_id?: string | undefined }
   | {
       type: "hold";
       id: string;
@@ -65,6 +66,6 @@ export type Command =
   | { type: "settle"; id: string; hold_id: string; actual: number }
   | { type: "release"; id: string; hold_id: string }
   | { type: "release_expired"; id: string }
-  | { type: "refund"; id: string; bucket: WalletBucket; credits: number; ref: string; user_id?: string }
+  | { type: "refund"; id: string; bucket: WalletBucket; credits: number; ref: string; user_id?: string | undefined }
   | { type: "clawback"; id: string; credits: number; ref: string }
   | { type: "reset"; id: string; credits: number; resets_at: number };

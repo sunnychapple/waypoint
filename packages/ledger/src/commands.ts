@@ -15,6 +15,15 @@ export type ApplyOutput = {
   result: CommandResult;
 };
 
+// Credits to buy before a hold of this size succeeds: 0 when it fits now. A purchase pays the
+// balance owed first, so owed is added to what is missing.
+export function shortfall(balances: { monthly: number; purchased: number; owed: number }, credits: number): number {
+  const available = balances.monthly + balances.purchased;
+  return available >= credits ? 0 : credits - available + balances.owed;
+}
+
+const HOLD_CLOSED: CommandResult = Object.freeze({ ok: false, reason: "hold_closed" });
+
 type Draft = {
   balances: WalletState["balances"];
   holds: Record<string, Hold>;
@@ -33,6 +42,14 @@ export function apply(state: WalletState, command: Command, now: number): ApplyO
   if (prior !== undefined) {
     if (prior.type !== command.type) {
       throw new Error("command id reused for a different command");
+    }
+    if (command.type === "hold") {
+      // A replayed hold is ok only while that same hold is still open; otherwise the task would run unpaid.
+      const open = Object.hasOwn(state.holds, command.hold_id) ? state.holds[command.hold_id] : undefined;
+      if (open === undefined) return { state, entries: [], result: HOLD_CLOSED };
+      if (open.user_id !== command.user_id || open.task !== command.task || open.credits !== command.credits) {
+        throw new Error("command id reused for a different command");
+      }
     }
     return { state, entries: [], result: prior.result };
   }
@@ -79,10 +96,8 @@ function execute(d: Draft, command: Command): CommandResult {
       if (Object.hasOwn(d.holds, command.hold_id)) {
         throw new Error(`hold already exists: ${command.hold_id}`);
       }
-      const available = d.balances.monthly + d.balances.purchased;
-      if (available < command.credits) {
-        return { ok: false, shortfall: command.credits - available };
-      }
+      const short = shortfall(d.balances, command.credits);
+      if (short > 0) return { ok: false, shortfall: short };
       const fromMonthly = Math.min(d.balances.monthly, command.credits);
       const fromPurchased = command.credits - fromMonthly;
       d.holds[command.hold_id] = {
