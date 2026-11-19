@@ -4,9 +4,9 @@ import type { Tier } from "@waypoint/router";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { z } from "zod";
-import { gatewayOptions, type AiBinding } from "../ai/gateway.ts";
+import { gatewayOptions, replyText, type AiBinding } from "../ai/gateway.ts";
 import { routeTask } from "../ai/router.ts";
-import { readModelStream, type StreamResult } from "../ai/stream.ts";
+import { readModelStream, readUsage, type StreamResult } from "../ai/stream.ts";
 import { ConfigError, loadConfig } from "../config/load.ts";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure, InsufficientCredits } from "../errors.ts";
@@ -214,4 +214,34 @@ export async function streamTask(
     };
     await sse.writeSSE({ event: "done", data: JSON.stringify(done) });
   });
+}
+
+// Runs the model without streaming and returns the whole answer. If the call fails or the answer
+// is empty, the hold is released and the reply is 500 "model unavailable".
+export async function answerTask(
+  c: Context<AppEnv>,
+  held: HeldTask,
+  prompt: { messages: ChatMessage[]; maxTokens: number },
+  now: () => number,
+): Promise<{ text: string; charged: number }> {
+  const ai: AiBinding = c.env.AI;
+  const tokens: { tokens_in: number | null; tokens_out: number | null } = { tokens_in: null, tokens_out: null };
+  let text: string | null = null;
+  try {
+    const output = await ai.run(
+      held.model,
+      { messages: prompt.messages, max_tokens: prompt.maxTokens, chat_template_kwargs: { enable_thinking: false } },
+      { gateway: gatewayOptions(c.env.AI_GATEWAY_ID), signal: AbortSignal.timeout(TASK_TIME_LIMIT_MS[held.task]) },
+    );
+    text = replyText(output);
+    readUsage(output, tokens);
+  } catch {
+    text = null;
+  }
+  if (text === null || text.trim() === "") {
+    await finishTask(c, held, "model_failed", tokens, now());
+    throw new ApiFailure("internal", "model unavailable");
+  }
+  const charged = await finishTask(c, held, "ok", tokens, now());
+  return { text, charged };
 }
