@@ -217,3 +217,10 @@ describe("webhook route through createApp", () => {
     expect(await res.json()).toEqual({ code: "unauthorized", message: "invalid signature", retry_after: null });
   });
 });
+
+describe("activity through createApp", () => {
+  test("GET /v1/activity with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/activity", {}, env);
+    expect(res.status).toBe(401);
+  });
+});
