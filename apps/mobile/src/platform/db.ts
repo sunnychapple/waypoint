@@ -1,6 +1,8 @@
+import { randomUUID } from "expo-crypto";
 import { openDatabaseSync } from "expo-sqlite";
 import { useRef, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
+import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
 
 function openDeviceDb(name: string): SqlDb {
@@ -24,6 +26,7 @@ export function getDb(): SqlDb {
   if (!device) {
     const db = openDeviceDb("waypoint.db");
     migrate(db);
+    ensureDefaultSpace(db, { now: Date.now, newId: randomUUID });
     device = db;
   }
   return device;

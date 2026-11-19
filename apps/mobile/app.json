@@ -11,12 +11,15 @@
       "bundleIdentifier": "app.waypoint.ios",
       "buildNumber": "1",
       "supportsTablet": false,
-      "infoPlist": {}
+      "infoPlist": {},
+      "usesAppleSignIn": true
     },
     "plugins": [
       "expo-router",
       ["expo-sqlite", { "enableFTS": true }],
-      ["expo-build-properties", { "ios": { "deploymentTarget": "26.0" } }]
+      ["expo-build-properties", { "ios": { "deploymentTarget": "26.0" } }],
+      "expo-apple-authentication",
+      "@clerk/expo"
     ]
   }
 }

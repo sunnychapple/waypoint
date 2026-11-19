@@ -4,6 +4,8 @@ import type { AppEnv } from "./env.ts";
 import { configRoute } from "./config/route.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
+import { privacyRoutes } from "./privacy/routes.ts";
+import { pushTokenRoute } from "./push/route.ts";
 import { quoteRoute } from "./tasks/quote.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
@@ -20,5 +22,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", quoteRoute);
   app.route("/", walletRoutes(deps));
   app.route("/", clerkWebhookRoute(deps));
+  app.route("/", privacyRoutes({ now: deps.now }));
+  app.route("/", pushTokenRoute({ now: deps.now }));
   return app;
 }
