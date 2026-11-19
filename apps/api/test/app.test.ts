@@ -1,14 +1,66 @@
 import { HTTPException } from "hono/http-exception";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { ApiErrorSchema, type ApiError } from "@waypoint/contracts";
 import { createApp } from "../src/app.ts";
 import { ApiFailure } from "../src/errors.ts";
+import { createTestDb } from "./helpers/d1.ts";
 
-const env = { DB: {} as D1Database, CONFIG: {} as KVNamespace };
+const ISSUER = "https://clerk.example.com";
+const NOW = 1_800_000_000_000;
+const env = {
+  DB: createTestDb(),
+  CONFIG: {} as KVNamespace,
+  CLERK_ISSUER: ISSUER,
+  CLERK_AUTHORIZED_PARTIES: "",
+};
 const VALID_KEY = "abcdefghijklmnop";
 
+let privateKey: CryptoKey;
+let publicJwk: JsonWebKey & { kid: string };
+
+function toBase64Url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function sessionToken(): Promise<string> {
+  const encode = (value: object): string => toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const signingInput = `${encode({ alg: "RS256", kid: "k1", typ: "JWT" })}.${encode({
+    iss: ISSUER,
+    sub: "user_123",
+    nbf: NOW / 1000 - 60,
+    exp: NOW / 1000 + 60,
+  })}`;
+  const signature = await crypto.subtle.sign(
+    { name: "RSASSA-PKCS1-v1_5" },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
+async function authed(headers: Record<string, string> = {}): Promise<Record<string, string>> {
+  return { ...headers, Authorization: `Bearer ${await sessionToken()}` };
+}
+
+beforeAll(async () => {
+  const pair = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  );
+  if (!("privateKey" in pair)) throw new Error("expected a key pair");
+  privateKey = pair.privateKey;
+  const exported = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  if (!("kty" in exported)) throw new Error("expected a JWK");
+  publicJwk = { ...exported, kid: "k1" };
+});
+
 function setup() {
-  const app = createApp();
+  const app = createApp({
+    fetchJwks: async () => ({ keys: [publicJwk] }),
+    now: () => NOW,
+    newId: () => crypto.randomUUID(),
+  });
   app.get("/throw-rate", () => {
     throw new ApiFailure("rate_limited", "slow down", 30);
   });
@@ -73,7 +125,7 @@ describe("error replies", () => {
 
 describe("Idempotency-Key check", () => {
   test.each(["POST", "PUT", "PATCH", "DELETE"])("%s /v1/x with no key gives 400 bad_request", async (method) => {
-    const res = await setup().request("/v1/x", { method }, env);
+    const res = await setup().request("/v1/x", { method, headers: await authed() }, env);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       code: "bad_request",
@@ -83,18 +135,26 @@ describe("Idempotency-Key check", () => {
   });
 
   test.each(["POST", "PUT", "PATCH", "DELETE"])("%s /v1/x with a 15-character key gives 400", async (method) => {
-    const res = await setup().request("/v1/x", { method, headers: { "Idempotency-Key": "a".repeat(15) } }, env);
+    const res = await setup().request(
+      "/v1/x",
+      { method, headers: await authed({ "Idempotency-Key": "a".repeat(15) }) },
+      env,
+    );
     expect(res.status).toBe(400);
   });
 
   test.each(["POST", "PUT", "PATCH", "DELETE"])("%s /v1/x with a valid key reaches the route", async (method) => {
-    const res = await setup().request("/v1/x", { method, headers: { "Idempotency-Key": VALID_KEY } }, env);
+    const res = await setup().request(
+      "/v1/x",
+      { method, headers: await authed({ "Idempotency-Key": VALID_KEY }) },
+      env,
+    );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ reached: true });
   });
 
   test("GET /v1/x with no key reaches the route", async () => {
-    const res = await setup().request("/v1/x", {}, env);
+    const res = await setup().request("/v1/x", { headers: await authed() }, env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ reached: true });
   });

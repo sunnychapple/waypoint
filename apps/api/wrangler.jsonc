@@ -12,6 +12,7 @@
     }
   ],
   "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "" },
   "durable_objects": { "bindings": [{ "name": "WALLET", "class_name": "Wallet" }] },
   "migrations": [{ "tag": "v1-wallet", "new_sqlite_classes": ["Wallet"] }]
 }
