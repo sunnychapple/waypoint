@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ApproveDeviceRequestSchema,
   DeviceViewSchema,
+  GroupKeysRequestSchema,
   PairingNonceRequestSchema,
   PutRecoveryRequestSchema,
   RegisterDeviceRequestSchema,
@@ -122,5 +123,14 @@ describe("RemoveDeviceRequestSchema", () => {
 
   test("devices: [] fails", () => {
     expect(RemoveDeviceRequestSchema.safeParse({ ...ROTATION, devices: [] }).success).toBe(false);
+  });
+});
+
+describe("S2 group keys", () => {
+  test("GroupKeysRequestSchema refuses an empty envelope list and 501 envelopes", () => {
+    const envelope = { device_id: "device_1", wrapped_key: "E".repeat(10) };
+    expect(GroupKeysRequestSchema.safeParse({ key_version: 1, envelopes: [envelope] }).success).toBe(true);
+    expect(GroupKeysRequestSchema.safeParse({ key_version: 1, envelopes: [] }).success).toBe(false);
+    expect(GroupKeysRequestSchema.safeParse({ key_version: 1, envelopes: Array.from({ length: 501 }, () => envelope) }).success).toBe(false);
   });
 });

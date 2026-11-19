@@ -87,3 +87,32 @@ export const RemoveDeviceRequestSchema = z.union([
   }),
 ]);
 export const RemoveDeviceResponseSchema = z.strictObject({ removed: KeyIdSchema, account_id: KeyIdSchema.nullable() });
+
+// S2: group keys.
+export const GroupKeysRequestSchema = z.strictObject({
+  key_version: z.number().int().min(1),
+  envelopes: z.array(z.strictObject({ device_id: KeyIdSchema, wrapped_key: EnvelopeTextSchema })).min(1).max(500),
+});
+export const GroupKeysResponseSchema = z.strictObject({ key_version: z.number().int().min(1), first: z.boolean() });
+export const GroupDevicesSchema = z.strictObject({
+  key_version: z.number().int().min(1),
+  devices: z.array(
+    z.strictObject({
+      id: KeyIdSchema,
+      user_id: KeyIdSchema,
+      kind: z.enum(["device", "account"]),
+      role: z.enum(["owner", "editor", "viewer"]),
+      sign_pub: PublicKeySchema,
+      box_pub: PublicKeySchema,
+      cert: SignatureSchema.nullable(),
+      has_current_key: z.boolean(),
+    }),
+  ),
+});
+export const MyGroupKeysSchema = z.strictObject({
+  key_version: z.number().int().min(1),
+  envelopes: z.array(z.strictObject({ key_version: z.number().int().min(1), wrapped_key: EnvelopeTextSchema })),
+  signers: z.array(
+    z.strictObject({ id: KeyIdSchema, user_id: KeyIdSchema, kind: z.enum(["device", "account"]), sign_pub: PublicKeySchema, cert: SignatureSchema.nullable() }),
+  ),
+});
