@@ -1740,6 +1740,8 @@ A static page served by the API Worker itself through Workers static assets (`as
 
 ## Open questions for the product owner
 
+Also in "Open questions" in `docs/build-plan.md` (37 to 45, and 34 for the socket check), merged with the jobs and mobile questions.
+
 1. **Deleting media.** There is no `DELETE /v1/blobs/:id` in the architecture, so the 3 GB a person has uploaded only grows. Add the endpoint (uploader or owner; frees the size) before media sync ships? The same goes for snapshots and compaction of the change log (`groups/{group}/snap/{seq}`), which no card builds yet.
 2. **Turnstile next to the link key** [R10]. `docs/security.md` says the viewer loads no third-party scripts, but Turnstile's widget script must run in the page, which holds the link key in memory. V1 loads it only for passcode links. Cloudflare already serves the page, so it is arguably not a new party; the stricter option is a Turnstile page on a separate origin in an iframe that posts the token back. For the security reviewer.
 3. **Media in shared groups for free members.** A free member can download what a paid member uploaded (only uploading needs a paid plan). Keep that?
@@ -1753,6 +1755,8 @@ A static page served by the API Worker itself through Workers static assets (`as
 11. **Migration numbers** (settled): PR 20 takes `0006_jobs.sql`; these cards take `0007` to `0009`.
 
 ## What the owner sets up
+
+All of it is in "Owner setup" in `docs/build-plan.md`.
 
 - **Link passcode pepper:** `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put LINK_PASSCODE_PEPPER`. Rotating it makes every existing passcode stop working.
 - **Turnstile:** a widget in the Cloudflare dashboard for the API host (the viewer is served from it). Its secret key with `npx wrangler secret put TURNSTILE_SECRET_KEY`; its site key goes into the V1 build. Tests use Cloudflare's dummy keys and never call Cloudflare.

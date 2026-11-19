@@ -2357,6 +2357,8 @@ One line each. Full cards are written when the stage starts, against the code th
 
 **Stage 2: talks to the API**
 
+**Superseded by `docs/cards/mobile-stage2.md`**, which has the full stage 2 cards and the owner's numbering (M15–M16 Explain, M17 Plans, M33 Questions for later, M26a/M26b) and an updated outline of stages 3 and 4. The table below is kept only as the original outline.
+
 | Card | Title |
 |---|---|
 | M3 | `packages/api-client`: typed client on `fetch` using `packages/contracts` schemas — Clerk token per request, `Idempotency-Key` on every write, device signature headers (`docs/security.md` section 7) on the writes that need them through an injected signer, a new nonce and timestamp on every retry, the one error shape, 402 shortfall, streaming for explain; tested in Node with a fake `fetch` and a software signer, against the `waypoint-v1.json` request vectors from S0B |

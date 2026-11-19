@@ -17,7 +17,7 @@ S0A → S0B → S1A → S1B → S1C → S1D ──→ S1F (also needs PR 31)
 | `packages/crypto` (all formats, HPKE, signatures, test vectors) | S0A, S0B |
 | Migration `0005_security.sql` (new `devices` columns, `device_pairings`, `request_nonces`, `jobs.device_id`), `BatchDb`, the test D1's `batch`, `requireDeviceSignature`, `apps/api/test/helpers/signing.ts` | S1A |
 | The device signature on the four paid routes merged before S1A (explain, more detail, double-check, Apple purchases) | S1E |
-| Push notices for device pairing; deleting a removed device's push token | S1F (outline below, written in full after S1D) |
+| Push notices for device pairing; deleting a removed device's push token | S1F (full card in `docs/cards/wave-3-jobs.md`) |
 | `packages/contracts/src/keys.ts`: created by S1B; S1C, S1D, S2 and S3 each append their own block | S1B to S3 |
 | `POST /v1/devices`, `GET /v1/devices` | S1B |
 | `GET`/`POST /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing/reveal`, `POST /v1/devices/:id/approve`, `src/keys/envelopes.ts` | S1C |
@@ -2652,6 +2652,8 @@ Not in this PR: signatures on routes written after S1A (each card adds its own),
 ---
 
 ## S1F · Device pushes and push-token cleanup (outline; written in full after S1D)
+
+**Now written in full in `docs/cards/wave-3-jobs.md` (S1F), which replaces this outline.** It builds on S1D and PR 20 Part A (`sendPush`), and its tests are a new file `apps/api/test/device-push.test.ts` instead of edits to the three existing test files.
 
 Builds on S1D and PR 31. Files: `apps/api/src/devices/register.ts`, `apps/api/src/devices/pairing.ts`, `apps/api/src/devices/remove.ts` and their tests (`devices.test.ts`, `pairing.test.ts`, `remove-device.test.ts`, which get a `PUSH_QUEUE` stub in `env`). What it adds, and nothing else:
 
