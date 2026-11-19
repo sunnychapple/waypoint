@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DeviceViewSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
+import { ApproveDeviceRequestSchema, DeviceViewSchema, PairingNonceRequestSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
 
 const SIGN_PUB = "A".repeat(87);
 const BOX_PUB = "B".repeat(87);
@@ -67,5 +67,20 @@ describe("RegisterDeviceRequestSchema", () => {
     };
     expect(DeviceViewSchema.safeParse(pending).success).toBe(true);
     expect(DeviceViewSchema.safeParse({ ...pending, cert: CERT, approved_at: 2, approved_by: "account_1" }).success).toBe(true);
+  });
+});
+
+describe("S1C pairing and approval schemas", () => {
+  test("PairingNonceRequestSchema takes a 43-character nonce and refuses 42", () => {
+    expect(PairingNonceRequestSchema.safeParse({ nonce: "N".repeat(43) }).success).toBe(true);
+    expect(PairingNonceRequestSchema.safeParse({ nonce: "N".repeat(42) }).success).toBe(false);
+  });
+
+  test("ApproveDeviceRequestSchema refuses 501 envelopes and key_version 0", () => {
+    const envelope = { group_id: "g1", key_version: 1, wrapped_key: "E".repeat(10) };
+    const base = { cert: CERT, account_envelope: "E".repeat(10) };
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [envelope] }).success).toBe(true);
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: Array.from({ length: 501 }, () => envelope) }).success).toBe(false);
+    expect(ApproveDeviceRequestSchema.safeParse({ ...base, envelopes: [{ ...envelope, key_version: 0 }] }).success).toBe(false);
   });
 });

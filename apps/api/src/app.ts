@@ -3,8 +3,10 @@ import { requireSession, type SessionDeps } from "./auth/session.ts";
 import type { AppEnv } from "./env.ts";
 import { APPLE_ROOT_CA_G3_SHA256 } from "./apple/jws.ts";
 import { applePurchaseRoute } from "./apple/route.ts";
+import { appleWebhookRoute } from "./apple/webhook.ts";
 import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
+import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
@@ -37,10 +39,12 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", moreDetailRoute(deps));
   app.route("/", doubleCheckRoute(deps));
   app.route("/", applePurchaseRoute({ now: deps.now, rootSha256: APPLE_ROOT_CA_G3_SHA256 }));
+  app.route("/", appleWebhookRoute({ now: deps.now, rootSha256: APPLE_ROOT_CA_G3_SHA256 }));
   app.route("/", walletRoutes(deps));
   app.route("/", clerkWebhookRoute(deps));
   app.route("/", privacyRoutes({ now: deps.now }));
   app.route("/", pushTokenRoute({ now: deps.now }));
   app.route("/", devicesRoute({ now: deps.now }));
+  app.route("/", pairingRoutes({ now: deps.now }));
   return app;
 }
