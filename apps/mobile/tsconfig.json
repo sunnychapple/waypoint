@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["es2022", "dom"],
+    "customConditions": ["react-native"]
+  },
+  "include": ["src", "modules/*/index.ts", "modules/*/src"]
+}
