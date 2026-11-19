@@ -185,7 +185,7 @@ describe("POST /v1/tasks/explain: credits", () => {
     expect(made.store.read()).toMatchObject({ monthly: 9 });
   });
 
-  test("the same key while that hold is still open runs and answers done; monthly 9 (charged once)", async () => {
+  test("the same key while that hold is still open: 409 request in progress, no model call, nothing charged", async () => {
     const made = makeTaskEnv();
     made.store.apply(
       {
@@ -199,8 +199,27 @@ describe("POST /v1/tasks/explain: credits", () => {
       },
       TASK_NOW,
     );
-    const events = await readEvents(await post(made.env));
-    expect(events.map((event) => event.event)).toEqual(["delta", "delta", "done"]);
+    const callsBefore = made.aiCalls.length;
+    const res = await post(made.env);
+    expect(res.status).toBe(409);
+    expect(res.headers.get("Retry-After")).toBe("1");
+    expect(await res.json()).toEqual({ code: "conflict", message: "request in progress", retry_after: 1 });
+    expect(made.aiCalls.length).toBe(callsBefore);
+    expect(made.store.read()).toMatchObject({ monthly: 9 });
+    expect(made.events).toEqual([]);
+  });
+
+  test("two identical requests at once: the model runs once, one streams, the other gets 409; charged once", async () => {
+    const made = makeTaskEnv();
+    const [first, second] = await Promise.all([post(made.env), post(made.env)]);
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const streamed = first.status === 200 ? first : second;
+    const refused = first.status === 200 ? second : first;
+    expect((await readEvents(streamed)).map((event) => event.event).at(-1)).toBe("done");
+    expect(await refused.json()).toEqual({ code: "conflict", message: "request in progress", retry_after: 1 });
+    const answerCalls = made.aiCalls.filter((call) => call.model !== "@cf/example/router");
+    expect(answerCalls.length).toBe(1);
     expect(made.store.read()).toMatchObject({ monthly: 9, holds: [] });
   });
 });

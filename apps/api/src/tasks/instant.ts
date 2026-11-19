@@ -94,6 +94,7 @@ export async function holdAndRoute(
   if (!held.ok) {
     if ("shortfall" in held) throw new InsufficientCredits(held.shortfall);
     if (held.reason === "hold_closed") throw new ApiFailure("conflict", "request already finished");
+    if (held.reason === "hold_in_progress") throw new ApiFailure("conflict", "request in progress", 1);
     throw new ApiFailure("internal", "something went wrong");
   }
 
