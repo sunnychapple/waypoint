@@ -87,6 +87,6 @@ export function devicesRoute(deps: { now: () => number }) {
       const rows = await c.env.DB.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE user_id = ? AND removed_at IS NULL ORDER BY added_at, id`)
         .bind(c.get("user").id)
         .all<DeviceView>();
-      return c.json({ devices: rows.results });
+      return c.json({ user_id: c.get("user").id, devices: rows.results });
     });
 }
