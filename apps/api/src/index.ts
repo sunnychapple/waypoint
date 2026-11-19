@@ -1,6 +1,7 @@
 import { topUpYearlyPlus } from "./apple/allowance.ts";
+import type { WalletCommands } from "./apple/purchases.ts";
 import { createApp } from "./app.ts";
-import { cleanup } from "./cleanup.ts";
+import { cleanup, type CleanupEnv } from "./cleanup.ts";
 import type { Env } from "./env.ts";
 import { apnsJwtSource } from "./push/apns.ts";
 import { handlePushBatch, PUSH_QUEUE_NAME, type PushDeps } from "./push/consumer.ts";
@@ -25,7 +26,14 @@ export default {
     throw new Error("unknown queue");
   },
   async scheduled(controller, env) {
-    await cleanup(env, controller.scheduledTime);
-    await topUpYearlyPlus(env.DB, (id) => env.WALLET.get(env.WALLET.idFromName(id)), controller.scheduledTime);
+    await runScheduled(env, (id) => env.WALLET.get(env.WALLET.idFromName(id)), controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;
+
+// Both jobs run even if one fails; a failure is rethrown afterwards so it still shows in the logs.
+export async function runScheduled(env: CleanupEnv, walletFor: (billingAccountId: string) => WalletCommands, now: number): Promise<void> {
+  const results = await Promise.allSettled([cleanup(env, now), topUpYearlyPlus(env.DB, walletFor, now)]);
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+  }
+}

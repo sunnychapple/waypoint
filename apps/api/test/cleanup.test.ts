@@ -12,14 +12,16 @@ const DAY = 24 * HOUR;
 type Stored = { key: string; uploaded: Date };
 
 // An in-memory bucket: keys stay sorted, list pages by key (the cursor is the last key of the page),
-// and deletes are real. Records every prefix it is asked to list.
+// and deletes are real. Records every prefix it is asked to list and the cursor each list call was given.
 function fakeBucket(objects: Stored[]) {
   const listedPrefixes: string[] = [];
   const pages: number[] = [];
+  const cursors: (string | undefined)[] = [];
   const sorted = [...objects].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const bucket: CleanupBucket = {
     async list(options) {
       listedPrefixes.push(options.prefix);
+      cursors.push(options.cursor);
       const matching = sorted.filter((o) => o.key.startsWith(options.prefix) && (options.cursor === undefined || o.key > options.cursor));
       const page = matching.slice(0, options.limit);
       pages.push(page.length);
@@ -34,7 +36,7 @@ function fakeBucket(objects: Stored[]) {
       }
     },
   };
-  return { bucket, listedPrefixes, pages, remaining: () => sorted.map((o) => o.key) };
+  return { bucket, listedPrefixes, pages, cursors, remaining: () => sorted.map((o) => o.key) };
 }
 
 function padded(prefix: string, i: number): string {
@@ -75,11 +77,32 @@ describe("cleanup", () => {
 
   test("2,500 old results/ objects over three pages are all deleted, passing the cursor back", async () => {
     const objects = Array.from({ length: 2500 }, (_, i) => ({ key: padded("results/", i), uploaded: new Date(NOW - 8 * DAY) }));
-    const { bucket, pages, remaining } = fakeBucket(objects);
+    const { bucket, pages, cursors, remaining } = fakeBucket(objects);
     const counts = await cleanup({ DB: createTestDb(), BUCKET: bucket }, NOW);
     expect(counts.results).toBe(2500);
     expect(remaining()).toEqual([]);
     expect(pages.slice(0, 3)).toEqual([1000, 1000, 500]);
+    expect(cursors.slice(0, 3)).toEqual([undefined, padded("results/", 999), padded("results/", 1999)]);
+  });
+
+  test("20,000 new results/ objects then one 30-day-old object: the old one is deleted and the new ones kept", async () => {
+    const objects = Array.from({ length: 20000 }, (_, i) => ({ key: padded("results/", i), uploaded: new Date(NOW - HOUR) }));
+    objects.push({ key: "results/zzold", uploaded: new Date(NOW - 30 * DAY) });
+    const { bucket, remaining } = fakeBucket(objects);
+    const counts = await cleanup({ DB: createTestDb(), BUCKET: bucket }, NOW);
+    expect(counts.results).toBe(1);
+    expect(remaining()).toHaveLength(20000);
+    expect(remaining()).not.toContain("results/zzold");
+  });
+
+  test("an object uploaded exactly 7 days ago is kept; one 1 ms older is deleted", async () => {
+    const { bucket, remaining } = fakeBucket([
+      { key: "results/edge", uploaded: new Date(NOW - 7 * DAY) },
+      { key: "results/just-past", uploaded: new Date(NOW - 7 * DAY - 1) },
+    ]);
+    const counts = await cleanup({ DB: createTestDb(), BUCKET: bucket }, NOW);
+    expect(remaining()).toEqual(["results/edge"]);
+    expect(counts.results).toBe(1);
   });
 
   test("25 pages of old objects: only 20 pages are listed in one run", async () => {

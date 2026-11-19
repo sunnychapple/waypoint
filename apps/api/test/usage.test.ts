@@ -10,6 +10,11 @@ import { createTestDb } from "./helpers/d1.ts";
 export const aeFits: (dataset: AnalyticsEngineDataset) => UsageDataset = (dataset) => dataset;
 export const eventFits: (event: UsageEvent) => z.infer<typeof UsageEventSchema> = (event) => event;
 
+// Compile-time check: true only if the schema's type and UsageEvent are identical, so tsc fails when either gains
+// a field the other lacks (an optional field included, which eventFits alone does not catch).
+type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+export const schemaIsExact: Exact<z.infer<typeof UsageEventSchema>, UsageEvent> = true;
+
 const GOOD: UsageEvent = {
   v: 1,
   id: "explain:u1:abcdefghijklmnop",

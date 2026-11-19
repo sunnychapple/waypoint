@@ -30,13 +30,17 @@ export async function topUpYearlyPlus(db: Db, walletFor: (billingAccountId: stri
     let month = 0;
     while (month < 11 && addMonths(row.purchased_at, month + 1) <= now) month++;
     if (month === 0) continue;
-    const result = await walletFor(row.billing_account_id).apply({
-      type: "reset",
-      id: `plus-month:${row.transaction_id}:${month}`,
-      credits: PLUS_MONTHLY_CREDITS,
-      resets_at: addMonths(row.purchased_at, month + 1),
-    });
-    if (result.ok) applied++;
+    try {
+      const result = await walletFor(row.billing_account_id).apply({
+        type: "reset",
+        id: `plus-month:${row.transaction_id}:${month}`,
+        credits: PLUS_MONTHLY_CREDITS,
+        resets_at: addMonths(row.purchased_at, month + 1),
+      });
+      if (result.ok) applied++;
+    } catch {
+      // A wallet error skips this account only; the others still get their top-up. The next run tries it again.
+    }
   }
   return applied;
 }

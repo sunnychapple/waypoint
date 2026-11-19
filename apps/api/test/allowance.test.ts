@@ -150,6 +150,27 @@ describe("topUpYearlyPlus", () => {
     ]);
   });
 
+  test("the first of three yearly accounts has a wallet error: the other two are still topped up", async () => {
+    const db = createTestDb();
+    for (const n of [1, 2, 3]) {
+      await userWithPlus(db, `u${n}`, `ba${n}`);
+      await db
+        .prepare("INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES (?, ?, ?, 'waypoint.plus.yearly', 'subscription', 'active', ?)")
+        .bind(`t${n}`, `o${n}`, `ba${n}`, YEARLY_START)
+        .run();
+    }
+    const commands: Command[] = [];
+    const walletFor = (billingAccountId: string): WalletCommands => ({
+      async apply(command) {
+        if (billingAccountId === "ba1") throw new Error("wallet unavailable");
+        commands.push(command);
+        return { ok: true };
+      },
+    });
+    expect(await topUpYearlyPlus(db, walletFor, NOW)).toBe(2);
+    expect(commands.map((command) => command.id).sort()).toEqual(["plus-month:t2:9", "plus-month:t3:9"]);
+  });
+
   test("a monthly Plus subscription gets no command", async () => {
     const db = createTestDb();
     await userWithPlus(db, "u1", "ba1");
