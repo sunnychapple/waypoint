@@ -198,3 +198,10 @@ describe("quote errors", () => {
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
 });
+
+describe("wallet", () => {
+  test("GET /v1/wallet with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/wallet", {}, env);
+    expect(res.status).toBe(401);
+  });
+});
