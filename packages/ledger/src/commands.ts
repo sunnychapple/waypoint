@@ -23,6 +23,7 @@ export function shortfall(balances: { monthly: number; purchased: number; owed: 
 }
 
 const HOLD_CLOSED: CommandResult = Object.freeze({ ok: false, reason: "hold_closed" });
+const HOLD_IN_PROGRESS: CommandResult = Object.freeze({ ok: false, reason: "hold_in_progress" });
 
 type Draft = {
   balances: WalletState["balances"];
@@ -50,6 +51,8 @@ export function apply(state: WalletState, command: Command, now: number): ApplyO
       if (open.user_id !== command.user_id || open.task !== command.task || open.credits !== command.credits) {
         throw new Error("command id reused for a different command");
       }
+      // The first request with this id is still running: a second one must not run the task too.
+      return { state, entries: [], result: HOLD_IN_PROGRESS };
     }
     return { state, entries: [], result: prior.result };
   }

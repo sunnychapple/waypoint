@@ -6,3 +6,4 @@ export * from "./config.ts";
 export * from "./wallet.ts";
 export * from "./privacy.ts";
 export * from "./push.ts";
+export * from "./instant.ts";

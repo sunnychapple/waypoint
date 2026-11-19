@@ -1,6 +1,7 @@
 import type { SessionUser } from "./auth/users.ts";
 import type { PushMessage } from "./push/messages.ts";
 import type { GroupRoom } from "./room/object.ts";
+import type { UsageEvent } from "./usage.ts";
 import type { Wallet } from "./wallet/object.ts";
 
 export type Env = {
@@ -18,5 +19,6 @@ export type Env = {
   APNS_TEAM_ID: string;
   APNS_TOPIC: string;
   APNS_PRIVATE_KEY: string; // secret: wrangler secret put APNS_PRIVATE_KEY
+  USAGE_QUEUE: Queue<UsageEvent>;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
