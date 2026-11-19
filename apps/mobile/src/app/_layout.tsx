@@ -16,6 +16,9 @@ function RootStack() {
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="new-space" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="space/[id]" options={{ presentation: "card" }} />
+        <Stack.Screen name="pages/new" />
+        <Stack.Screen name="pages/[id]" />
+        <Stack.Screen name="session/[id]" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />
