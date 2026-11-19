@@ -22,6 +22,7 @@ export type Env = {
   APNS_PRIVATE_KEY: string; // secret: wrangler secret put APNS_PRIVATE_KEY
   USAGE_QUEUE: Queue<UsageEvent>;
   ANALYTICS: AnalyticsEngineDataset;
+  BUCKET: R2Bucket;
   APPLE_BUNDLE_ID: string;
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
 };

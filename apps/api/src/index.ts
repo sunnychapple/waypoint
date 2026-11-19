@@ -1,4 +1,6 @@
+import { topUpYearlyPlus } from "./apple/allowance.ts";
 import { createApp } from "./app.ts";
+import { cleanup } from "./cleanup.ts";
 import type { Env } from "./env.ts";
 import { apnsJwtSource } from "./push/apns.ts";
 import { handlePushBatch, PUSH_QUEUE_NAME, type PushDeps } from "./push/consumer.ts";
@@ -21,5 +23,9 @@ export default {
     if (batch.queue === PUSH_QUEUE_NAME) return handlePushBatch(batch, env, pushDeps);
     if (batch.queue === USAGE_QUEUE_NAME) return handleUsageBatch(batch, env);
     throw new Error("unknown queue");
+  },
+  async scheduled(controller, env) {
+    await cleanup(env, controller.scheduledTime);
+    await topUpYearlyPlus(env.DB, (id) => env.WALLET.get(env.WALLET.idFromName(id)), controller.scheduledTime);
   },
 } satisfies ExportedHandler<Env>;

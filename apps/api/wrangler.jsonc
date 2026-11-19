@@ -24,6 +24,8 @@
   },
   "ai": { "binding": "AI" },
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "waypoint_usage" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "waypoint" }],
+  "triggers": { "crons": ["0 * * * *"] },
   "queues": {
     "producers": [
       { "binding": "PUSH_QUEUE", "queue": "waypoint-push" },
