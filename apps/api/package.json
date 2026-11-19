@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@waypoint/contracts": "0.0.0",
+    "@waypoint/ledger": "0.0.0",
     "@waypoint/pricing": "0.0.0",
     "@waypoint/router": "0.0.0",
     "hono": "4.13.19",
