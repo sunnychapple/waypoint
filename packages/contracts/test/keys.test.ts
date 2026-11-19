@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { DeviceViewSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
+import { DeviceViewSchema, PutRecoveryRequestSchema, RegisterDeviceRequestSchema } from "../src/keys.ts";
 
 const SIGN_PUB = "A".repeat(87);
 const BOX_PUB = "B".repeat(87);
@@ -67,5 +67,17 @@ describe("RegisterDeviceRequestSchema", () => {
     };
     expect(DeviceViewSchema.safeParse(pending).success).toBe(true);
     expect(DeviceViewSchema.safeParse({ ...pending, cert: CERT, approved_at: 2, approved_by: "account_1" }).success).toBe(true);
+  });
+});
+
+describe("PutRecoveryRequestSchema", () => {
+  // The recovery entry of packages/crypto/test/vectors/waypoint-v1.json, copied here: this package has no Node types to read the file with.
+  const VECTOR_ACCOUNT_DEVICE_ID = "acct_1";
+  const VECTOR_BLOB = "AWBhYmNkZWZnaGlqawkZ0TxRxE900CVwSTC66NBj7QsnzLy22zRjTQG3VUZ7pmn7E4xkxUg0IjD-Ja-jCE-UZu98zzQPNoO5OyfnjtIPnD7K9Ul6BIYxwY2J9vEA";
+
+  test("takes the blob of waypoint-v1.json and refuses 123 characters", () => {
+    const body = { account_device_id: VECTOR_ACCOUNT_DEVICE_ID, wrapped_account_key: VECTOR_BLOB, verified: true };
+    expect(PutRecoveryRequestSchema.safeParse(body).success).toBe(true);
+    expect(PutRecoveryRequestSchema.safeParse({ ...body, wrapped_account_key: VECTOR_BLOB.slice(0, 123) }).success).toBe(false);
   });
 });
