@@ -14,6 +14,7 @@
   "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
   "vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "", "AI_GATEWAY_ID": "waypoint" },
   "ai": { "binding": "AI" },
+  "queues": { "producers": [{ "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }] },
   "durable_objects": {
     "bindings": [
       { "name": "WALLET", "class_name": "Wallet" },

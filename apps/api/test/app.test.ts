@@ -199,6 +199,13 @@ describe("quote errors", () => {
   });
 });
 
+describe("explain route through createApp", () => {
+  test("POST /v1/tasks/explain with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/tasks/explain", { method: "POST" }, env);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("wallet", () => {
   test("GET /v1/wallet with no Authorization header gives 401 through createApp", async () => {
     const res = await setup().request("/v1/wallet", {}, env);

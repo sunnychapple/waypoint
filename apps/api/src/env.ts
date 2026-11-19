@@ -1,5 +1,6 @@
 import type { SessionUser } from "./auth/users.ts";
 import type { GroupRoom } from "./room/object.ts";
+import type { UsageEvent } from "./usage.ts";
 import type { Wallet } from "./wallet/object.ts";
 
 export type Env = {
@@ -12,5 +13,6 @@ export type Env = {
   GROUP_ROOM: DurableObjectNamespace<GroupRoom>;
   AI: Ai;
   AI_GATEWAY_ID: string;
+  USAGE_QUEUE: Queue<UsageEvent>;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
