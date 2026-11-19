@@ -217,7 +217,7 @@ sent_log     (what each cloud task sent)
 
 A set of pages from Snap pages is a session with captures and no audio.
 
-Proposed cryptography, **to be reviewed by a security owner before it is built**: a signing key and an encryption key per device, a symmetric key per group and key version wrapped for each device, authenticated encryption for every change and file.
+Cryptography: see `docs/security.md` (cards in `docs/cards/security.md`); **an outside security review is required before real students use it**. In short: each device has Secure Enclave P-256 signing and encryption keys; each account has an account key (held by its devices and wrapped by the 12-word recovery key) that certifies devices; each group has a random key per key version, wrapped for every device and account key with HPKE (P-256, HKDF-SHA256, AES-256-GCM) and used with AES-256-GCM for every change and file. Devices are added by comparing a 6-digit code; key, device and money requests are signed by the device key.
 
 ## 6. Models and routing
 
