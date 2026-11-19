@@ -6,6 +6,7 @@ import { handleError, handleNotFound } from "./errors.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
 import { quoteRoute } from "./tasks/quote.ts";
 import { walletRoutes } from "./wallet/route.ts";
+import { clerkWebhookRoute } from "./webhooks/clerk.ts";
 
 export function createApp(deps: SessionDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -18,5 +19,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", configRoute);
   app.route("/", quoteRoute);
   app.route("/", walletRoutes(deps));
+  app.route("/", clerkWebhookRoute(deps));
   return app;
 }
