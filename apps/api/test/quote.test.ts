@@ -156,6 +156,10 @@ describe("POST /v1/tasks/quote: bad requests", () => {
     ["research without depth", '{"task": "research", "note": "secret-text"}'],
     ["fallback_voice on explain", '{"task": "explain", "fallback_voice": true, "note": "secret-text"}'],
     ["an extra key", '{"task": "explain", "secret-text": 1}'],
+    ["a JSON array body", '[{"task": "explain", "note": "secret-text"}]'],
+    ["a JSON null body", "null"],
+    ["a JSON number body", "5"],
+    ["an empty body", ""],
   ];
 
   test.each(cases)("%s gives 400 bad_request without echoing the request", async (_name, raw) => {
@@ -178,5 +182,22 @@ describe("POST /v1/tasks/quote: config", () => {
     const res = await post(JSON.stringify({ task: "explain" }), env);
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ code: "internal", message: "config unavailable", retry_after: null });
+  });
+
+  test("a non-ConfigError thrown by CONFIG is rethrown and gives 500 internal 'something went wrong'", async () => {
+    const { env } = makeEnv(goodConfigEntries(), view(10, 0, 0));
+    const broken = {
+      ...env,
+      CONFIG: {
+        async get(): Promise<unknown> {
+          throw new TypeError("kv down");
+        },
+      },
+    };
+    const res = await post(JSON.stringify({ task: "explain" }), broken);
+    expect(res.status).toBe(500);
+    const body: unknown = await res.json();
+    expect(body).toEqual({ code: "internal", message: "something went wrong", retry_after: null });
+    expect(JSON.stringify(body)).not.toContain("kv down");
   });
 });

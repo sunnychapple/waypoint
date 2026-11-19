@@ -182,6 +182,16 @@ describe("quote errors", () => {
     expect(InsufficientCreditsErrorSchema.safeParse(body).success).toBe(true);
   });
 
+  test("a signed-in POST /v1/tasks/quote with no Idempotency-Key gives 400 bad_request through createApp", async () => {
+    const res = await setup().request("/v1/tasks/quote", { method: "POST", headers: await authed() }, env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      code: "bad_request",
+      message: "Idempotency-Key header required",
+      retry_after: null,
+    });
+  });
+
   test("POST /v1/tasks/quote with no Authorization header gives 401 through createApp", async () => {
     const res = await setup().request("/v1/tasks/quote", { method: "POST" }, env);
     expect(res.status).toBe(401);
