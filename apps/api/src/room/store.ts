@@ -49,13 +49,19 @@ export function createRoomStore(store: SqlStore): {
 
   return {
     append(change, now) {
-      if (!DEVICE_ID.test(change.device_id)) throw new RangeError("device_id is not valid");
+      if (typeof change.device_id !== "string" || !DEVICE_ID.test(change.device_id)) {
+        throw new RangeError("device_id is not valid");
+      }
       if (!Number.isSafeInteger(change.key_version) || change.key_version < 1) {
         throw new RangeError("key_version must be a safe integer of at least 1");
       }
-      if (!KIND.test(change.kind)) throw new RangeError("kind is not valid");
+      if (typeof change.kind !== "string" || !KIND.test(change.kind)) throw new RangeError("kind is not valid");
+      if (!(change.locked_bytes instanceof ArrayBuffer)) throw new RangeError("locked_bytes must be an ArrayBuffer");
       if (change.locked_bytes.byteLength < 1 || change.locked_bytes.byteLength > MAX_LOCKED_BYTES) {
         throw new RangeError("locked_bytes must be 1 to 1,048,576 bytes");
+      }
+      if (change.blob_key !== null && typeof change.blob_key !== "string") {
+        throw new RangeError("blob_key must be null or a string");
       }
       if (change.blob_key !== null && (change.blob_key.length < 1 || change.blob_key.length > MAX_BLOB_KEY)) {
         throw new RangeError("blob_key must be null or 1 to 512 characters");
@@ -109,7 +115,7 @@ export function createRoomStore(store: SqlStore): {
     },
 
     ack(deviceId, seq, now) {
-      if (!DEVICE_ID.test(deviceId)) throw new RangeError("device_id is not valid");
+      if (typeof deviceId !== "string" || !DEVICE_ID.test(deviceId)) throw new RangeError("device_id is not valid");
       if (!Number.isSafeInteger(seq) || seq < 0 || seq > lastSeq()) {
         throw new RangeError("seq must be a safe integer from 0 to the room's last seq");
       }

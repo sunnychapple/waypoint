@@ -15,6 +15,25 @@ function change(overrides: Partial<NewChange> = {}): NewChange {
   };
 }
 
+// Number of rows currently in the changes table.
+function rowCount(store: ReturnType<typeof createTestStore>): unknown {
+  return store.sql.exec("SELECT COUNT(*) AS n FROM changes").toArray()[0]?.n;
+}
+
+// A room with one good change already stored, so a rejected append must leave exactly one row.
+function seeded() {
+  const store = createTestStore();
+  const room = createRoomStore(store);
+  room.append(change(), 1);
+  return { store, room };
+}
+
+// Appends a change whose fields may have the wrong runtime type.
+function appendRaw(room: ReturnType<typeof createRoomStore>, overrides: Record<string, unknown>) {
+  const bad: Record<string, unknown> = { ...change(), ...overrides };
+  return Reflect.apply(room.append, room, [bad, 2]);
+}
+
 describe("append and after", () => {
   test("the first append gets seq 1 and the next gets seq 2", () => {
     const room = createRoomStore(createTestStore());
@@ -97,8 +116,26 @@ describe("append checks", () => {
     ["a device_id with a space", "device a"],
     ["a device_id with a dot", "device.a"],
   ])("rejects %s", (_, device_id) => {
+    const { store, room } = seeded();
+    expect(() => room.append(change({ device_id }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
+  });
+
+  test.each([
+    ["a device_id of 128 characters", "a".repeat(128)],
+    ["a device_id with _, : and -", "A_b:c-d"],
+  ])("accepts %s", (_, device_id) => {
     const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ device_id }), 1)).toThrow(RangeError);
+    expect(room.append(change({ device_id }), 1)).toEqual({ seq: 1 });
+  });
+
+  test.each([
+    ["a number", 5],
+    ["undefined", undefined],
+  ])("rejects a device_id that is %s", (_, device_id) => {
+    const { store, room } = seeded();
+    expect(() => appendRaw(room, { device_id })).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test.each([
@@ -107,8 +144,18 @@ describe("append checks", () => {
     ["key_version NaN", Number.NaN],
     ["key_version above the safe integer range", Number.MAX_SAFE_INTEGER + 1],
   ])("rejects %s", (_, key_version) => {
-    const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ key_version }), 1)).toThrow(RangeError);
+    const { store, room } = seeded();
+    expect(() => room.append(change({ key_version }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
+  });
+
+  test.each([
+    ["a string", "1"],
+    ["undefined", undefined],
+  ])("rejects a key_version that is %s", (_, key_version) => {
+    const { store, room } = seeded();
+    expect(() => appendRaw(room, { key_version })).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test.each([
@@ -117,13 +164,32 @@ describe("append checks", () => {
     ["a kind with a digit", "note2"],
     ["a kind of 33 characters", "a".repeat(33)],
   ])("rejects %s", (_, kind) => {
+    const { store, room } = seeded();
+    expect(() => room.append(change({ kind }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
+  });
+
+  test.each([
+    ["a kind of 32 characters", "a".repeat(32)],
+    ["a kind with an underscore", "a_b"],
+  ])("accepts %s", (_, kind) => {
     const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ kind }), 1)).toThrow(RangeError);
+    expect(room.append(change({ kind }), 1)).toEqual({ seq: 1 });
+  });
+
+  test.each([
+    ["a number", 5],
+    ["undefined", undefined],
+  ])("rejects a kind that is %s", (_, kind) => {
+    const { store, room } = seeded();
+    expect(() => appendRaw(room, { kind })).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test("rejects 0 bytes", () => {
-    const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ locked_bytes: new ArrayBuffer(0) }), 1)).toThrow(RangeError);
+    const { store, room } = seeded();
+    expect(() => room.append(change({ locked_bytes: new ArrayBuffer(0) }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test("accepts exactly 1,048,576 bytes", () => {
@@ -132,13 +198,36 @@ describe("append checks", () => {
   });
 
   test("rejects 1,048,577 bytes", () => {
-    const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ locked_bytes: new ArrayBuffer(MAX_BYTES + 1) }), 1)).toThrow(RangeError);
+    const { store, room } = seeded();
+    expect(() => room.append(change({ locked_bytes: new ArrayBuffer(MAX_BYTES + 1) }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
+  });
+
+  test.each([
+    ["a Uint8Array", new Uint8Array([1, 2, 3])],
+    ["a DataView", new DataView(new ArrayBuffer(3))],
+    ["a SharedArrayBuffer", new SharedArrayBuffer(3)],
+    ["null", null],
+    ["undefined", undefined],
+  ])("rejects locked_bytes that is %s", (_, locked_bytes) => {
+    const { store, room } = seeded();
+    expect(() => appendRaw(room, { locked_bytes })).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test("rejects an empty blob_key", () => {
-    const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ blob_key: "" }), 1)).toThrow(RangeError);
+    const { store, room } = seeded();
+    expect(() => room.append(change({ blob_key: "" }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
+  });
+
+  test.each([
+    ["a number", 5],
+    ["undefined", undefined],
+  ])("rejects a blob_key that is %s", (_, blob_key) => {
+    const { store, room } = seeded();
+    expect(() => appendRaw(room, { blob_key })).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test("accepts a blob_key of 512 characters", () => {
@@ -147,8 +236,9 @@ describe("append checks", () => {
   });
 
   test("rejects a blob_key of 513 characters", () => {
-    const room = createRoomStore(createTestStore());
-    expect(() => room.append(change({ blob_key: "k".repeat(513) }), 1)).toThrow(RangeError);
+    const { store, room } = seeded();
+    expect(() => room.append(change({ blob_key: "k".repeat(513) }), 2)).toThrow(RangeError);
+    expect(rowCount(store)).toBe(1);
   });
 
   test("a failed append does not use up a seq", () => {
@@ -228,6 +318,16 @@ describe("ack", () => {
     const room = createRoomStore(createTestStore());
     room.append(change(), 1);
     expect(() => room.ack("", 1, 100)).toThrow(RangeError);
+  });
+
+  test.each([
+    ["a number", 5],
+    ["undefined", undefined],
+    ["null", null],
+  ])("rejects a device_id that is %s", (_, deviceId) => {
+    const room = createRoomStore(createTestStore());
+    room.append(change(), 1);
+    expect(() => Reflect.apply(room.ack, room, [deviceId, 1, 100])).toThrow(RangeError);
   });
 });
 
