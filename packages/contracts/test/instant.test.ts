@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  ANSWER_MAX_CHARS,
+  DoubleCheckResponseSchema,
   ExplainRequestSchema,
+  FollowUpRequestSchema,
   StreamDeltaSchema,
   StreamDoneSchema,
   TRANSCRIPT_MAX_CHARS,
@@ -53,5 +56,36 @@ describe("stream event schemas", () => {
     expect(StreamDoneSchema.safeParse({ ...GOOD_DONE, credits: -1 }).success).toBe(false);
     expect(StreamDoneSchema.safeParse({ ...GOOD_DONE, tier: "huge" }).success).toBe(false);
     expect(StreamDoneSchema.safeParse({ ...GOOD_DONE, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("FollowUpRequestSchema", () => {
+  const GOOD_FOLLOW_UP = { ...GOOD_EXPLAIN, answer: "It is water moving across a membrane." };
+
+  test("accepts a word, transcript and answer", () => {
+    expect(FollowUpRequestSchema.parse(GOOD_FOLLOW_UP)).toEqual(GOOD_FOLLOW_UP);
+  });
+
+  test("rejects a missing answer, a blank answer, an answer of 4,001 characters and an extra key", () => {
+    const bad = [
+      { word: "osmosis", transcript: "the cell takes in water" },
+      { ...GOOD_FOLLOW_UP, answer: "  " },
+      { ...GOOD_FOLLOW_UP, answer: "a".repeat(ANSWER_MAX_CHARS + 1) },
+      { ...GOOD_FOLLOW_UP, extra: true },
+    ];
+    for (const body of bad) expect(FollowUpRequestSchema.safeParse(body).success).toBe(false);
+  });
+
+  test("accepts an answer of exactly 4,000 characters", () => {
+    expect(FollowUpRequestSchema.safeParse({ ...GOOD_FOLLOW_UP, answer: "b".repeat(ANSWER_MAX_CHARS) }).success).toBe(true);
+  });
+});
+
+describe("DoubleCheckResponseSchema", () => {
+  test("accepts a good reply and rejects an empty text and an extra key", () => {
+    const good = { text: "Correct.", credits: 4, tier: "strong", retention: "standard" };
+    expect(DoubleCheckResponseSchema.safeParse(good).success).toBe(true);
+    expect(DoubleCheckResponseSchema.safeParse({ ...good, text: "" }).success).toBe(false);
+    expect(DoubleCheckResponseSchema.safeParse({ ...good, extra: 1 }).success).toBe(false);
   });
 });

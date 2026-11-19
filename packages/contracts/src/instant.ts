@@ -25,3 +25,21 @@ export const StreamDoneSchema = z.strictObject({
 
 export type StreamDelta = z.infer<typeof StreamDeltaSchema>;
 export type StreamDone = z.infer<typeof StreamDoneSchema>;
+
+// More detail and double-check also send the explanation the app already shows.
+export const ANSWER_MAX_CHARS = 4000;
+
+export const FollowUpRequestSchema = ExplainRequestSchema.extend({
+  answer: z.string().trim().min(1).max(ANSWER_MAX_CHARS),
+});
+
+export type FollowUpRequest = z.infer<typeof FollowUpRequestSchema>;
+
+export const DoubleCheckResponseSchema = z.strictObject({
+  text: z.string().min(1),
+  credits: z.number().int().min(0),
+  tier: z.enum(["light", "standard", "strong"]),
+  retention: z.enum(["standard", "zero"]),
+});
+
+export type DoubleCheckResponse = z.infer<typeof DoubleCheckResponseSchema>;
