@@ -4,6 +4,7 @@ import type { AppEnv } from "./env.ts";
 import { configRoute } from "./config/route.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireIdempotencyKey } from "./idempotency.ts";
+import { quoteRoute } from "./tasks/quote.ts";
 
 export function createApp(deps: SessionDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -14,5 +15,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.use("/v1/*", requireIdempotencyKey);
   // Routes go below this line.
   app.route("/", configRoute);
+  app.route("/", quoteRoute);
   return app;
 }
