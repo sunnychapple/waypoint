@@ -39,3 +39,26 @@ export const DeviceViewSchema = z.strictObject({
 export type DeviceView = z.infer<typeof DeviceViewSchema>;
 
 export const DeviceListSchema = z.strictObject({ devices: z.array(DeviceViewSchema) });
+
+// S1C: pairing and approval.
+export const PairingNonceRequestSchema = z.strictObject({ nonce: Bytes32Schema });
+export const PairingViewSchema = z.strictObject({
+  device_id: KeyIdSchema,
+  commitment: Bytes32Schema,
+  expires_at: z.number().int(),
+  approver: z.strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema }).nullable(),
+  approver_nonce: Bytes32Schema.nullable(),
+  device_nonce: Bytes32Schema.nullable(),
+});
+export type PairingView = z.infer<typeof PairingViewSchema>;
+
+export const GroupEnvelopeSchema = z.strictObject({
+  group_id: KeyIdSchema,
+  key_version: z.number().int().min(1),
+  wrapped_key: EnvelopeTextSchema,
+});
+export const ApproveDeviceRequestSchema = z.strictObject({
+  cert: SignatureSchema,
+  account_envelope: EnvelopeTextSchema,
+  envelopes: z.array(GroupEnvelopeSchema).max(500),
+});
