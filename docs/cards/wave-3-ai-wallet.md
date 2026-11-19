@@ -12,7 +12,9 @@ Order:
 | 16 | `main` | any |
 | 19 | `main` | any |
 
-Several cards add lines to `apps/api/src/env.ts`, `apps/api/src/app.ts`, `apps/api/wrangler.jsonc` and `packages/contracts/src/index.ts`. Add only your own lines there and leave the rest as it is; conflicts are sorted out when merging.
+Several cards add lines to `apps/api/src/env.ts`, `apps/api/src/app.ts`, `apps/api/wrangler.jsonc` and `packages/contracts/src/index.ts`. Add only your own lines there and leave the rest as it is; conflicts are sorted out when merging. The merge order across all card files is the "Build order" section of `docs/build-plan.md`.
+
+**Device signatures.** Explain, more detail and double-check spend credits, so `docs/security.md` section 7 requires a device signature on them. These cards are built before the signature check exists (S1A), so they do not add it; card S1E in `docs/cards/security.md` adds it to all three routes in `createApp` afterwards, without changing these files. After S1E a paid task needs an approved device (S1B).
 
 Route tests build a fresh app instead of using `createApp`, so they need no Clerk token (same pattern as PR 11 and 12):
 
@@ -26,7 +28,7 @@ app.use(async (c, next) => {
 // then mount the route under test
 ```
 
-Every code block marked "exactly" below was built and run against `main` at `e53c250` (typecheck, tests and `npm run bundle -w @waypoint/api` all passed). Copy those blocks as they are.
+Every code block marked "exactly" below was built and run against `main` at `e53c250` (typecheck, tests and `npm run bundle -w @waypoint/api` all passed). Copy those blocks as they are. On 19 Nov 2026 the integration pass (`docs/build-plan.md`, "Build order") changed PR 14's `usage.ts`, its `finishTask` call and `test/helpers/tasks.ts` to the shared usage event (`id`, binding `USAGE_QUEUE`); those were built and run again together with PR 31 and PR 33 (typecheck, tests, bundle).
 
 ## Decisions these cards make
 
@@ -34,12 +36,12 @@ Recorded in `docs/architecture.md` section 4 by this planning pull request.
 
 1. **Fixed price.** An instant task holds its price from the price table and, once the answer is delivered, settles with `actual` equal to that price. The real model cost (tokens) goes only into the usage event, for Analytics and for flow 8.
 2. **Model failure.** If the model call cannot start, the hold is released and the reply is 500 `internal` "model unavailable". If a streamed answer breaks part way, the hold is released and the stream ends with an `error` event. Nothing is charged in either case. The app's "Try again" sends a **new** Idempotency-Key (the old one now gets 409, because its hold is closed).
-3. **Zero retention.** A zero-retention user's text is never sent to the router model (it is not confirmed zero-retention); their `explain` routes as "unsure", which is the strong tier. If the route table has no zero-retention entry for the task, the reply is 403 `forbidden` "no zero-retention route for this task", the hold is released, and no model is called. Today no route is zero-retention, so every Plus user with the switch on gets 403 for every instant task until a zero-retention route is added to KV.
+3. **Zero retention.** A zero-retention user's text is never sent to the router model (it is not confirmed zero-retention); their `explain` routes as "unsure", which is the strong tier. If the route table has no zero-retention entry for the task, the reply is 403 `forbidden` "no zero-retention route for this task", the hold is released, and no model is called. Today no route is zero-retention, and PR 32 still lets a Plus user turn the switch on, so a Plus user who turns it on gets 403 for every instant task (and every job, PR 20 on) until a zero-retention route is added to KV. This is the intended state until then; the app says so beside the switch (mobile card M21).
 4. **Router failure** (error, timeout of 3 s, or an answer that does not parse) routes as "unsure" (strong tier), as architecture section 6 says. The usage event records `router: "failed"`.
 5. **More detail and double-check** take the word, the transcript excerpt and the explanation the app is showing (`answer`), because the server keeps nothing between calls. **Double-check answers in one JSON reply, not a stream**, as the API table in section 4 lists it.
-6. **Usage events** go to a new queue `waypoint-usage` (binding `USAGE`). These cards only send them; the consumer that writes Analytics Engine and the `activity` table is PR 33. Losing an event never fails a request.
+6. **Usage events** go to a new queue `waypoint-usage` (binding `USAGE_QUEUE`). The event type `UsageEvent` in `apps/api/src/usage.ts` (PR 14) is the one shape for every cloud task, instant tasks and jobs alike; its `id` is the task's hold id, so a redelivered event is written once. These cards only send events; the consumer that writes the `activity` table and Analytics Engine (binding `ANALYTICS`) is PR 33, which checks each message with a zod schema tied to this type. Losing an event never fails a request.
 7. **Starter credits.** The Clerk `user.created` webhook grants 25 credits to the **purchased** bucket (purchased credits never expire; a monthly reset would wipe them from the monthly bucket), with command id `starter:<user id>`, so the wallet grants them once however often Clerk retries.
-8. **Deleted users.** `user.deleted` deletes the user's D1 row; the schema's `ON DELETE CASCADE` removes their entitlements, devices, recovery row, memberships, jobs, activity and idempotency rows. The wallet Durable Object is left as it is: its ledger is the money record for that billing account (Apple refund notices may still arrive for its purchases), it holds no personal data, and its credits are forfeited, because no account can reach it any more.
+8. **Deleted users.** `user.deleted` deletes the user's D1 row; the schema's `ON DELETE CASCADE` removes their entitlements, devices, recovery row, memberships, jobs, activity and idempotency rows, and, once those cards are merged, their push tokens (PR 31) and, through `devices`, their key envelopes and device pairings (S1A). The wallet Durable Object is left as it is: its ledger is the money record for that billing account (Apple refund notices may still arrive for its purchases), it holds no personal data, and its credits are forfeited, because no account can reach it any more. Groups the user created, their room data and R2 objects stay; cleaning them up is an open question in `docs/build-plan.md`.
 
 ---
 
@@ -428,19 +430,21 @@ export function readUsage(chunk: unknown, result: { tokens_in: number | null; to
 }
 ```
 
-`apps/api/src/usage.ts`, exactly:
+`apps/api/src/usage.ts`, exactly. This is the one usage event shape for every cloud task; PR 33's consumer checks it with a schema that must match this type, and PR 20 to 25 send the same type for jobs.
 
 ```ts
-import type { InstantTask } from "@waypoint/contracts";
+import type { InstantTask, JobType } from "@waypoint/contracts";
 import type { Tier } from "@waypoint/router";
 
-// One event per model call, for Analytics Engine and the activity list (PR 33 consumes them).
-// Sizes, credits and route only: never the text sent or the answer.
+// One event per finished cloud task: instant tasks (PR 14, 15) and jobs (PR 20 on). PR 33 writes each one to
+// D1 activity and Analytics Engine. Sizes, credits and route only: never the text sent or the answer.
 export type UsageEvent = {
   v: 1;
+  // The task's hold id. Unique per run, so a redelivered event is written once.
+  id: string;
   at: number;
   user_id: string;
-  task: InstantTask;
+  task: InstantTask | JobType;
   outcome: "ok" | "model_failed";
   credits: number;
   tier: Tier;
@@ -465,7 +469,7 @@ export async function sendUsage(queue: UsageQueue, event: UsageEvent): Promise<v
 }
 ```
 
-`task` is typed from `InstantTask`, never from request text (the wave 3 note for the first card that feeds `activity`). `credits` is the settle result's `charged` (0 when released).
+`task` is typed from the task lists in `@waypoint/contracts`, never from request text (the wave 3 note for the first card that feeds `activity`). `id` is the hold id. `credits` is the settle result's `charged` (0 when released). `tier` becomes `activity.route` in PR 33.
 
 Part A tests.
 
@@ -497,10 +501,12 @@ Files: `apps/api/src/tasks/instant.ts`, `apps/api/src/tasks/explain.ts`, `apps/a
 `wrangler.jsonc`: add a top-level
 
 ```jsonc
-  "queues": { "producers": [{ "binding": "USAGE", "queue": "waypoint-usage" }] },
+  "queues": { "producers": [{ "binding": "USAGE_QUEUE", "queue": "waypoint-usage" }] },
 ```
 
-`src/env.ts`: add `import type { UsageEvent } from "./usage.ts";` and `USAGE: Queue<UsageEvent>;` to `Env`.
+`src/env.ts`: add `import type { UsageEvent } from "./usage.ts";` and `USAGE_QUEUE: Queue<UsageEvent>;` to `Env`.
+
+If PR 31 has already added a top-level `"queues"` block, add the `USAGE_QUEUE` producer to its `producers` list instead of adding a second block. (In the build order PR 14 merges first, so PR 31 adds to this block.)
 
 `src/tasks/instant.ts`, exactly. These are the pieces PR 15 reuses.
 
@@ -650,8 +656,9 @@ export async function finishTask(
   } else {
     await wallet(c).apply({ type: "release", id: held.releaseId, hold_id: held.holdId }).catch(() => undefined);
   }
-  await sendUsage(c.env.USAGE, {
+  await sendUsage(c.env.USAGE_QUEUE, {
     v: 1,
+    id: held.holdId,
     at: now,
     user_id: held.userId,
     task: held.task,
@@ -895,14 +902,14 @@ export function makeTaskEnv(options: TaskEnvOptions = {}) {
       return (options.reply ?? (async () => ({ choices: [{ message: { content: JSON.stringify(GOOD_ANSWERS) } }] })))();
     },
   };
-  const USAGE: UsageQueue = {
+  const USAGE_QUEUE: UsageQueue = {
     send: async (event) => {
       if (options.usageFails === true) throw new Error("queue down");
       events.push(event);
     },
   };
   const CONFIG = { get: async (key: string) => map.get(key) ?? null };
-  const env = { CONFIG, WALLET, AI, USAGE, AI_GATEWAY_ID: "gw-test" };
+  const env = { CONFIG, WALLET, AI, USAGE_QUEUE, AI_GATEWAY_ID: "gw-test" };
   return { env, store, commands, walletNames, aiCalls, events };
 }
 ```
@@ -911,7 +918,7 @@ How the tests read the stream: `await readEvents(res)`. `res.text()` resolves wh
 
 Tests (`test/explain.test.ts`). User `{ id: "u1", clerk_id: "user_1", plan: "free", billing_account_id: "ba1", zero_retention: false }`, key `abcdefghijklmnop`, `explainRoute({ now: () => TASK_NOW })` in the fresh app, and a body whose transcript contains the marker `SECRET-TRANSCRIPT-7f3a`. Each bullet is one test:
 - Happy path: 200, `Content-Type` contains `text/event-stream`; events are `delta`, `delta`, `done`; the delta texts (each passing `StreamDeltaSchema`) join to `"Water moves across a membrane."`; `done` passes `StreamDoneSchema` and equals `{ credits: 1, tier: "light", retention: "standard", offer_research: false }`; the wallet has monthly 9 and no holds; the commands are a `hold` with id and `hold_id` `explain:u1:abcdefghijklmnop`, `task` `"explain"`, `credits` 1, `expires_at` `TASK_NOW + 60_000 + 60_000`, then a `settle` with id `explain_settle:u1:abcdefghijklmnop` and `actual` 1; every wallet lookup used `"ba1"`.
-- The one usage event equals `{ v: 1, at: TASK_NOW, user_id: "u1", task: "explain", outcome: "ok", credits: 1, tier: "light", model: "workers-ai/glm-4.7-flash", retention: "standard", router: "ok", bytes_sent: <UTF-8 bytes of word + transcript>, tokens_in: 120, tokens_out: 9 }`.
+- The one usage event equals `{ v: 1, id: "explain:u1:abcdefghijklmnop", at: TASK_NOW, user_id: "u1", task: "explain", outcome: "ok", credits: 1, tier: "light", model: "workers-ai/glm-4.7-flash", retention: "standard", router: "ok", bytes_sent: <UTF-8 bytes of word + transcript>, tokens_in: 120, tokens_out: 9 }`.
 - Two AI calls: first the router (`config:router` model, no `stream`), then the answer model with `inputs` matching `{ stream: true, max_tokens: 500, chat_template_kwargs: { enable_thinking: false } }`, `options.gateway` equal to `{ id: "gw-test", collectLog: false, skipCache: true }` and `options.signal` an `AbortSignal`. The user message contains the word and the transcript.
 - `bytes_sent` counts bytes, not characters: a word `"é"` adds 2.
 - Router says `needs_web` with p 0.9 → `done.offer_research` true.
@@ -935,7 +942,7 @@ Tests (`test/explain.test.ts`). User `{ id: "u1", clerk_id: "user_1", plan: "fre
 
 `test/app.test.ts` (add, change nothing else): through `createApp`, `POST /v1/tasks/explain` with no `Authorization` header gives 401.
 
-Not in this PR: more detail and double-check (PR 15), the usage queue consumer, Analytics Engine and `activity` rows (PR 33), rate limits, acting on `unsafe`.
+Not in this PR: more detail and double-check (PR 15), the usage queue consumer, Analytics Engine and `activity` rows (PR 33), the device signature (S1E), rate limits, acting on `unsafe`.
 
 ---
 
@@ -1107,7 +1114,7 @@ Tests.
 `packages/contracts/test/instant.test.ts` (add): `FollowUpRequestSchema` accepts word, transcript and answer; rejects a missing `answer`, `answer: "  "`, an answer of 4,001 characters and an extra key; accepts 4,000. `DoubleCheckResponseSchema` accepts a good reply and rejects `text: ""` and an extra key.
 
 `test/follow-up.test.ts`, using `makeTaskEnv`, `readEvents` and `TASK_NOW` from `test/helpers/tasks.ts`, the fresh app with both routes mounted, the same user and key as PR 14, and a body `{ word: "osmosis", transcript: "... SECRET-TRANSCRIPT-7f3a", answer: "It is water moving. SECRET-ANSWER-91c2" }`:
-- More detail, happy path: events end with `done` equal to `{ credits: 3, tier: "standard", retention: "standard", offer_research: false }`; exactly one AI call (no router), to `workers-ai/deepseek-v4.1-flash`, `inputs` matching `{ stream: true, max_tokens: 1200 }`; the user message contains the answer; monthly 7; commands `hold` `more_detail:u1:<key>` with `credits` 3 and `expires_at` `TASK_NOW + 90_000 + 60_000`, then `settle` `more_detail_settle:u1:<key>`; usage event `task: "more_detail"`, `credits: 3`, `router: "skipped"`, `bytes_sent` the bytes of all three strings.
+- More detail, happy path: events end with `done` equal to `{ credits: 3, tier: "standard", retention: "standard", offer_research: false }`; exactly one AI call (no router), to `workers-ai/deepseek-v4.1-flash`, `inputs` matching `{ stream: true, max_tokens: 1200 }`; the user message contains the answer; monthly 7; commands `hold` `more_detail:u1:<key>` with `credits` 3 and `expires_at` `TASK_NOW + 90_000 + 60_000`, then `settle` `more_detail_settle:u1:<key>`; usage event `id: "more_detail:u1:<key>"`, `task: "more_detail"`, `credits: 3`, `router: "skipped"`, `bytes_sent` the bytes of all three strings.
 - More detail, stream fails after one chunk → `error` event, released, monthly 10.
 - More detail, monthly 2 → 402 with `shortfall` 1.
 - Double-check, happy path with `reply` returning `{ choices: [{ message: { content: "Correct. Osmosis is..." } }], usage: { prompt_tokens: 5, completion_tokens: 3 } }`: 200 JSON passing `DoubleCheckResponseSchema` and equal to `{ text: "Correct. Osmosis is...", credits: 4, tier: "strong", retention: "standard" }`; one AI call to `workers-ai/kimi-k2.6` with no `stream` key and `max_tokens` 600, gateway options as in PR 14; monthly 6; commands `double_check:u1:<key>` (`expires_at` `TASK_NOW + 120_000 + 60_000`) then `double_check_settle:u1:<key>`; usage `tokens_in` 5, `tokens_out` 3.
@@ -1122,7 +1129,7 @@ Tests.
 
 `test/app.test.ts` (add): through `createApp`, both endpoints with no `Authorization` header give 401.
 
-Not in this PR: research, read-link, threads of more than one follow-up.
+Not in this PR: research, read-link, threads of more than one follow-up, the device signature (S1E).
 
 ---
 
@@ -1464,5 +1471,6 @@ Not in this PR: deleting the user's groups, room data, R2 objects or devices' ke
 
 - **AI Gateway:** create a gateway named `waypoint` in the Cloudflare account (or change `AI_GATEWAY_ID` in `wrangler.jsonc`). Turn its default log collection off too, as a second guard; every call already sends `collectLog: false` and `skipCache: true`. Set per-account rate limits there.
 - **Queue:** `wrangler queues create waypoint-usage`. Until PR 33 adds the consumer, events wait in the queue (and expire after its retention period).
+- The full owner list for every card set is "Owner setup" in `docs/build-plan.md`.
 - **KV:** `config:router.model` must be the real Clef-flash model id on Workers AI, and every model in `config:routes:<version>` must be a Workers AI id (`@cf/...`).
 - **Clerk:** add a webhook endpoint `https://<api host>/webhooks/clerk` subscribed to `user.created` and `user.deleted`, then `wrangler secret put CLERK_WEBHOOK_SIGNING_SECRET` with its signing secret.
