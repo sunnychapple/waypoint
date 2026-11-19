@@ -261,15 +261,399 @@ Branch `pr/05-router`.
 - Exporting `SUBJECTS`, `RouteDecision` and `DecideRouteInput` is fine.
 - Add tests: zero retention on a fixed task; a stronger tier with only standard entries; the zero entry in a weaker tier is never used; `unsafe` at exactly 0.6; a custom `minConfidence`; a bad `minConfidence`; `constructor` and `__proto__` as tasks; schema for p = 0, p = 1, extra keys, difficulty 0 and 2.5; an empty model string.
 
-## Wave 2: the API Worker's spine (cards written when wave 1 is merged)
+## Wave 2: the API Worker's spine
 
-| PR | Title | Builds on |
+PR 06 goes first and is merged before the others start. PRs 07 to 10 each branch from `main` after 06 is merged. They all add lines to `apps/api/src/env.ts`, `apps/api/src/index.ts`, `apps/api/src/app.ts` or `apps/api/wrangler.jsonc`; add only your own lines there and leave the rest as it is. Conflicts are sorted out when merging.
+
+Rules for every wave-2 card, on top of `AGENTS.md`:
+- Files: only under `apps/api/`, plus `package-lock.json`, unless the card names another path.
+- Nothing in `apps/api/src/` imports a `node:` module. Tests may.
+- Durable Object classes stay thin: all logic is in a plain module that takes a `SqlStore` (from `src/storage.ts`), and the tests run that module against `createTestStore()`. Test files never import `cloudflare:workers` or a file that does.
+- Handlers and middleware are tested through `app.request(path, init, env)` with a hand-made `env` object. No Miniflare, no `wrangler dev`, no network.
+- Error replies always use `ApiFailure` or the error handler from PR 06, never a hand-built JSON body.
+- Never log request bodies, tokens or note text.
+- Before opening the pull request, also run `npm run bundle -w @waypoint/api` and paste its last lines. It must succeed.
+
+### PR 06 · `apps/api`: Worker skeleton, error shape, Idempotency-Key check, test stand-ins
+
+Branch `pr/06-api-skeleton`. Files: only under `apps/api/`, plus `package-lock.json`.
+
+`apps/api/package.json`: the package template, name `@waypoint/api`, plus:
+- `"scripts"`: `"test": "vitest run"`, `"typecheck": "tsc -p tsconfig.json"`, `"bundle": "wrangler deploy --dry-run --outdir dist"`.
+- `"dependencies"`: `"@waypoint/contracts": "0.0.0"`, `"hono": "4.13.19"`.
+- `"devDependencies"`: `"@cloudflare/workers-types": "5.20261118.1"`, `"@types/node": "24.19.2"`, `"wrangler": "4.164.0"`.
+
+`apps/api/tsconfig.json`, exactly:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": ["@cloudflare/workers-types", "node"] },
+  "include": ["src", "test"]
+}
+```
+
+`apps/api/wrangler.jsonc`, exactly (the ids are placeholders until the real resources exist; they are not secrets):
+
+```jsonc
+{
+  "name": "waypoint-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "waypoint",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../db/d1/migrations"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }]
+}
+```
+
+`src/env.ts`
+- `export type Env = { DB: D1Database; CONFIG: KVNamespace };`
+- `export type AppEnv = { Bindings: Env };`
+
+`src/storage.ts`, exactly:
+
+```ts
+// The parts of D1 this Worker uses. D1Database satisfies this type.
+export type DbStatement = {
+  bind(...values: unknown[]): DbStatement;
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+  run(): Promise<{ meta: { changes: number } }>;
+};
+
+export type Db = { prepare(query: string): DbStatement };
+
+export type SqlValue = string | number | null | ArrayBuffer;
+
+// The parts of Durable Object storage this Worker uses. DurableObjectStorage satisfies this type.
+export type SqlStore = {
+  sql: { exec(query: string, ...bindings: SqlValue[]): { toArray(): Record<string, SqlValue>[] } };
+  transactionSync<T>(fn: () => T): T;
+};
+```
+
+`src/errors.ts`
+- `export class ApiFailure extends Error` with `readonly code: ErrorCode` and `readonly retryAfter: number | null`. Constructor `(code: ErrorCode, message: string, retryAfter: number | null = null)`.
+- `export function handleError(err, c)`, with the parameter types Hono's `app.onError` expects:
+  - `ApiFailure`: status `STATUS_FOR_CODE[code]`, body `apiError(code, message, retryAfter)`.
+  - Hono `HTTPException`: map status 400 to `bad_request`, 401 `unauthorized`, 403 `forbidden`, 404 `not_found`, 409 `conflict`, 429 `rate_limited`; any other status becomes 500 `internal`. Message: `"request failed"`.
+  - Anything else: 500 `internal`, message `"something went wrong"`. Never put `err.message` or a stack in the reply.
+- `export function handleNotFound(c)`, typed for `app.notFound`: 404 `not_found`, message `"no such endpoint"`.
+- When `retry_after` is not null, also set the `Retry-After` header to that number.
+
+`src/idempotency.ts`
+- `export const requireIdempotencyKey: MiddlewareHandler<AppEnv>`. For `POST`, `PUT`, `PATCH` and `DELETE`: if `isValidIdempotencyKey(c.req.header(IDEMPOTENCY_KEY_HEADER))` is false, throw `ApiFailure("bad_request", "Idempotency-Key header required")`. Other methods pass through. This checks the header only; storing and replaying responses is PR 11.
+
+`src/app.ts`, exactly this shape:
+
+```ts
+export function createApp(): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.onError(handleError);
+  app.notFound(handleNotFound);
+  // Middleware, in this order. PR 07 adds the session check here, before the Idempotency-Key check.
+  app.use("/v1/*", requireIdempotencyKey);
+  // Routes go below this line.
+  return app;
+}
+```
+
+`/webhooks/*` paths are not under `/v1/*`, so they never need an Idempotency-Key.
+
+`src/index.ts`: `export default createApp();` and nothing else.
+
+`test/helpers/d1.ts` and `test/helpers/sql.ts`: copy these exactly. They are the only D1 and Durable Object stand-ins; later cards reuse them and must not write their own.
+
+```ts
+// test/helpers/d1.ts
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import type { Db, DbStatement } from "../../src/storage.ts";
+
+const MIGRATION = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../db/d1/migrations/0001_directory.sql",
+);
+
+function toInput(value: unknown): SQLInputValue {
+  if (value === null || typeof value === "string" || typeof value === "number") return value;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  throw new TypeError(`unsupported bind value: ${typeof value}`);
+}
+
+// An in-memory D1 stand-in on node:sqlite, with the directory schema applied.
+export function createTestDb(): Db {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  db.exec(readFileSync(MIGRATION, "utf8"));
+  const statement = (query: string, values: SQLInputValue[]): DbStatement => ({
+    bind: (...next) => statement(query, next.map(toInput)),
+    first: async <T,>() => (db.prepare(query).get(...values) ?? null) as T | null,
+    all: async <T,>() => ({ results: db.prepare(query).all(...values) as T[] }),
+    run: async () => ({ meta: { changes: Number(db.prepare(query).run(...values).changes) } }),
+  });
+  return { prepare: (query) => statement(query, []) };
+}
+```
+
+```ts
+// test/helpers/sql.ts
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import type { SqlStore, SqlValue } from "../../src/storage.ts";
+
+function toInput(value: SqlValue): SQLInputValue {
+  return value instanceof ArrayBuffer ? new Uint8Array(value) : value;
+}
+
+function fromOutput(value: unknown): SqlValue {
+  if (value instanceof Uint8Array) return value.slice().buffer;
+  if (value === null || typeof value === "string" || typeof value === "number") return value;
+  throw new TypeError(`unsupported column value: ${typeof value}`);
+}
+
+// An in-memory stand-in for Durable Object SQLite storage on node:sqlite.
+export function createTestStore(): SqlStore {
+  const db = new DatabaseSync(":memory:");
+  return {
+    sql: {
+      exec(query, ...bindings) {
+        const rows = db.prepare(query).all(...bindings.map(toInput));
+        return {
+          toArray: () =>
+            rows.map((row) =>
+              Object.fromEntries(Object.entries(row).map(([key, value]) => [key, fromOutput(value)])),
+            ),
+        };
+      },
+    },
+    transactionSync(fn) {
+      db.exec("BEGIN");
+      try {
+        const result = fn();
+        db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+}
+```
+
+Tests (`test/`):
+- `helpers.test.ts`: the two compile-time checks below, plus: `createTestDb()` has the users table (insert a user, read `plan` back as `"free"`), `first()` gives `null` for no row, `all()` gives `results`, foreign keys are on (a device for a missing user is rejected); `createTestStore()` returns a BLOB as an `ArrayBuffer`, and a `transactionSync` that throws leaves no rows behind.
+
+  ```ts
+  export const d1Fits: (db: D1Database) => Db = (db) => db;
+  export const doStorageFits: (storage: DurableObjectStorage) => SqlStore = (storage) => storage;
+  ```
+- `app.test.ts`, using `createApp()` and adding throwaway routes inside the test only:
+  - an unknown path gives 404 with exactly `{ code: "not_found", message: "no such endpoint", retry_after: null }`;
+  - a route that throws `ApiFailure("rate_limited", "slow down", 30)` gives 429, that body, and `Retry-After: 30`;
+  - a route that throws a plain `Error("secret detail")` gives 500 `internal` and the reply body does not contain `secret detail`;
+  - a route that throws `new HTTPException(401)` gives 401 `unauthorized`; `HTTPException(418)` gives 500 `internal`;
+  - every error body passes `ApiErrorSchema.parse`;
+  - `POST /v1/x` with no Idempotency-Key gives 400 `bad_request`; with a 15-character key gives 400; with a valid key reaches the route; the same for `PUT`, `PATCH` and `DELETE`; `GET /v1/x` with no key reaches the route; `POST /webhooks/x` with no key reaches the route.
+
+Not in this PR: any real endpoint, auth, Durable Objects, KV reads, CORS, rate limits.
+
+### PR 07 · Clerk session check
+
+Branch `pr/07-clerk-session`. Builds on 04 and 06. No new dependencies: verify the token with Web Crypto (`crypto.subtle`), which Workers and Node both have.
+
+This card is done in two sittings on the same branch. Part A is `src/auth/token.ts` and `src/auth/jwks.ts` with their tests; commit and push. Part B is the rest.
+
+**Part A**
+
+`src/auth/token.ts`
+- `export type SessionClaims = { sub: string; sid: string | null };`
+- `export type VerifyOptions = { issuer: string; authorizedParties: readonly string[]; now: number; getKey: (kid: string) => Promise<JsonWebKey | undefined> };` (`now` is Unix ms.)
+- `export async function verifySessionToken(token: string, options: VerifyOptions): Promise<SessionClaims>`. Throws `ApiFailure("unauthorized", "sign in required")` for every failure, with no detail about which check failed. It checks, in order:
+  1. three dot-separated base64url parts that decode, and header and payload are JSON objects;
+  2. header `alg` is exactly `"RS256"` and `kid` is a non-empty string (reject `"none"`, `HS256` and anything else);
+  3. `getKey(kid)` returns a key, imported as `{ name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }` for `verify`, and the signature over `<header>.<payload>` is valid;
+  4. `iss` equals `options.issuer` exactly;
+  5. `exp` and `nbf` are numbers (seconds); the token is good when `nbf - 5 <= now/1000 < exp + 5` (5 seconds of clock skew);
+  6. `sub` is a non-empty string;
+  7. if `azp` is present it must be in `authorizedParties`; if `authorizedParties` is empty, any `azp` passes.
+  Returns `sub` and `sid` (`sid` is `null` when absent or not a string).
+
+`src/auth/jwks.ts`
+- `export function jwksKeySource(issuer: string, fetchJwks: (url: string) => Promise<unknown>, now: () => number): (kid: string) => Promise<JsonWebKey | undefined>`.
+- The URL is `<issuer>/.well-known/jwks.json` (no double slash if `issuer` ends with `/`).
+- The response must be `{ keys: [...] }`; keep only keys with `kty: "RSA"` and a string `kid`. Anything else counts as no keys.
+- Cache the keys for 10 minutes. When asked for a `kid` that is not in the cache, fetch again, but at most once every 60 seconds; between fetches an unknown `kid` returns `undefined`.
+- If a fetch throws, keep the old keys and return what they have.
+- The cache lives in the closure returned by `jwksKeySource`, nowhere else.
+
+Part A tests (`test/token.test.ts`, `test/jwks.test.ts`): make a key pair in the test with `crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"])` (under these types it returns `CryptoKeyPair | CryptoKey`; narrow with `if (!("privateKey" in pair)) throw new Error()`), and a small `signToken(header, payload)` helper in the test file. Cases: a good token; each check above failing on its own (bad shape, `alg: "none"`, `HS256`, missing `kid`, unknown `kid`, signature from another key, a changed payload, wrong `iss`, expired, `exp` 4 s ago passes, not yet valid, missing `sub`, `azp` not allowed, `azp` absent passes); every failure is `ApiFailure` with code `unauthorized` and message `sign in required`. JWKS: the URL built from an issuer with and without a trailing slash; keys are fetched once and reused within 10 minutes; fetched again after 10 minutes; an unknown `kid` fetches again only after 60 s; a failed fetch keeps the old keys; a bad response gives no keys.
+
+**Part B**
+
+`src/env.ts`: add `CLERK_ISSUER: string` and `CLERK_AUTHORIZED_PARTIES: string` (comma-separated, may be empty) to `Env`, and add `Variables: { user: SessionUser }` to `AppEnv`.
+
+`wrangler.jsonc`: add `"vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "" }`.
+
+`src/auth/users.ts`
+- `export type SessionUser = { id: string; clerk_id: string; plan: "free" | "plus" | "own"; billing_account_id: string; zero_retention: boolean };`
+- `export async function loadOrCreateUser(db: Db, clerkId: string, now: number, newId: () => string): Promise<SessionUser>`. Runs `INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES (?, ?, ?, ?) ON CONFLICT (clerk_id) DO NOTHING` with a new id as both `id` and `billing_account_id`, then selects the row by `clerk_id`. Two calls at once for the same Clerk user end up with one row. `zero_retention` comes back as a boolean. No email, name or other Clerk profile data is stored.
+
+`src/auth/session.ts`
+- `export function requireSession(deps: { fetchJwks: (url: string) => Promise<unknown>; now: () => number; newId: () => string }): MiddlewareHandler<AppEnv>`.
+- Reads `Authorization: Bearer <token>`. Missing or another scheme: `ApiFailure("unauthorized", "sign in required")`.
+- Verifies with `verifySessionToken`, using `env.CLERK_ISSUER`, `env.CLERK_AUTHORIZED_PARTIES` split on commas (trimmed, empty parts dropped) and one `jwksKeySource` per issuer, created once and kept for the life of the middleware.
+- Then `loadOrCreateUser(env.DB, claims.sub, ...)` and `c.set("user", user)`.
+- `GET /v1/config` skips the check (the app reads it before sign-in; it holds no personal data). Every other `/v1/*` request needs it.
+
+`src/app.ts`: `createApp` takes `deps` with the same shape as `requireSession`'s and registers `app.use("/v1/*", requireSession(deps))` before the Idempotency-Key line. `src/index.ts`: `export default createApp({ fetchJwks: (url) => fetch(url).then((r) => r.json()), now: Date.now, newId: () => crypto.randomUUID() });`. Update the PR 06 tests only as needed to pass `deps` and a valid session.
+
+Part B tests: `loadOrCreateUser` creates a user with `billing_account_id` equal to its id, plan `free`, `zero_retention` false; a second call returns the same user and adds no row; two calls in a row with different `newId` values keep the first id. Middleware through `app.request`, with `createTestDb()` as `DB` and a `fetchJwks` stub (count its calls): no header gives 401; `Basic` gives 401; a bad token gives 401; a good token reaches the route and `c.get("user")` has the D1 user; a second request reuses the JWKS (one fetch); `GET /v1/config` with no header is not 401 (it is 404 until PR 09); a write with a good token and no Idempotency-Key gives 400; a write with no token and no key gives 401.
+
+Not in this PR: the starter 25 credits (PR 19, with the Clerk webhook), web cookies, device signatures, rate limits.
+
+### PR 08 · Wallet Durable Object
+
+Branch `pr/08-wallet-do`. Builds on 03 and 06. Dependencies: add `"@waypoint/ledger": "0.0.0"` to `apps/api`.
+
+Storage, created with `CREATE TABLE IF NOT EXISTS` when the object starts:
+
+```
+balances (bucket TEXT PRIMARY KEY CHECK (bucket IN ('monthly','purchased','owed')),
+          credits INTEGER NOT NULL,
+          resets_at INTEGER,          -- monthly row only, else NULL
+          period INTEGER NOT NULL DEFAULT 0)  -- monthly row only: the ledger's monthly_period
+holds    (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, task TEXT NOT NULL, credits INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL, from_monthly INTEGER NOT NULL, from_purchased INTEGER NOT NULL,
+          monthly_period INTEGER NOT NULL)
+ledger   (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, at INTEGER NOT NULL, user_id TEXT, kind TEXT NOT NULL, bucket TEXT NOT NULL,
+          credits INTEGER NOT NULL, ref TEXT NOT NULL)
+applied  (command_id TEXT PRIMARY KEY, type TEXT NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL)
+```
+
+The three balance rows are inserted with 0 credits if missing. `ledger.seq` is the order entries were written in (largest plus 1, worked out inside the transaction). `applied.result` is the `CommandResult` as JSON.
+
+`src/wallet/store.ts`
+- `export function createWalletStore(store: SqlStore): { apply(command: Command, now: number): CommandResult; read(): WalletView; ledger(after: number, limit: number): { entries: LedgerEntry[]; next: number }; nextExpiry(): number | null }`.
+- `export type WalletView = { monthly: number; purchased: number; owed: number; monthly_resets_at: number | null; holds: Hold[] }` (holds in id order).
+- `apply`, all inside one `store.transactionSync`:
+  1. Build a `WalletState` from the tables: the balance rows, all holds, and in `applied` only the row for `command.id` if there is one (the ledger package looks up nothing else).
+  2. Call the ledger's `apply(state, command, now)`. Errors it throws pass through unchanged and nothing is written.
+  3. If it returned the stored result (the id was already applied), write nothing.
+  4. Otherwise write the new balance rows, delete holds that are gone, insert holds that are new, insert every ledger entry, and insert the `applied` row only if `result.ok` is true.
+- `ledger(after, limit)`: entries with `seq > after`, in `seq` order, at most `limit`. `next` is the `seq` of the last entry returned, or `after` when none. `after` a safe integer ≥ 0 and `limit` 1 to 500, else `RangeError`.
+- `nextExpiry()`: the smallest hold `expires_at`, or `null`.
+
+`src/wallet/object.ts`
+- `export class Wallet extends DurableObject<Env>` (`import { DurableObject } from "cloudflare:workers"`). The constructor creates the store from `ctx.storage` inside `ctx.blockConcurrencyWhile`.
+- RPC methods: `apply(command: Command): Promise<CommandResult>` (uses `Date.now()`, then sets the alarm to `nextExpiry()` if there is one, or deletes it), `read(): Promise<WalletView>`, `ledger(after: number, limit: number): Promise<{ entries: LedgerEntry[]; next: number }>`.
+- `alarm()`: applies `{ type: "release_expired", id: "expire-" + crypto.randomUUID() }` with `Date.now()`, then sets the alarm to the next expiry, if any.
+- No other methods, no `fetch` handler.
+
+`src/env.ts`: add `WALLET: DurableObjectNamespace<Wallet>`. `src/index.ts`: add `export { Wallet } from "./wallet/object.ts";`. `wrangler.jsonc`: add `"durable_objects": { "bindings": [{ "name": "WALLET", "class_name": "Wallet" }] }` and `"migrations": [{ "tag": "v1-wallet", "new_sqlite_classes": ["Wallet"] }]`.
+
+Tests (`test/wallet-store.test.ts`, on `createTestStore()`; never import `object.ts`):
+- grant then `read()`; hold then settle with a partial actual; release; clawback beyond purchased gives `owed`; reset;
+- a repeated command id writes nothing new (row counts unchanged) and returns the first result; the same id with another type throws;
+- a failed hold (shortfall) writes nothing and the same id later succeeds after a grant;
+- an invalid command (for example credits 0) throws and writes nothing;
+- a new store on the same `SqlStore` sees the same state (it survives a restart);
+- after a 200-step seeded random sequence of commands, `read()` equals the result of running the same commands through the ledger package's `apply` in memory, and `balancesFromLedger` over every entry (read page by page from `ledger(0, 50)` on) equals the stored balances;
+- `ledger` paging and its `RangeError`; `nextExpiry` with no holds, and with two holds.
+
+Not in this PR: HTTP endpoints for the wallet (PR 16), who may call which command, Apple.
+
+### PR 09 · `GET /v1/config` and the KV config loader
+
+Branch `pr/09-config`. Builds on 02, 05 and 06. Dependencies: add `"@waypoint/pricing": "0.0.0"`, `"@waypoint/router": "0.0.0"` and `"zod": "4.6.7"` to `apps/api`. Also adds `packages/contracts/src/config.ts` and its export from `packages/contracts/src/index.ts`, and a test in `packages/contracts/test/`.
+
+KV keys (all JSON), as in `docs/architecture.md` section 5:
+
+| Key | Shape | Schema |
 |---|---|---|
-| 06 | `apps/api` skeleton: Hono app, wrangler config with all bindings, one error handler using the contracts error shape, 404, Idempotency-Key required on writes (header check only) | 01 |
-| 07 | Clerk session check middleware (JWT verified against JWKS, user loaded or created in D1) | 04, 06 |
-| 08 | Wallet Durable Object: stores `packages/ledger` state in DO SQLite, RPC methods for each command | 03, 06 |
-| 09 | `GET /v1/config` and the KV config loader (prices, routes, router, flags, min-native, voice-pack), validated with the package schemas | 02, 05, 06 |
-| 10 | Group room Durable Object: `changes` and `cursors`, append with next seq, fetch after seq (no sockets yet) | 06 |
+| `config:current` | `{ "prices": "<version>", "routes": "<version>" }` | in `src/config/schemas.ts` |
+| `config:prices:{version}` | price table | `PriceTableSchema` from `@waypoint/pricing` |
+| `config:routes:{version}` | route table | `RouteTableSchema` from `@waypoint/router` |
+| `config:router` | `{ "model": string (non-empty), "min_confidence": number, 0 < x ≤ 1 }` | in `src/config/schemas.ts` |
+| `config:flags` | `{ [name]: boolean }`, names `^[a-z0-9_]{1,64}$` | in `src/config/schemas.ts` |
+| `config:min-native` | `{ "ios": "<major>.<minor>.<patch>" }` | in `src/config/schemas.ts` |
+| `config:voice-pack` | `{ "version": string, "url": https URL, "sha256": 64 lowercase hex, "size": integer > 0 }` | in `src/config/schemas.ts` |
+
+The table's `version` inside `config:prices:{version}` and `config:routes:{version}` must equal the `{version}` in the key.
+
+`src/config/schemas.ts`: the five schemas above, all `z.strictObject` (flags is a `z.record`).
+
+`src/config/load.ts`
+- `export type ConfigKv = { get(key: string, options: { type: "json"; cacheTtl: number }): Promise<unknown> };`
+- `export type LoadedConfig = { prices: PriceTable; routes: RouteTable; router: RouterConfig; flags: Record<string, boolean>; min_native: { ios: string }; voice_pack: VoicePack };`
+- `export class ConfigError extends Error` with a `key: string` field.
+- `export async function loadConfig(kv: ConfigKv): Promise<LoadedConfig>`: reads `config:current` first, then the other six keys at once (`Promise.all`), each with `cacheTtl: 60`. A missing key (`null`), a value that fails its schema, or a version mismatch throws `ConfigError` naming the key. No defaults, no fallback to the tables in the packages.
+
+`packages/contracts/src/config.ts`
+- `export const ConfigResponseSchema = z.strictObject({ prices: z.strictObject({ version: z.string().min(1), credits: z.record(z.string(), z.number().int().min(1)) }), routes_version: z.string().min(1), flags: z.record(z.string(), z.boolean()), min_native: z.strictObject({ ios: z.string().min(1) }), voice_pack: z.strictObject({ version: z.string().min(1), url: z.string().url(), sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().min(1) }) });` and `export type ConfigResponse`.
+
+`src/config/route.ts`: `export const configRoute = new Hono<AppEnv>().get("/v1/config", ...)`, and one line in `src/app.ts` under "Routes go below this line": `app.route("/", configRoute);`. `GET /v1/config` returns `ConfigResponse`: the price table, the routes version (not the models), flags, min native version and voice pack. The router config is not sent. Header `Cache-Control: public, max-age=60`. A `ConfigError` becomes `ApiFailure("internal", "config unavailable")`; the key name is not in the reply.
+
+`src/env.ts` already has `CONFIG: KVNamespace`; nothing to add.
+
+Tests:
+- `packages/contracts/test/config.test.ts`: a good response parses; extra keys, a bad sha256 and size 0 fail.
+- `test/config.test.ts`, with a `Map`-backed `ConfigKv` stub in the test that records the options it was called with:
+  - compile-time check `export const kvFits: (kv: KVNamespace) => ConfigKv = (kv) => kv;`;
+  - a full good config loads; every read uses `type: "json"` and `cacheTtl: 60`;
+  - each of the seven keys missing gives `ConfigError` with that key;
+  - each schema rejects one bad value (for example `min_confidence: 0`, `ios: "1.4"`, `sha256` in capitals, an `http://` URL, a flag name with a capital letter, a price of 0);
+  - the price-table version not matching `config:current` gives `ConfigError`;
+  - the route, tested on a fresh `new Hono<AppEnv>()` with `handleError` as `onError` and `configRoute` mounted (not through `createApp`, which PR 07 changes): `GET /v1/config` gives 200, a body that passes `ConfigResponseSchema`, no `router` key and no model ids anywhere in it, and the `Cache-Control` header; with one key missing it gives 500 `internal` and the body does not contain the key name.
+
+
+Not in this PR: writing config to KV, a seed script, the quote endpoint (PR 12).
+
+### PR 10 · Group room Durable Object
+
+Branch `pr/10-group-room`. Builds on 06. No new dependencies.
+
+Storage, created with `CREATE TABLE IF NOT EXISTS` when the object starts:
+
+```
+changes (seq INTEGER PRIMARY KEY, device_id TEXT NOT NULL, key_version INTEGER NOT NULL, kind TEXT NOT NULL,
+         locked_bytes BLOB NOT NULL, blob_key TEXT, at INTEGER NOT NULL)
+cursors (device_id TEXT PRIMARY KEY, last_seq INTEGER NOT NULL, seen_at INTEGER NOT NULL)
+```
+
+The room never reads inside `locked_bytes`; it stores and returns the bytes as they are.
+
+`src/room/store.ts`
+- `export type NewChange = { device_id: string; key_version: number; kind: string; locked_bytes: ArrayBuffer; blob_key: string | null };`
+- `export type Change = NewChange & { seq: number; at: number };`
+- `export function createRoomStore(store: SqlStore): { append(change: NewChange, now: number): { seq: number }; after(seq: number, limit: number): { changes: Change[]; last_seq: number }; ack(deviceId: string, seq: number, now: number): void }`.
+- `append`: checks, else `RangeError`: `device_id` matches `^[A-Za-z0-9_:-]{1,128}$`; `key_version` is a safe integer ≥ 1; `kind` matches `^[a-z_]{1,32}$`; `locked_bytes` is 1 to 1,048,576 bytes (bigger goes to R2 by `blob_key`); `blob_key` is `null` or 1 to 512 characters. The new `seq` is the current largest `seq` plus 1 (1 for the first), worked out and inserted inside one `transactionSync`.
+- `after(seq, limit)`: changes with `seq` greater than the given one, in `seq` order, at most `limit` (1 to 500, else `RangeError`; `seq` a safe integer ≥ 0, else `RangeError`). `last_seq` is the room's largest `seq` (0 when empty), so the caller knows whether there is more.
+- `ack(deviceId, seq, now)`: `deviceId` checked as above; `seq` a safe integer from 0 to the largest `seq`, else `RangeError`. Sets the device's `last_seq` to the larger of the stored and the given value, and `seen_at` to `now`.
+
+`src/room/object.ts`
+- `export class GroupRoom extends DurableObject<Env>`, store created in `ctx.blockConcurrencyWhile`.
+- RPC methods `append(change: NewChange)`, `after(seq: number, limit: number)` and `ack(deviceId: string, seq: number)`, using `Date.now()`. No `fetch` handler, no sockets, no presence.
+
+`src/env.ts`: add `GROUP_ROOM: DurableObjectNamespace<GroupRoom>`. `src/index.ts`: add `export { GroupRoom } from "./room/object.ts";`. `wrangler.jsonc`: add `{ "name": "GROUP_ROOM", "class_name": "GroupRoom" }` to the Durable Object bindings and `{ "tag": "v2-group-room", "new_sqlite_classes": ["GroupRoom"] }` to `migrations`, after the wallet entries (create the two keys if PR 08 is not merged yet).
+
+Tests (`test/room-store.test.ts`, on `createTestStore()`; never import `object.ts`):
+- the first append gets seq 1, the next 2; bytes come back byte-for-byte equal; `blob_key` null and set;
+- each `append` check fails on its own, including exactly 1,048,576 bytes passing and 1,048,577 failing, and 0 bytes failing; a failed append does not use up a seq;
+- `after(0, 2)` on 3 changes gives seq 1 and 2 with `last_seq` 3; `after(3, 10)` gives none; bad `seq` and `limit` throw;
+- `ack` keeps the larger value, updates `seen_at`, and rejects a seq above the largest;
+- a new store on the same `SqlStore` continues from the last seq.
+
+Not in this PR: sockets, presence, push, membership checks, the HTTP sync endpoints (PR 28).
 
 ## Wave 3: endpoints and flows
 
@@ -283,7 +667,7 @@ Branch `pr/05-router`.
 | 16 | `GET /v1/wallet`, `GET /v1/wallet/ledger` |
 | 17 | `POST /v1/purchases/apple`: verify the signed transaction, grant once per transaction id |
 | 18 | `POST /webhooks/apple`: renewal, refund, revoke; monthly allowance and clawback |
-| 19 | `POST /webhooks/clerk` |
+| 19 | `POST /webhooks/clerk`, and the 25 starter credits for a new account |
 | 20 | Jobs API: `POST /v1/jobs`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id` |
 | 21 | `GET /v1/jobs/:id/events` stream |
 | 22 | Workflow: `overview_script` |

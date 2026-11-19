@@ -79,7 +79,7 @@ Every paid flow follows one money pattern: **quote, hold, run, settle at the rea
 
 ## 4. API
 
-One versioned REST surface on the API Worker plus one socket per group. Every request carries the Clerk session. Requests that change keys, devices or money are also signed by the device key.
+One versioned REST surface on the API Worker plus one socket per group. Every request carries the Clerk session, except `GET /v1/config`, which the app reads before sign-in and which holds no personal data. Requests that change keys, devices or money are also signed by the device key.
 
 | Area | Endpoints | Backed by |
 |---|---|---|
@@ -144,10 +144,13 @@ presence (device_id, user_id, since)   -- memory only
 ### Wallet (one Durable Object per billing account, SQLite storage)
 
 ```
-balances (bucket PK -- monthly | purchased | owed, credits, resets_at)
-holds    (id PK, user_id, task, credits, expires_at)
-ledger   (id PK, at, user_id, kind -- grant | hold | settle | release | refund | clawback | reset, bucket, credits, ref)
+balances (bucket PK -- monthly | purchased | owed, credits, resets_at, period)
+holds    (id PK, user_id, task, credits, expires_at, from_monthly, from_purchased, monthly_period)
+ledger   (seq PK, id, at, user_id, kind -- grant | hold | settle | release | refund | clawback | reset, bucket, credits, ref)
+applied  (command_id PK, type, result, at)   -- successful commands, so a retry returns the first result
 ```
+
+`period` (monthly row only) counts monthly resets; a hold records the period it was made in. An alarm releases holds when they expire.
 
 Monthly credits are spent first, then purchased ones. The ledger only ever gets new rows, so the balance can always be rebuilt from it. A `family_share` entitlement creates no wallet grant.
 
@@ -161,6 +164,7 @@ Wallet rules decided on 18 Nov 2026:
 ### KV keys
 
 ```
+config:current            the live prices and routes versions
 config:prices:{version}   task -> credits
 config:routes:{version}   task -> tier -> model id, retention class
 config:router             questions and thresholds
