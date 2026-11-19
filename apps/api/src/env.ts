@@ -7,7 +7,10 @@ export type Env = {
   CONFIG: KVNamespace;
   CLERK_ISSUER: string;
   CLERK_AUTHORIZED_PARTIES: string;
+  CLERK_WEBHOOK_SIGNING_SECRET: string;
   WALLET: DurableObjectNamespace<Wallet>;
   GROUP_ROOM: DurableObjectNamespace<GroupRoom>;
+  AI: Ai;
+  AI_GATEWAY_ID: string;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };

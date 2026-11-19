@@ -198,3 +198,22 @@ describe("quote errors", () => {
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
 });
+
+describe("wallet", () => {
+  test("GET /v1/wallet with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/wallet", {}, env);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("webhook route through createApp", () => {
+  test("POST /webhooks/clerk with no Authorization, no Idempotency-Key and no svix headers gives 401 invalid signature", async () => {
+    const res = await setup().request(
+      "/webhooks/clerk",
+      { method: "POST", body: "{}" },
+      { ...env, CLERK_WEBHOOK_SIGNING_SECRET: "whsec_" + btoa("0123456789abcdef0123456789abcdef") },
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "invalid signature", retry_after: null });
+  });
+});
