@@ -90,7 +90,7 @@ Out of scope: a compromised iOS or Secure Enclave, a malicious app build (App St
 | Group key, one per key version | 32 random bytes | Keychain on each device that can read the group | AES-256-GCM for everything in the group | A member or a member's device is removed (new version) |
 | Recovery key | 16 random bytes shown as 12 BIP-39 words | On paper, with the person | Wraps the account key | The person makes a new one; after the account key is replaced |
 | Link key | 32 random bytes | In the shared URL's fragment only | AES-256-GCM for the one linked item | Never; a new link has a new key |
-| Link passcode pepper | 32 random bytes | Cloudflare Secrets Store (`LINK_PASSCODE_PEPPER`) | HMAC of link passcodes | Rotated by hand; old links then need a new passcode |
+| Link passcode pepper | 32 random bytes | A Worker secret (`LINK_PASSCODE_PEPPER`, set with `wrangler secret put`) | HMAC of link passcodes | Rotated by hand; old links then need a new passcode |
 
 The two account keys are stored together as 64 bytes: the signing scalar, then the encryption scalar (CryptoKit `rawRepresentation` of each private key).
 
@@ -238,8 +238,8 @@ The app fetches the result, opens it with its Secure Enclave key, saves it local
 
 ## 15. Rules other cards must follow
 
-- **Signed routes** (`requireDeviceSignature` from S1A, before the PR 11 idempotency store): every S1 to S3 write; PR 27 `POST /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`; PR 14 and 15 task calls; PR 17 `POST /v1/purchases/apple`; PR 20 `POST /v1/jobs` and `DELETE /v1/jobs/:id`; PR 30 `POST /v1/links` and `DELETE /v1/links/:id`. Cards already merged before S1A get a follow-up card that adds the middleware.
-- **PR 20** stores `c.get("device").id` in `jobs.device_id` and serves `GET /v1/jobs/:id/result` as `application/octet-stream`, only to the job's user. **PR 22 to 25** call `sealJobResult` (S4) in the step that makes the result.
+- **Signed routes** (`requireDeviceSignature` from S1A, before the PR 11 idempotency store): every S1 to S3 write; PR 27 `POST /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`; PR 14 and 15 task calls; PR 17 `POST /v1/purchases/apple`; PR 20 `POST /v1/jobs` and `DELETE /v1/jobs/:id`; PR 30 `POST /v1/links` and `DELETE /v1/links/:id`. PR 14, 15 and 17 are merged before S1A; card S1E adds the middleware to their four routes in `createApp`. Because of this, a paid task or a purchase needs a registered, approved device.
+- **PR 20** stores `c.get("device").id` in `jobs.device_id` and serves `GET /v1/jobs/:id/result` as `application/octet-stream`, only to the job's user. **PR 22 to 25** call `sealJobResult` (S4) in the step that makes the result, with the R2 binding `BUCKET` (added by PR 33).
 - **PR 27** increments `groups.key_version` in the same D1 batch that ends a membership (removal or leaving), never creates envelopes, and stores `name_locked` as opaque base64url (at most 1,024 characters).
 - **PR 28** refuses a change whose `key_version` is not the group's current one (409), so nothing is written with a key a removed member knows.
 - **PR 30** stores `passcode_hash = base64url(HMAC-SHA256(LINK_PASSCODE_PEPPER, context("link-passcode", link id, passcode)))` (`linkPasscodeHash` in `packages/crypto`), compares in constant time, and rate-limits attempts with Turnstile. The link key never reaches the server: the viewer reads it from `#k=<base64url 32 bytes>`. The viewer page loads no third-party scripts **[R10]**.
