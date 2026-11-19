@@ -1,4 +1,4 @@
-import { requireNativeModule } from "expo-modules-core";
+import { requireNativeModule } from "expo";
 
 export type ScannedPage = { file: string; width: number; height: number };
 export type PageLine = { text: string; x: number; y: number; width: number; height: number };

@@ -15,3 +15,6 @@ export type SqlStore = {
   sql: { exec(query: string, ...bindings: SqlValue[]): { toArray(): Record<string, SqlValue>[] } };
   transactionSync<T>(fn: () => T): T;
 };
+
+// D1 with batch: the statements run in one transaction; if one fails, none is applied. D1Database satisfies this type.
+export type BatchDb = Db & { batch(statements: DbStatement[]): Promise<unknown[]> };
