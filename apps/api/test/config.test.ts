@@ -134,6 +134,20 @@ describe("loadConfig", () => {
     expect(err.key).toBe("config:voice-pack");
   });
 
+  test("voice-pack URL with a username and password is rejected", async () => {
+    const err = await loadError(
+      withValue("config:voice-pack", { ...goodVoicePack(), url: "https://u:p@packs.example.com/voices.zip" }),
+    );
+    expect(err.key).toBe("config:voice-pack");
+  });
+
+  test("voice-pack URL with a username only is rejected", async () => {
+    const err = await loadError(
+      withValue("config:voice-pack", { ...goodVoicePack(), url: "https://u@packs.example.com/voices.zip" }),
+    );
+    expect(err.key).toBe("config:voice-pack");
+  });
+
   test("a flag name with a capital letter is rejected", async () => {
     const err = await loadError(withValue("config:flags", { NewExport: true }));
     expect(err.key).toBe("config:flags");
@@ -179,5 +193,20 @@ describe("GET /v1/config", () => {
     const text = await res.text();
     expect(JSON.parse(text)).toEqual({ code: "internal", message: "config unavailable", retry_after: null });
     expect(text).not.toContain("config:router");
+  });
+
+  test("a KV error that is not a ConfigError goes through handleError, not 'config unavailable'", async () => {
+    const kv: ConfigKv = {
+      async get() {
+        throw new Error("kv down");
+      },
+    };
+    const res = await routeApp().request("/v1/config", {}, { CONFIG: kv });
+    expect(res.status).toBe(500);
+    expect(JSON.parse(await res.text())).toEqual({
+      code: "internal",
+      message: "something went wrong",
+      retry_after: null,
+    });
   });
 });

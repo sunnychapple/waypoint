@@ -18,7 +18,10 @@ export const MinNativeSchema = z.strictObject({
 
 export const VoicePackSchema = z.strictObject({
   version: z.string().min(1),
-  url: z.url({ protocol: /^https$/ }),
+  url: z.url({ protocol: /^https$/ }).refine((u) => {
+    const parsed = new URL(u);
+    return parsed.username === "" && parsed.password === "";
+  }, "url must not contain credentials"),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().min(1),
 });
