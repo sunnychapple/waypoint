@@ -7,6 +7,8 @@ import { appleWebhookRoute } from "./apple/webhook.ts";
 import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
 import { groupKeyRoutes } from "./keys/routes.ts";
+import { jobsRoutes } from "./jobs/routes.ts";
+import { jobWorkflow } from "./jobs/start.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
@@ -52,5 +54,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", recoveryRoute({ now: deps.now }));
   app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
+  app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));
   return app;
 }

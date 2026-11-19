@@ -327,3 +327,17 @@ describe("device signatures on the routes merged before S1A", () => {
     expect(await res.json()).toEqual({ reached: true });
   });
 });
+
+describe("jobs through createApp", () => {
+  test("POST /v1/jobs signed in, with a valid key and no Waypoint headers, gives 401 device signature required", async () => {
+    const res = await setup().request("/v1/jobs", { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }) }, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "device signature required", retry_after: null });
+  });
+
+  test("GET /v1/jobs/x without Authorization gives 401", async () => {
+    const res = await setup().request("/v1/jobs/x", {}, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
+  });
+});
