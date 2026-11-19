@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apply, emptyWallet } from "../src/index.ts";
+import { apply, emptyWallet, shortfall } from "../src/index.ts";
 import type { ApplyOutput, Command, CommandResult, WalletState } from "../src/index.ts";
 
 const NOW = 1_000;
@@ -487,4 +487,117 @@ describe("bucket check at runtime", () => {
       });
     }
   }
+});
+
+describe("shortfall", () => {
+  it("is 0 when monthly covers the hold", () => {
+    expect(shortfall({ monthly: 5, purchased: 0, owed: 0 }, 5)).toBe(0);
+  });
+
+  it("is what is missing when purchased is too small", () => {
+    expect(shortfall({ monthly: 0, purchased: 3, owed: 0 }, 5)).toBe(2);
+  });
+
+  it("does not add owed when the hold fits, so owed does not block a hold that fits", () => {
+    expect(shortfall({ monthly: 50, purchased: 0, owed: 90 }, 10)).toBe(0);
+  });
+
+  it("adds owed to what is missing", () => {
+    expect(shortfall({ monthly: 0, purchased: 3, owed: 7 }, 5)).toBe(9);
+  });
+});
+
+describe("buy and retry with owed credits", () => {
+  it("reports the balance owed in the shortfall, then succeeds once a purchase pays it off", () => {
+    const bought = apply(emptyWallet(), { type: "grant", id: "g1", bucket: "purchased", credits: 90, ref: "pack" }, NOW).state;
+    const clawed = apply(bought, { type: "clawback", id: "k1", credits: 180, ref: "refund-apple" }, NOW).state;
+    expect(clawed.balances).toMatchObject({ purchased: 0, owed: 90 });
+
+    const short = apply(clawed, holdCommand("h1", "H1", 10), NOW);
+    expect(short.result).toEqual({ ok: false, shortfall: 100 });
+    expect(short.entries).toEqual([]);
+
+    const paid = apply(short.state, { type: "grant", id: "g2", bucket: "purchased", credits: 100, ref: "pack" }, NOW).state;
+    expect(paid.balances).toMatchObject({ purchased: 10, owed: 0 });
+
+    const retried = apply(paid, holdCommand("h1", "H1", 10), NOW);
+    expect(retried.result).toEqual({ ok: true });
+    expect(retried.state.balances.purchased).toBe(0);
+  });
+});
+
+describe("replayed hold", () => {
+  it("returns ok with no entries while the same hold is open", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    const replay = apply(held, holdCommand("h1", "H1", 4), NOW);
+    expect(replay.result).toEqual({ ok: true });
+    expect(replay.entries).toEqual([]);
+    expect(replay.state).toEqual(held);
+  });
+
+  it("returns hold_closed with no entries after the hold was settled", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    const settled = apply(held, { type: "settle", id: "s1", hold_id: "H1", actual: 4 }, NOW).state;
+    const replay = apply(settled, holdCommand("h1", "H1", 4), NOW);
+    expect(replay.result).toEqual({ ok: false, reason: "hold_closed" });
+    expect(replay.entries).toEqual([]);
+    expect(replay.state).toEqual(settled);
+    expect(replay.state.applied).toEqual(settled.applied);
+  });
+
+  it("returns hold_closed after release_expired released the hold", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4, 5_000), NOW).state;
+    const expired = apply(held, { type: "release_expired", id: "x1" }, 6_000).state;
+    const replay = apply(expired, holdCommand("h1", "H1", 4, 5_000), 6_000);
+    expect(replay.result).toEqual({ ok: false, reason: "hold_closed" });
+    expect(replay.entries).toEqual([]);
+  });
+
+  it("throws when the open hold has other credits than the replay", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    expect(() => apply(held, holdCommand("h1", "H1", 3), NOW)).toThrow("command id reused for a different command");
+  });
+
+  it("throws when the open hold has another task than the replay", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    const other: Command = { type: "hold", id: "h1", hold_id: "H1", user_id: "u1", task: "practice", credits: 4, expires_at: 5_000 };
+    expect(() => apply(held, other, NOW)).toThrow("command id reused for a different command");
+  });
+
+  it("returns hold_closed for the same command id with a new hold_id, and does not create the new hold", () => {
+    const held = apply(wallet(10, 0), holdCommand("h1", "H1", 4), NOW).state;
+    const replay = apply(held, holdCommand("h1", "H2", 4), NOW);
+    expect(replay.result).toEqual({ ok: false, reason: "hold_closed" });
+    expect(Object.hasOwn(replay.state.holds, "H2")).toBe(false);
+    expect(replay.state.holds).toEqual(held.holds);
+  });
+});
+
+describe("grant user_id typed as optional", () => {
+  it("compiles when user_id is typed string | undefined and set to undefined, and records null", () => {
+    const build = (userId: string | undefined): Command => ({
+      type: "grant",
+      id: "g1",
+      bucket: "monthly",
+      credits: 1,
+      ref: "x",
+      user_id: userId,
+    });
+    const out = apply(emptyWallet(), build(undefined), NOW);
+    expect(out.result).toEqual({ ok: true });
+    expect(out.entries[0]?.user_id).toBeNull();
+  });
+});
+
+describe("refund after a reset, with existing commands only", () => {
+  it("forfeits the monthly part of a hold made before the reset, and keeps monthly at 0", () => {
+    let state = apply(emptyWallet(), { type: "reset", id: "m0", credits: 2_000, resets_at: 9_999 }, NOW).state;
+    state = apply(state, holdCommand("h1", "H1", 40), NOW).state;
+    state = apply(state, { type: "reset", id: "apple-refund-1", credits: 0, resets_at: NOW }, NOW).state;
+    expect(state.balances.monthly).toBe(0);
+
+    const out = apply(state, { type: "settle", id: "s1", hold_id: "H1", actual: 10 }, NOW);
+    expect(out.result).toEqual({ ok: true, charged: 10, forfeited_monthly: 30 });
+    expect(out.state.balances.monthly).toBe(0);
+  });
 });
