@@ -395,3 +395,21 @@ describe("POST /v1/tasks/explain: request checks", () => {
     expect(dump).not.toContain(MARKER);
   });
 });
+
+describe("POST /v1/tasks/explain: a repeated key after a failed stream", () => {
+  test("a first request whose stream fails releases the hold; the same key again is 409 request already finished, with no model call and no credits moved", async () => {
+    const made = makeTaskEnv({ stream: async () => failingStream('data: {"response":"Water "}\n\n') });
+    const first = await post(made.env);
+    expect(first.status).toBe(200);
+    expect((await readEvents(first)).map((event) => event.event)).toEqual(["delta", "error"]);
+    const callsBefore = made.aiCalls.length;
+    const eventsBefore = made.events.length;
+
+    const again = await post(made.env);
+    expect(again.status).toBe(409);
+    expect(await again.json()).toEqual({ code: "conflict", message: "request already finished", retry_after: null });
+    expect(made.aiCalls).toHaveLength(callsBefore);
+    expect(made.store.read()).toMatchObject({ monthly: 10, holds: [] });
+    expect(made.events).toHaveLength(eventsBefore);
+  });
+});
