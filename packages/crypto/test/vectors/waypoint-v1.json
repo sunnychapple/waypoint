@@ -1,0 +1,111 @@
+{
+  "context": {
+    "label": "group-key",
+    "fields": [
+      "g_01",
+      "7",
+      "dev_é"
+    ],
+    "bytes": "776179706f696e742f76312f67726f75702d6b6579000004675f303100013700066465765fc3a9"
+  },
+  "request": {
+    "method": "POST",
+    "target": "/v1/devices/dev_new/approve?x=1",
+    "deviceId": "dev_phone",
+    "timestamp": 1763560000000,
+    "nonce": "AQIDBAUGBwgJCgsMDQ4PEA",
+    "bodySha256": "2d4f6661aa3e2cac99d03595c76a7c30b2b2be52d7e2e4906f94043295a376af",
+    "body_utf8": "{\"name\":\"iPad\"}",
+    "signing_input": "776179706f696e742f76312f72657175657374000004504f5354001f2f76312f646576696365732f6465765f6e65772f617070726f76653f783d3100096465765f70686f6e65000d31373633353630303030303030001641514944424155474277674a4367734d445134504541004032643466363636316161336532636163393964303335393563373661376333306232623262653532643765326534393036663934303433323935613337366166",
+    "device_private_key": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+    "device_sign_pub": "BGD-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+    "signature": "WfmKh87ba4LV2dTCQ75ML5DC5Td4hDBHKCNlwro89eNCe_U2gIMpz0jS-cO9bPgpYFv1VrnzWTJST1LZQ4Kh1A"
+  },
+  "pairing": {
+    "new_sign_pub": "BGD-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+    "new_box_pub": "BF6EtVCLRb0cWMBg0KVSt9YG00gwJMuoy85r-WQ-2QUiP0MxZrqBoFPEKpMznLlg8dY42sMges18jL4cMKPpwv0",
+    "new_nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "approver_sign_pub": "BJqF0XF8Ad4Tey5pNbysd4XCFK7JaJ8WWJZBIoeMsNSdkfNIjTNHXpgjgC0S-L2Z0xhQaV7XfUsJW5gu5NOK0_Y",
+    "approver_nonce": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8",
+    "commitment": "pN2iIzuN5OgNBeFbVxvWH-zD18OqbcC8r8mvnYJPwsw",
+    "code": "096681"
+  },
+  "device_certificate": {
+    "user_id": "usr_1",
+    "device_id": "dev_new",
+    "sign_pub": "BGD-1LolWp0xyWHrdMY1bWjASbiSO2H6bOZpYi5g8p-2eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk",
+    "box_pub": "BF6EtVCLRb0cWMBg0KVSt9YG00gwJMuoy85r-WQ-2QUiP0MxZrqBoFPEKpMznLlg8dY42sMges18jL4cMKPpwv0",
+    "signing_input": "776179706f696e742f76312f6465766963652d636572740000057573725f3100076465765f6e657700574247442d314c6f6c5770307879574872644d593162576a41536269534f324836624f5a705969356738702d326551502d45416934764a6d6b47756e70566969385a504c787367777466703952643650436c4e524749706b0057424636457456434c52623063574d4267304b565374395947303067774a4d756f793835722d57512d3251556950304d785a7271426f4650454b704d7a6e4c6c673864593432734d67657331386a4c34634d4b5070777630",
+    "account_private_key": "0f56db78ca460b055c500064824bed999a25aaf48ebb519ac201537b85479813",
+    "account_sign_pub": "BOJm3f3BJmjbMNTKPo93SUMsQWBE8tK4wQvz1AEq7_qKv6hkBKLp_-Z9R8WH73qXp_RWuGO00Cz8aSiXOrWxyzk",
+    "signature": "738jtYCqsK1tF3jTY7kwIVHAjh8ofxx65wqwkL-Zr-7HUwIij3bKw9DyCCj1HqqMSywM8IhfpGQIrfX9UUi-8g"
+  },
+  "group_key_envelope": {
+    "group_id": "grp_1",
+    "key_version": 3,
+    "recipient_device_id": "dev_new",
+    "recipient_private_key": "8ee4c4f3e7b1c2b6a2c9d4f1e3b5a7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1",
+    "recipient_box_pub": "BF6EtVCLRb0cWMBg0KVSt9YG00gwJMuoy85r-WQ-2QUiP0MxZrqBoFPEKpMznLlg8dY42sMges18jL4cMKPpwv0",
+    "ikm_e": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "group_key": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "signer_id": "dev_phone",
+    "signer_private_key": "e7a25ad7f2d0c1d4fa4a2d1a9b6c0b8d6a0d4bd8c4a39b0e0f8b8a1d2e3f4a5b",
+    "signer_sign_pub": "BJqF0XF8Ad4Tey5pNbysd4XCFK7JaJ8WWJZBIoeMsNSdkfNIjTNHXpgjgC0S-L2Z0xhQaV7XfUsJW5gu5NOK0_Y",
+    "info": "776179706f696e742f76312f67726f75702d6b65790000056772705f3100013300076465765f6e6577",
+    "signature_input": "776179706f696e742f76312f656e76656c6f70652d736967000029776179706f696e742f76312f67726f75702d6b65790000056772705f3100013300076465765f6e65770101043ecd14c425a55bda0ea6cdf16031bd5a04cc337706cfdeb38b2afa37967be5dc4373a4bd215f7b473252305ed2a9b86a8cb439f186765df4838459b1ca04c4b800304e22100264caeda22d4ceb010b562cb4f5836be6ac5a782f2040bd343038f499eac974c1c48a6f4a3063180fa8153435096465765f70686f6e65",
+    "envelope": "AQEEPs0UxCWlW9oOps3xYDG9WgTMM3cGz96ziyr6N5Z75dxDc6S9IV97RzJSMF7SqbhqjLQ58YZ2XfSDhFmxygTEuAAwTiIQAmTK7aItTOsBC1YstPWDa-asWngvIEC9NDA49JnqyXTBxIpvSjBjGA-oFTQ1CWRldl9waG9uZa91B8W-iJLuUREqVAU0dCqM7BvG63wahABlkBXru6bugMR6AAHM4kX53f9MKAfdeXbAZVdo9TEQAAYXi2_rYl4"
+  },
+  "account_key_envelope": {
+    "user_id": "usr_1",
+    "account_device_id": "acct_1",
+    "recipient_device_id": "dev_new",
+    "recipient_private_key": "8ee4c4f3e7b1c2b6a2c9d4f1e3b5a7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1",
+    "ikm_e": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+    "account_key": "0f56db78ca460b055c500064824bed999a25aaf48ebb519ac201537b85479813101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+    "signer_id": "dev_phone",
+    "signer_sign_pub": "BJqF0XF8Ad4Tey5pNbysd4XCFK7JaJ8WWJZBIoeMsNSdkfNIjTNHXpgjgC0S-L2Z0xhQaV7XfUsJW5gu5NOK0_Y",
+    "info": "776179706f696e742f76312f6163636f756e742d6b65790000057573725f310006616363745f3100076465765f6e6577",
+    "envelope": "AQIEWMOK02el6tEGdY2gavz1dRTridBPSbLdgwb0XH1MZYObdfX3ykKYqOxdmVGSNHFi6eF2SWM1vbebw9K0ivAYewBQ1TGxpWllRxi2uifgI_hKJGFuHC-ff4IC_fCR3g5msqx99UfA99TfQUXXL0VPbgPb4bj3XBufy25Sq-C_3CmYRoHH0qdacGmGgOzlPD5QXQUJZGV2X3Bob25ljwI-FshZ3az63r7eZyMJVkJzrsmHulPujPM-y-SoiThLS1KlOWyF16KSkXA_BNNhUnOaPszusuEbO6eHkYVH9g"
+  },
+  "sealed_result": {
+    "job_id": "job_1",
+    "device_id": "dev_new",
+    "device_private_key": "8ee4c4f3e7b1c2b6a2c9d4f1e3b5a7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1",
+    "device_box_pub": "BF6EtVCLRb0cWMBg0KVSt9YG00gwJMuoy85r-WQ-2QUiP0MxZrqBoFPEKpMznLlg8dY42sMges18jL4cMKPpwv0",
+    "ikm_e": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+    "info": "776179706f696e742f76312f726573756c740000056a6f625f3100076465765f6e6577",
+    "plaintext_utf8": "HOST A: Today we look at photosynthesis.",
+    "sealed": "AQMERb9m3D3fBOd4UX7uiW6OHph2_w50GRBtXPetbwNs-dWN-CpUW-4uGn2Z1jYV55ILiQf_2aXWp_xlo4aHQ1EcbLCunePIJQo4jzTIU8OFU9e9Ld-qa53qg60Tt6t77TGtVdTpnTXGpwRxydXBj7UXHaLGXtjv2_vb"
+  },
+  "recovery": {
+    "words": "legal winner thank year wave sausage worth useful legal winner thank yellow",
+    "entropy": "7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
+    "user_id": "usr_1",
+    "account_device_id": "acct_1",
+    "wrap_key": "b03d0d1383d90bba2a1030767e35304fd50df8ff6dc430c995cde6ca0fe85286",
+    "aad": "01776179706f696e742f76312f7265636f766572790000057573725f310006616363745f31",
+    "account_key": "0f56db78ca460b055c500064824bed999a25aaf48ebb519ac201537b85479813101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+    "nonce": "606162636465666768696a6b",
+    "blob": "AWBhYmNkZWZnaGlqawkZ0TxRxE900CVwSTC66NBj7QsnzLy22zRjTQG3VUZ7pmn7E4xkxUg0IjD-Ja-jCE-UZu98zzQPNoO5OyfnjtIPnD7K9Ul6BIYxwY2J9vEA"
+  },
+  "content": {
+    "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "key_version": 3,
+    "context": "776179706f696e742f76312f6368616e67650000056772705f3100096465765f70686f6e6500046e6f7465",
+    "context_label": "change",
+    "context_fields": [
+      "grp_1",
+      "dev_phone",
+      "note"
+    ],
+    "nonce": "707172737475767778797a7b",
+    "plaintext_utf8": "{\"t\":\"cell\"}",
+    "locked": "AQAAAANwcXJzdHV2d3h5entspc4Fiev_UShGFK_b51KSS8YgR2oXzh6cKVPz"
+  },
+  "link_passcode": {
+    "pepper": "333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152",
+    "link_id": "lnk_1",
+    "passcode": "4821",
+    "hash": "5slJwYc-np2O4JixU5cC2vhWgELRyup98QiB-0ILXWE"
+  }
+}
