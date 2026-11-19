@@ -8,3 +8,4 @@ export * from "./privacy.ts";
 export * from "./push.ts";
 export * from "./instant.ts";
 export * from "./purchases.ts";
+export * from "./keys.ts";
