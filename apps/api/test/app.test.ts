@@ -6,6 +6,7 @@ import { createApp } from "../src/app.ts";
 import type { AppEnv } from "../src/env.ts";
 import { ApiFailure, handleError, InsufficientCredits } from "../src/errors.ts";
 import { createTestDb } from "./helpers/d1.ts";
+import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const ISSUER = "https://clerk.example.com";
 const NOW = 1_800_000_000_000;
@@ -256,5 +257,65 @@ describe("Apple purchase route through createApp", () => {
     const res = await setup().request("/v1/purchases/apple", { method: "POST", body: "{}" }, env);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
+  });
+});
+
+describe("device signatures on the routes merged before S1A", () => {
+  let phone: TestDevice;
+  let userId: string;
+
+  beforeAll(async () => {
+    await setup().request("/v1/x", { headers: await authed() }, env);
+    const row = await env.DB.prepare("SELECT id FROM users WHERE clerk_id = 'user_123'").first<{ id: string }>();
+    if (row === null) throw new Error("session user missing");
+    userId = row.id;
+    phone = await makeTestDevice("dev_phone");
+    await insertDevice(env.DB, phone, { userId });
+  });
+
+  test("each of the four paths, signed in with a key and no Waypoint headers, gives 401 device signature required", async () => {
+    const paths = ["/v1/tasks/explain", "/v1/tasks/more-detail", "/v1/tasks/double-check", "/v1/purchases/apple"];
+    for (const path of paths) {
+      const res = await setup().request(path, { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }) }, env);
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ code: "unauthorized", message: "device signature required", retry_after: null });
+    }
+  });
+
+  test("POST /v1/tasks/explain signed by the phone with body {} gives 400 invalid request", async () => {
+    const init = await signedInit(phone, { method: "POST", path: "/v1/tasks/explain", body: {}, now: NOW });
+    const res = await setup().request("/v1/tasks/explain", { ...init, headers: await authed(init.headers as Record<string, string>) }, env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
+  });
+
+  test("POST /v1/purchases/apple signed by the phone with body {} gives 400 invalid request", async () => {
+    const init = await signedInit(phone, { method: "POST", path: "/v1/purchases/apple", body: {}, now: NOW });
+    const res = await setup().request("/v1/purchases/apple", { ...init, headers: await authed(init.headers as Record<string, string>) }, env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
+  });
+
+  test("POST /v1/tasks/explain signed by a device of another user gives 401", async () => {
+    await env.DB.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES (?, ?, ?, ?)")
+      .bind("user_other_id", "user_other", NOW, "user_other_id")
+      .run();
+    const other = await makeTestDevice("dev_other");
+    await insertDevice(env.DB, other, { userId: "user_other_id" });
+    const init = await signedInit(other, { method: "POST", path: "/v1/tasks/explain", body: {}, now: NOW });
+    const res = await setup().request("/v1/tasks/explain", { ...init, headers: await authed(init.headers as Record<string, string>) }, env);
+    expect(res.status).toBe(401);
+  });
+
+  test("POST /v1/tasks/quote with a valid key, no Waypoint headers and body {} gives 400 invalid request, not 401", async () => {
+    const res = await setup().request("/v1/tasks/quote", { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }), body: "{}" }, env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
+  });
+
+  test("POST /v1/x with a valid key and no Waypoint headers gives 200", async () => {
+    const res = await setup().request("/v1/x", { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }) }, env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reached: true });
   });
 });
