@@ -2,10 +2,9 @@ import { HTTPException } from "hono/http-exception";
 import { describe, expect, test } from "vitest";
 import { ApiErrorSchema, type ApiError } from "@waypoint/contracts";
 import { createApp } from "../src/app.ts";
-import type { Env } from "../src/env.ts";
 import { ApiFailure } from "../src/errors.ts";
 
-const env = { DB: {} as D1Database, CONFIG: {} as KVNamespace } satisfies Env;
+const env = { DB: {} as D1Database, CONFIG: {} as KVNamespace };
 const VALID_KEY = "abcdefghijklmnop";
 
 function setup() {
