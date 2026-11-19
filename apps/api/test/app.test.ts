@@ -1,8 +1,10 @@
+import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { beforeAll, describe, expect, test } from "vitest";
-import { ApiErrorSchema, type ApiError } from "@waypoint/contracts";
+import { ApiErrorSchema, InsufficientCreditsErrorSchema, type ApiError } from "@waypoint/contracts";
 import { createApp } from "../src/app.ts";
-import { ApiFailure } from "../src/errors.ts";
+import type { AppEnv } from "../src/env.ts";
+import { ApiFailure, handleError, InsufficientCredits } from "../src/errors.ts";
 import { createTestDb } from "./helpers/d1.ts";
 
 const ISSUER = "https://clerk.example.com";
@@ -163,5 +165,26 @@ describe("Idempotency-Key check", () => {
     const res = await setup().request("/webhooks/x", { method: "POST" }, env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ reached: true });
+  });
+});
+
+describe("quote errors", () => {
+  test("a route throwing InsufficientCredits(5) gives 402 with shortfall 5 that passes InsufficientCreditsErrorSchema", async () => {
+    const app = new Hono<AppEnv>();
+    app.onError(handleError);
+    app.get("/throw-402", () => {
+      throw new InsufficientCredits(5);
+    });
+    const res = await app.request("/throw-402", {}, env);
+    expect(res.status).toBe(402);
+    const body: unknown = await res.json();
+    expect(body).toEqual({ code: "insufficient_credits", message: "not enough credits", retry_after: null, shortfall: 5 });
+    expect(InsufficientCreditsErrorSchema.safeParse(body).success).toBe(true);
+  });
+
+  test("POST /v1/tasks/quote with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/tasks/quote", { method: "POST" }, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
 });

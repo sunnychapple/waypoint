@@ -16,6 +16,12 @@ export class ApiFailure extends Error {
   }
 }
 
+export class InsufficientCredits extends ApiFailure {
+  constructor(readonly shortfall: number) {
+    super("insufficient_credits", "not enough credits");
+  }
+}
+
 const CODE_FOR_HTTP_STATUS: Partial<Record<number, ErrorCode>> = {
   400: "bad_request",
   401: "unauthorized",
@@ -29,6 +35,12 @@ export const handleError: ErrorHandler<AppEnv> = (err, c) => {
   let code: ErrorCode = "internal";
   let message = "something went wrong";
   let retryAfter: number | null = null;
+  if (err instanceof InsufficientCredits) {
+    return c.json(
+      { ...apiError("insufficient_credits", err.message), shortfall: err.shortfall },
+      STATUS_FOR_CODE.insufficient_credits as ContentfulStatusCode,
+    );
+  }
   if (err instanceof ApiFailure) {
     code = err.code;
     message = err.message;
