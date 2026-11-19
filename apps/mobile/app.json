@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Waypoint",
+    "slug": "waypoint",
+    "scheme": "waypoint",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios"],
+    "ios": {
+      "bundleIdentifier": "app.waypoint.ios",
+      "buildNumber": "1",
+      "supportsTablet": false,
+      "infoPlist": {}
+    },
+    "plugins": [
+      "expo-router",
+      ["expo-build-properties", { "ios": { "deploymentTarget": "26.0" } }]
+    ]
+  }
+}
