@@ -2,6 +2,8 @@
 
 Each pull request is one task card: small enough to finish in one sitting without losing context. Cards in the same wave touch different folders and can run in parallel. A wave starts when the one before it is merged. Cards for later waves are written in full when their wave starts, against the code that exists by then.
 
+From wave 3 on, cards live in four files under `docs/cards/` (server: `wave-3-ai-wallet.md`, `wave-3-apple-push-privacy.md`, `security.md`; app: `mobile.md`). Which card runs when, and in which order they merge, is the "Build order" section at the end of this file, with the conventions for cards not yet written, the owner's setup list and the open questions.
+
 Every card follows `AGENTS.md`. If a card leaves something unclear, ask in the pull request; do not invent.
 
 Dependency versions to use (exact):
@@ -744,31 +746,31 @@ Not in this PR: sockets, presence, push, membership checks, the HTTP sync endpoi
 
 ## Wave 3: endpoints and flows
 
-| PR | Title |
-|---|---|
-| 11 | Idempotency store: replay the first response for a repeated key (D1 or DO, decided in the card) |
-| 12 | `POST /v1/tasks/quote` |
-| 13 | Clef router call through AI Gateway, using `packages/router` |
-| 14 | `POST /v1/tasks/explain`: hold, route, stream through AI Gateway with logging off, settle, usage event |
-| 15 | `POST /v1/tasks/more-detail` and `POST /v1/tasks/double-check` |
-| 16 | `GET /v1/wallet`, `GET /v1/wallet/ledger` |
-| 17 | `POST /v1/purchases/apple`: verify the signed transaction, grant once per transaction id |
-| 18 | `POST /webhooks/apple`: renewal, refund, revoke; monthly allowance and clawback |
-| 19 | `POST /webhooks/clerk`, and the 25 starter credits for a new account |
-| 20 | Jobs API: `POST /v1/jobs`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id` |
-| 21 | `GET /v1/jobs/:id/events` stream |
-| 22 | Workflow: `overview_script` |
-| 23 | Workflow: `retranscribe` (signed audio upload, Whisper in chunks, delete audio) |
-| 24 | Workflow: `research` (search API, Browser Run, light reads, standard writes) |
-| 25 | Workflows: `video_slides`, `diagram`, `mini_app`, `practice` |
-| 26 | `POST /v1/tasks/read-link` (needs a price decision first) |
-| 27 | Groups, invites and membership endpoints |
-| 28 | Sync endpoints and the group socket |
-| 29 | Blobs: signed upload and download URLs, paid plans only for media |
-| 30 | Shared links API, Turnstile and passcode rate limits |
-| 31 | Push: push-token endpoint and the queue consumer that calls Apple |
-| 32 | `PUT /v1/settings/zero-retention` (Plus only) and `GET /v1/activity` |
-| 33 | Usage events to Analytics Engine; cleanup cron for `results/` (7 days) and `tmp/audio/` |
+| PR | Title | Full card |
+|---|---|---|
+| 11 | Idempotency store: replay the first response for a repeated key (D1 or DO, decided in the card) | this file (merged) |
+| 12 | `POST /v1/tasks/quote` | this file (merged) |
+| 13 | Clef router call through AI Gateway, using `packages/router` | `docs/cards/wave-3-ai-wallet.md` |
+| 14 | `POST /v1/tasks/explain`: hold, route, stream through AI Gateway with logging off, settle, usage event | `docs/cards/wave-3-ai-wallet.md` |
+| 15 | `POST /v1/tasks/more-detail` and `POST /v1/tasks/double-check` | `docs/cards/wave-3-ai-wallet.md` |
+| 16 | `GET /v1/wallet`, `GET /v1/wallet/ledger` | `docs/cards/wave-3-ai-wallet.md` |
+| 17 | `POST /v1/purchases/apple`: verify the signed transaction, grant once per transaction id | `docs/cards/wave-3-apple-push-privacy.md` |
+| 18 | `POST /webhooks/apple`: renewal, refund, revoke; monthly allowance and clawback | `docs/cards/wave-3-apple-push-privacy.md` |
+| 19 | `POST /webhooks/clerk`, and the 25 starter credits for a new account | `docs/cards/wave-3-ai-wallet.md` |
+| 20 | Jobs API: `POST /v1/jobs`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id` | to be written (see "Conventions for the cards still to write") |
+| 21 | `GET /v1/jobs/:id/events` stream | to be written |
+| 22 | Workflow: `overview_script` | to be written |
+| 23 | Workflow: `retranscribe` (signed audio upload, Whisper in chunks, delete audio) | to be written |
+| 24 | Workflow: `research` (search API, Browser Run, light reads, standard writes) | to be written |
+| 25 | Workflows: `video_slides`, `diagram`, `mini_app`, `practice` | to be written |
+| 26 | `POST /v1/tasks/read-link` (needs a price decision first) | to be written |
+| 27 | Groups, invites and membership endpoints | to be written |
+| 28 | Sync endpoints and the group socket | to be written |
+| 29 | Blobs: signed upload and download URLs, paid plans only for media | to be written |
+| 30 | Shared links API, Turnstile and passcode rate limits | to be written |
+| 31 | Push: push-token endpoint and the queue consumer that calls Apple | `docs/cards/wave-3-apple-push-privacy.md` |
+| 32 | `PUT /v1/settings/zero-retention` (Plus only) and `GET /v1/activity` | `docs/cards/wave-3-apple-push-privacy.md` |
+| 33 | Usage events to D1 `activity` and Analytics Engine; hourly cron for `results/` (7 days), `tmp/audio/`, old idempotency rows and request nonces, Plus yearly top-ups; adds R2 | `docs/cards/wave-3-apple-push-privacy.md` |
 
 Notes the wave 3 cards must carry (from the wave 1 follow-up review):
 
@@ -909,30 +911,184 @@ Tests (`test/quote.test.ts`), with the fresh app above and `quoteRoute` mounted.
 
 Not in this PR: holding credits, the router call, quotes for `read_link` (no price yet).
 
-## Blocked until a security owner signs off
+## Security (S0 to S4)
 
-| PR | Title |
-|---|---|
-| S1 | Devices: `POST /v1/devices`, approval with a 6-digit code, `DELETE`, `GET` |
-| S2 | Group key envelopes and `POST /v1/groups/:id/keys` (key version bump on member removal) |
-| S3 | `PUT /v1/recovery` and the 12-word recovery key |
-| S4 | Sealing task results to one device |
+The product owner decided on 19 Nov 2026 to build the end-to-end encryption and device signatures now, with only well-known algorithms and the platform's own crypto, and to have the design reviewed by an outside security reviewer **before real students use the app**. The design is `docs/security.md`; the items for the reviewer are its section 17 (R1 to R14). The full cards are in `docs/cards/security.md`.
+
+| Card | Title | Full card |
+|---|---|---|
+| S0A | `packages/crypto`: bytes, contexts, keys, HPKE | `docs/cards/security.md` |
+| S0B | `packages/crypto`: Waypoint formats and published test vectors | `docs/cards/security.md` |
+| S1A | Migration `0005_security.sql`, `BatchDb`, the device signature check | `docs/cards/security.md` |
+| S1B | `POST /v1/devices`, `GET /v1/devices` | `docs/cards/security.md` |
+| S1C | Pairing with the 6-digit code, and approval | `docs/cards/security.md` |
+| S1D | `DELETE /v1/devices/:id` (account key rotation, key version bump) | `docs/cards/security.md` |
+| S1E | Device signatures on the paid routes merged before S1A (explain, more detail, double-check, Apple purchases) | `docs/cards/security.md` |
+| S1F | Push notices for device pairing; deleting a removed device's push token | `docs/cards/security.md` (outline; written in full after S1D) |
+| S2 | Group key envelopes and `POST /v1/groups/:id/keys` | `docs/cards/security.md` |
+| S3 | `PUT /v1/recovery`, `GET /v1/recovery` | `docs/cards/security.md` |
+| S4 | Sealing job results to one device | `docs/cards/security.md` |
 
 ## Mobile and web (separate track)
 
-iOS builds and native modules need Xcode, which the current build machine does not have. These cards are written once that is in place.
+The iPhone app is built with Expo (SDK 58). Setup, the stage 1 cards in full and an outline of stages 2 to 4 are in `docs/cards/mobile.md`. Builds and device checks need Xcode 27.2, which needs macOS Tahoe 26.6 or later on the build Mac (section 0 of that file); Node-testable parts can be built before that.
 
-| PR | Title |
-|---|---|
-| M1 | `apps/mobile` host shell: React Native, Hermes, Metro, `@module-federation/metro`, sign-in |
-| M2 | Zephyr: `zephyr-metro-plugin`, one remote per feature, tag per native version |
-| M3 | `packages/api-client`: typed client for the API using `packages/contracts` (testable in Node) |
-| M4 | Device SQLite schema and migrations |
-| M5+ | One card per native module and per feature bundle |
-| V1 | `apps/viewer`: shared-link viewer that unlocks in the browser |
+| Card | Title | Full card |
+|---|---|---|
+| M1a | App shell: Expo app, routes, tabs, theme | `docs/cards/mobile.md` |
+| M1b | Sign-in with Clerk | `docs/cards/mobile.md` |
+| M4 | Device SQLite: schema, migrations, spaces, settings | `docs/cards/mobile.md` |
+| M5 to M9b | Native modules (audio, speech, pages, on-device model, search index) and the search screen | `docs/cards/mobile.md` |
+| M10a to M12 | Capture, Study and Settings screens | `docs/cards/mobile.md` |
+| M3, M13 to M21, M26, M27a | Stage 2: API client, device keys and registering this iPhone, config, purchases, plans, Explain, questions for later, second transcript, research, push, activity | outline in `docs/cards/mobile.md`; to be written |
+| M22 to M25 | Stage 3: voices and overviews | outline in `docs/cards/mobile.md`; to be written |
+| M27b to M32, M2 | Stage 4: more devices and recovery, sync, sharing, Zephyr, system targets | outline in `docs/cards/mobile.md`; to be written |
+| V1 | `apps/viewer`: shared-link viewer that unlocks in the browser | to be written |
 
 ## Model choice (flow 8)
 
 | PR | Title |
 |---|---|
 | E1 | `tools/model-eval`: run a task on candidate models, grade with Clef, write a report. Test set from public material only. |
+
+## Build order
+
+Written 19 Nov 2026, when the four card files were reconciled. A batch is a set of cards that touch different files, or only add lines to the shared files listed below, so they can be built at the same time. A card starts as soon as the cards in its "after" column are merged; it does not wait for its whole batch. Within a batch, merge in the order given. The mobile track touches only `apps/mobile/` (and `package-lock.json`), so it runs beside every server batch.
+
+| Batch | Cards (after) | Merge order |
+|---|---|---|
+| 0, being built | PR 13, PR 16, PR 19, S0A, M1a | PR 16, PR 19, PR 13, S0A, M1a |
+| 1 | PR 14 A+B (13), PR 17 A+B, PR 31 A+B, PR 32, S0B (S0A); M1b, M4 (M1a) | PR 32, PR 14, PR 17, PR 31, S0B; M1b, M4 |
+| 2 | PR 15 (14), PR 18 (17), S1A (S0B); M5, M7, M8, M9a (M4), M10a (M1b, M4) | PR 15, PR 18, S1A |
+| 3 | S1B (S1A), S4 (S1A), S1E (S1A, 14, 15, 17), PR 33 A+B (14, 17, 31, S1A); M6 (M5), M9b (M9a), M10c (M7, M10a) | S4, S1B, S1E, PR 33 |
+| 4 | S1C (S1B), S3 (S1B); M10b (M6, M10a), M11a (M8, M10c) | S1C, S3 |
+| 5 | S1D (S1C), S2 (S1C); M11b (M11a), M12 (M10b, M11a, M9a) | S1D, S2 |
+| 6, cards to write first | S1F (S1D, 31); PR 20 (S1A, S4, 33); PR 27 (S1A); mobile stage 2 (below) | in the order written |
+| 7 and on | PR 21 (20); PR 22 to 25 (20, S4); PR 28 (27, S2); PR 29 (27, 33); PR 30 (27, 29); PR 26 (price decided); V1 (30); E1 any time | |
+
+Mobile stage 2, once its server cards are merged: M3 (contracts from PR 14, 16, 17, 31, 32 and S1B; runs in Node, no Xcode), M13, M26 (Swift `Core` tested with `swift test`, no Xcode), M27a (M26, M3, S1B), then M14 (M27a, PR 17, S1E), M15, M16 (M27a, PR 15), M17, M20 (M27a, PR 31), M21 (PR 32), M18 and M19 (PR 20, 23, 24). Stages 3 and 4 follow their server cards (PR 22, 25; S1C, S1D, S2, S3, PR 27 to 30).
+
+**Xcode.** Every mobile card can be written, type-checked, tested in Node (`src/core`, `packages/api-client`), bundled (`npm run export:ios`) and have its Swift `Core` tested with `swift test` on the current Mac. The "Device check" steps need macOS Tahoe 26.6 or later and Xcode 27.2 (`docs/cards/mobile.md`, section 0); until then a card is merged with them marked "not run: no Xcode yet", and they are run on the iPhone once Xcode is in place, in card order.
+
+### Shared files: what each card adds, and how merges are resolved
+
+- **`apps/api/src/app.ts`.** Route lines go at the end of the list under "Routes go below this line"; their order does not matter (no two routes share a method and path). Middleware lines only above that line, and only S1E adds one. Keep every card's import and line.
+- **`apps/api/src/env.ts`.** One line per binding or var. Names in use: `DB`, `CONFIG`, `WALLET`, `GROUP_ROOM`, `CLERK_ISSUER`, `CLERK_AUTHORIZED_PARTIES` (merged); `AI`, `AI_GATEWAY_ID` (PR 13); `USAGE_QUEUE` (PR 14); `CLERK_WEBHOOK_SIGNING_SECRET` (PR 19); `APPLE_BUNDLE_ID`, `APPLE_ENVIRONMENTS` (PR 17); `APPLE_APP_APPLE_ID` (PR 18); `PUSH_QUEUE`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_TOPIC`, `APNS_PRIVATE_KEY` (PR 31); `ANALYTICS`, `BUCKET` (PR 33). S1A changes only `Variables` (adds `device`).
+- **`apps/api/wrangler.jsonc`.** One block per key, never two. `vars` is one line until PR 17 makes it multi-line (keeping PR 13's `AI_GATEWAY_ID`); later cards add lines to it. `queues` is created by PR 14 (usage producer); PR 31 adds the push producer and consumer; PR 33 adds the usage consumer. `ai` (PR 13), `analytics_engine_datasets`, `r2_buckets`, `triggers` (PR 33) appear once each.
+- **`apps/api/src/index.ts`.** Until PR 31 it is `export default createApp(...)`. PR 31 makes it `export default { fetch, queue } satisfies ExportedHandler<Env>`, PR 33 adds `scheduled`. Keep the `export { GroupRoom }` and `export { Wallet }` lines; later cards add Durable Object and Workflow class exports and `queue` branches, and never go back to the old shape. No card before PR 31 edits this file.
+- **`packages/contracts/src/index.ts`.** One `export * from` line per new file: `instant.ts` (PR 14), `wallet.ts` (PR 16), `purchases.ts` (PR 17), `push.ts` (PR 31), `privacy.ts` (PR 32), `keys.ts` (S1B; S1C, S1D, S2 and S3 append to that file in merge order). No two files export the same name (checked).
+- **D1 migrations and `db/d1/test/schema.test.mjs`.** Numbers are fixed:
+
+  | File | Card |
+  |---|---|
+  | `0001_directory.sql` | PR 04 (merged) |
+  | `0002_idempotency.sql` | PR 11 (merged) |
+  | `0003_push_tokens.sql` | PR 31 |
+  | `0004_apple_notifications.sql` | PR 18 |
+  | `0005_security.sql` | S1A |
+  | `0006` on | the next free number when the card is written, in build order |
+
+  PR 31 renames the table-count test to "creates exactly the expected tables" and removes its fixed count; every migration card after it only adds its tables to `EXPECTED` and `EXPECTED_TYPES`.
+- **`package-lock.json`.** S0A, M1a, S1A and the mobile cards that add packages all change it. Merge one, then for the next take `main`'s lockfile, run `npm install` and commit the result. Never hand-merge the lockfile. M1a's root `overrides` must survive every such merge.
+- **Test helpers.** One copy each, reused, never redefined: `test/helpers/d1.ts` and `sql.ts` (PR 06; S1A adds `batch`), `test/helpers/tasks.ts` (PR 14), `test/helpers/apple.ts` (PR 17), `test/helpers/signing.ts` (S1A).
+
+### Decisions made while reconciling the card sets (19 Nov 2026)
+
+1. **Usage events.** One shape, `UsageEvent` in `apps/api/src/usage.ts` (PR 14): `v`, `id` (the hold id), `at`, `user_id`, `task` (instant task or job type), `outcome`, `credits`, `tier`, `model`, `retention`, `router`, `bytes_sent`, `tokens_in`, `tokens_out`. Queue binding `USAGE_QUEUE` → `waypoint-usage`. PR 33 checks each message with a zod schema tied to the type with `satisfies` (and a test in the other direction), lives in a new file `src/usage-consumer.ts`, writes `activity` with `route` = `tier`, and writes Analytics Engine through the binding `ANALYTICS`.
+2. **R2.** PR 33 adds the only R2 binding, `BUCKET` (bucket `waypoint`). S4, PR 20, 23, 29, 30 use it.
+3. **Migrations** as in the table above.
+4. **`src/index.ts`** as above; no card assumed the old shape after PR 31.
+5. **Device signatures.** S0A → S0B → S1A run early, beside batch 1 and 2. Routes written after S1A put `requireDeviceSignature` on the route (S1A rule). The four paid routes merged before it (PR 14, 15, 17) get it from one follow-up card, S1E, in `createApp`, without changing their files or tests. **Consequence: from S1E on, a paid task or a purchase needs a registered, approved device (S1B).** The app registers its first device right after sign-in, so the mobile device-keys card (M26) and first-device registration (M27a) moved from stage 4 to stage 2.
+6. **Jobs and sealing:** rules for PR 20 to 25 are in the next section.
+7. **Push.** `push_tokens.device_id` is the device's `devices.id`. Pairing pushes and deleting a removed device's token are S1F (S1B and S1C had said PR 31 would do it; PR 31 said their own cards would).
+8. **Zero retention.** PR 32 lets a Plus user turn it on although no zero-retention route exists; until one is in KV, that user gets 403 for every cloud task (PR 14 decision 3). Written plainly in `docs/architecture.md` sections 4 and 6 and in the PR 32 and M21 cards.
+9. **Request nonces** are deleted by PR 33's hourly cron (S1A said so; PR 33 did not), so PR 33 runs after S1A.
+10. **Smaller fixes:** PR 17's `vars` block keeps `AI_GATEWAY_ID`; placeholder bundle id `app.waypoint.ios` everywhere; S3 after S1B so `keys.ts` is created once; Worker secrets instead of Secrets Store in the architecture table; new endpoints and tables listed in `docs/architecture.md` sections 4 and 5; account deletion's effect on devices, push tokens and groups written down (cleanup still open).
+
+## Conventions for the cards still to write
+
+For PR 20 to 30, S1F and the mobile stage 2 to 4 cards. They come on top of `AGENTS.md`, the wave 2 rules and the wave 3 notes.
+
+- **Bindings and names.** Use the names in "Shared files" above. R2 is `BUCKET`, with keys from `docs/architecture.md` section 5 (`results/{job}`, `tmp/audio/{job}`, `groups/{group}/...`, `links/{link}/data`). A Workflow binding is `<NAME>_WORKFLOW` (for example `OVERVIEW_WORKFLOW`), its class is exported from `src/index.ts`, and its logic lives in a plain module tested in Node; the Workflow class stays thin and tests never import it (the Durable Object rule).
+- **Money.** Quote, hold, run, settle at the real cost, never above the quote. A hold made by a request has the command id `<op>:<user id>:<Idempotency-Key>`, `op` at most 24 characters (for example `job:`, `job_settle:`, `job_release:`; a workflow that settles later stores what it needs to rebuild the ids). `expires_at` is now + the task's time limit + `HOLD_MARGIN_MS`; work stops if the hold is gone. Shortfall → `InsufficientCredits`; `hold_closed` → 409 "request already finished". Release on failure. Write the settle result's `charged` into `jobs.spent` and the usage event.
+- **Zero retention.** Pick the route before any work starts. A zero-retention user with no zero-retention route for the job gets 403 `forbidden` "no zero-retention route for this task", with the hold released and no model called (as PR 14).
+- **Usage events.** One `UsageEvent` per finished task or job, after settle or release, through `sendUsage(env.USAGE_QUEUE, ...)`. `id` is the hold id; `task` is the job type from `JOB_TYPES` (`research`, not `research_deep`); `tier` and `model` are those of the model that wrote the result; token counts are summed over all model calls (null if none reported); `bytes_sent` is the UTF-8 bytes of the text sent, or for `retranscribe` the audio bytes uploaded. `retranscribe` uses no tiered model: it sends `tier: "light"`, `model` the Whisper id, `router: "skipped"`. Never write `activity` directly; never put text in the event.
+- **Device signatures.** On the route, `requireDeviceSignature(deps)` before `idempotent(deps)`: `POST /v1/jobs`, `DELETE /v1/jobs/:id`, `POST /v1/tasks/read-link` (PR 26), PR 27's `POST /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`, PR 30's `POST /v1/links` and `DELETE /v1/links/:id`, and any other write that changes keys, devices, membership or money. `GET` routes need only the session. Tests use `test/helpers/signing.ts`.
+- **Idempotency.** Every write already needs the header. Writes whose replies hold no note content add `idempotent(deps)` (jobs created and cancelled, groups, invites, links, blobs). Replies with content (a job's result, read-link) are never stored; their hold protects them.
+- **Jobs and sealing (PR 20 to 25, S4).** PR 20 writes `jobs.device_id` from `c.get("device").id` and serves `GET /v1/jobs/:id/result` as `application/octet-stream`, only to the job's user. PR 22 to 25 call `sealJobResult({ db: env.DB, bucket: env.BUCKET }, ...)` inside the one Workflow step that generates the result and return only `result_key` from that step: plaintext never goes into a step's return value, a queue, a log, D1, KV or Analytics Engine. A finished job sends `{ user_id, kind: "job_ready", ref: <job id>, device_id: jobs.device_id }` to `PUSH_QUEUE`. PR 33's cron deletes `results/` after 7 days and `tmp/audio/` after 24 hours.
+- **Groups, sync, links (PR 27 to 30).** `docs/security.md` section 15: PR 27 bumps `key_version` in the same D1 batch that ends a membership and stores `name_locked` as opaque base64url; PR 28 refuses a change with an old key version (409) and sends `kind: "sync"` pushes; PR 30 stores peppered passcode hashes (`LINK_PASSCODE_PEPPER`, a Worker secret).
+- **Migrations.** The next free number when the card is written, recorded in the table above; add the tables to the schema test's `EXPECTED` and `EXPECTED_TYPES` (no table count) and to `docs/architecture.md` section 5.
+- **Contracts.** One new file per card in `packages/contracts/src/` with one `export *` line; check the names do not clash.
+- **Placement.** Each new card says what it builds on and is added to the "Build order" table when it is written.
+
+## Owner setup
+
+Everything the cards need from the owner, in one list. Ids and placeholders are not secrets; secrets go only through `wrangler secret put`.
+
+**Build Mac and Apple developer account**
+- Upgrade macOS to Tahoe 26.6 or later, install Xcode 27.2, the iOS 27 simulator runtime and CocoaPods; turn on Developer Mode on the iPhone (`docs/cards/mobile.md`, section 0).
+- A paid Apple Developer team (Sign in with Apple needs it); note the Team ID.
+- Choose the bundle id and put it in `apps/mobile/app.json`, `APPLE_BUNDLE_ID` and `APNS_TOPIC` (all three hold the placeholder `app.waypoint.ios`) and in Clerk's native app settings.
+- An APNs auth key (`.p8`): its key id into `APNS_KEY_ID`, the team id into `APNS_TEAM_ID`, the key itself with `npx wrangler secret put APNS_PRIVATE_KEY < AuthKey_<KEY ID>.p8`.
+
+**App Store Connect**
+- The app record; its numeric Apple id into `APPLE_APP_APPLE_ID` (production notices are refused until then).
+- Six products with exactly these ids: `waypoint.own_it` (non-consumable), `waypoint.plus.monthly` and `waypoint.plus.yearly` (one subscription group), `waypoint.credits.1000`, `.5000`, `.20000` (consumable).
+- App Store Server Notifications **Version 2**, production and sandbox URL `https://<api host>/webhooks/apple`.
+
+**Clerk**
+- An instance with email code and Apple sign-in; the iOS app registered for native Sign in with Apple (Team ID, bundle id); the publishable key in `apps/mobile/.env.local` as `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+- The issuer URL into `CLERK_ISSUER`, the authorized parties into `CLERK_AUTHORIZED_PARTIES`.
+- A webhook to `https://<api host>/webhooks/clerk` subscribed to `user.created` and `user.deleted` only; its signing secret with `wrangler secret put CLERK_WEBHOOK_SIGNING_SECRET`.
+- Terms and Privacy URLs for the Welcome screen.
+
+**Cloudflare**
+- D1 database `waypoint` and KV namespace: real ids into `wrangler.jsonc`; apply the migrations with `wrangler d1 migrations apply`.
+- KV config: `config:current`, prices, routes (Workers AI ids such as `@cf/...`, not the test placeholders), `config:router` with the real Clef-flash model id, flags, min native version, voice pack.
+- Workers AI on the account; an AI Gateway named `waypoint` with log collection off and per-account rate limits.
+- Queues `waypoint-usage` and `waypoint-push`; R2 bucket `waypoint`; Analytics Engine dataset `waypoint_usage` (created on first write). Durable Objects and the hourly cron come from `wrangler.jsonc`.
+- Later cards: `LINK_PASSCODE_PEPPER` (PR 30), Turnstile (PR 30), a search API key (PR 24), and probably an R2 API token for signed upload and download URLs (PR 23, 29; decided when those cards are written).
+- Zephyr Cloud for over-the-air bundles (M2, stage 4).
+
+**Security review**
+- Engage an outside security reviewer for `docs/security.md` (items R1 to R14 in section 17) before real students use the app.
+
+## Open questions
+
+Collected from the four card files and their planning pull requests (#19 to #22), without repeats. Numbered so pull requests can refer to them.
+
+**Product and prices**
+1. **Zero retention at launch.** A Plus user can turn it on, and then every cloud task gets 403 until a zero-retention route is in KV. Keep that (the app explains it), or hide the switch until a route exists? Which models may be marked zero-retention?
+2. **Cost against price.** If the router fails or says "unsure", explain runs on the strong tier for 1 credit (about 4 credits of cost at 500 tokens); double-check costs more than its 4 credits. Flow 8 should set the prices or the token caps.
+3. **Clef-flash:** its reply format and model id are not documented; confirm on staging, with the streaming format, that `AbortSignal` stops a stalled stream, and that every answer model accepts `enable_thinking: false`.
+4. **`unsafe`** from the router is recorded nowhere and changes nothing. What should happen?
+5. **Read-link price** (PR 26 waits for it).
+6. **Phones without Apple Intelligence:** offer flashcards, quiz and help in the cloud for credits later?
+
+**Accounts and money**
+7. **Account deletion.** Groups the user created, their room data and R2 objects are not cleaned up, and a late session token can recreate a deleted user's row (without starter credits). Needs a cleanup card; also decide whether removing a deleted user from shared groups bumps the key version.
+8. **Sandbox purchases on production** (needed for App Review; gives TestFlight testers free credits), or a separate staging Worker?
+9. **`REFUND_REVERSED`:** grant the credits or Plus again?
+10. **Expiry and Plus refunds reset monthly credits to 0.** Confirm.
+11. **Family Sharing:** the account matching assumes each member has their own `originalTransactionId`.
+12. **No OCSP check** on Apple's certificates (as Apple's library with online checks off).
+13. **A result that cannot be sealed** because its device was removed mid-job: refund the credits?
+
+**Push**
+14. **APNs from a production Worker** over HTTP/2 is confirmed only by a workerd maintainer and community clients; fallbacks are listed in PR 31's card.
+15. **APNs provider token** shared across isolates by a 30-minute `iat` step; if APNs still refuses, keep it in a Durable Object.
+16. **Push copy** needs review.
+17. **Should `POST /v1/push-tokens` refuse a `device_id`** that is not an approved device of the user?
+
+**Security** (also for the outside reviewer, `docs/security.md` section 17)
+18. **Removing a device does not revoke its Clerk session** (R13); that needs a session id per device and a Clerk API call.
+19. **Account reset** for a user with no device and no recovery key (old data becomes unreadable); not built.
+20. **Encryption at rest on the phone:** SQLCipher, or iOS data protection only?
+
+**App**
+21. **Upgrade the build Mac to macOS Tahoe** now (needed for any iOS build with SDK 58)?
+22. **Sign-in before the free on-device features**, or only for credits, sync and sharing (fewer barriers, no account for under-13s unless needed)?
+23. **VisionKit's document camera** instead of the custom camera drawn on T2?
+24. **Transcript language** per space or per recording?
+25. **"Help me with a problem":** steps first, answer last for everyone?
+26. **Background transcription on iOS 27:** if it stops while the screen is locked, is a transcript written after the recording acceptable?
