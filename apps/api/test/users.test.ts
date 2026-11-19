@@ -34,6 +34,17 @@ describe("loadOrCreateUser", () => {
     expect(again.billing_account_id).toBe("first-id");
   });
 
+  test("two calls at once with different newId values give one row and the same user", async () => {
+    const db = createTestDb();
+    const [first, second] = await Promise.all([
+      loadOrCreateUser(db, "user_123", NOW, () => "first-id"),
+      loadOrCreateUser(db, "user_123", NOW, () => "second-id"),
+    ]);
+    expect(second).toEqual(first);
+    const count = await db.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
+    expect(count).toEqual({ n: 1 });
+  });
+
   test("a different Clerk user gets a different row", async () => {
     const db = createTestDb();
     await loadOrCreateUser(db, "user_a", NOW, () => "ua");

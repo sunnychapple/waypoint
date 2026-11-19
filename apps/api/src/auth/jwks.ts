@@ -9,6 +9,7 @@ export function jwksKeySource(
   const url = `${issuer.replace(/\/+$/, "")}/.well-known/jwks.json`;
   let keys = new Map<string, JsonWebKey>();
   let fetchedAt = Number.NEGATIVE_INFINITY;
+  let inflight: Promise<void> | null = null;
 
   const refresh = async (at: number): Promise<void> => {
     fetchedAt = at;
@@ -35,9 +36,12 @@ export function jwksKeySource(
   return async (kid) => {
     const at = now();
     const age = at - fetchedAt;
-    if (age >= CACHE_MS || (!keys.has(kid) && age >= UNKNOWN_KID_REFETCH_MS)) {
-      await refresh(at);
+    if (inflight === null && (age >= CACHE_MS || (!keys.has(kid) && age >= UNKNOWN_KID_REFETCH_MS))) {
+      inflight = refresh(at).finally(() => {
+        inflight = null;
+      });
     }
+    if (inflight !== null) await inflight;
     return keys.get(kid);
   };
 }

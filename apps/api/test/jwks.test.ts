@@ -109,6 +109,18 @@ describe("jwksKeySource", () => {
     await expect(jwksKeySource(ISSUER, fetchJwks, () => 0)("k1")).resolves.toBeUndefined();
   });
 
+  test("two lookups at once on a cold cache share one fetch and both get the key", async () => {
+    const fetchJwks = vi.fn(async (_url: string): Promise<unknown> => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { keys: [KEY] };
+    });
+    const getKey = jwksKeySource(ISSUER, fetchJwks, () => 0);
+    const [first, second] = await Promise.all([getKey("k1"), getKey("k1")]);
+    expect(first).toEqual(KEY);
+    expect(second).toEqual(KEY);
+    expect(fetchJwks).toHaveBeenCalledTimes(1);
+  });
+
   test("keeps only RSA keys with a string kid", async () => {
     const fetchJwks = vi.fn(async (_url: string): Promise<unknown> => ({
       keys: [

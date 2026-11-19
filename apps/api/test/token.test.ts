@@ -191,6 +191,46 @@ describe("verifySessionToken", () => {
     await expect(verifySessionToken(token, options())).resolves.toEqual({ sub: "user_123", sid: "sess_456" });
   });
 
+  test("rejects a missing nbf", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ nbf: undefined }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects an nbf that is not a number", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ nbf: "soon" }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects an empty sub", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ sub: "" }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects a sub that is not a string", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ sub: 42 }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects an azp that is not a string when parties are listed", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ azp: 5 }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects alg RS512", async () => {
+    const token = await signToken({ alg: "RS512", kid: "k1" }, goodPayload());
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects an iss with an extra trailing slash", async () => {
+    const token = await signToken(goodHeader(), goodPayload({ iss: `${ISSUER}/` }));
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
+  test("rejects a kid that is not a string", async () => {
+    const token = await signToken({ alg: "RS256", kid: 1 }, goodPayload());
+    await expectSignInRequired(verifySessionToken(token, options()));
+  });
+
   test("accepts any azp when no parties are listed", async () => {
     const token = await signToken(goodHeader(), goodPayload({ azp: "https://anything.example.com" }));
     await expect(verifySessionToken(token, options({ authorizedParties: [] }))).resolves.toEqual({

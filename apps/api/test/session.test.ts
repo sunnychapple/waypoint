@@ -13,13 +13,18 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
-async function sessionToken(sub = "user_123", key: CryptoKey = privateKey): Promise<string> {
+async function sessionToken(
+  sub = "user_123",
+  key: CryptoKey = privateKey,
+  extra: Record<string, unknown> = {},
+): Promise<string> {
   const encode = (value: object): string => toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
   const signingInput = `${encode({ alg: "RS256", kid: "k1", typ: "JWT" })}.${encode({
     iss: ISSUER,
     sub,
     nbf: NOW / 1000 - 60,
     exp: NOW / 1000 + 60,
+    ...extra,
   })}`;
   const signature = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, new TextEncoder().encode(signingInput));
   return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
@@ -129,6 +134,37 @@ describe("requireSession", () => {
   test("a write with no token and no Idempotency-Key gives 401", async () => {
     const { app } = setup();
     const res = await app.request("/v1/x", { method: "POST" }, envWith());
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
+  });
+
+  test.each([
+    ["POST", "/v1/config"],
+    ["HEAD", "/v1/config"],
+    ["GET", "/v1/configx"],
+    ["GET", "/v1/config/"],
+  ])("%s %s with no Authorization header gives 401", async (method, path) => {
+    const { app } = setup();
+    const res = await app.request(path, { method }, envWith());
+    expect(res.status).toBe(401);
+  });
+
+  test("CLERK_AUTHORIZED_PARTIES is split on commas and trimmed, ignoring empty entries", async () => {
+    const { app } = setup();
+    const env = { ...envWith(), CLERK_AUTHORIZED_PARTIES: " app1 , ,app2 " };
+    const allowed = { Authorization: `Bearer ${await sessionToken("user_123", privateKey, { azp: "app2" })}` };
+    expect((await app.request("/v1/me", { headers: allowed }, env)).status).toBe(200);
+    const other = { Authorization: `Bearer ${await sessionToken("user_123", privateKey, { azp: "app3" })}` };
+    expect((await app.request("/v1/me", { headers: other }, env)).status).toBe(401);
+    const empty = { Authorization: `Bearer ${await sessionToken("user_123", privateKey, { azp: "" })}` };
+    expect((await app.request("/v1/me", { headers: empty }, env)).status).toBe(401);
+  });
+
+  test("the issuer comes from CLERK_ISSUER in env, so a token from another issuer gives 401", async () => {
+    const { app } = setup();
+    const env = { ...envWith(), CLERK_ISSUER: "https://other-issuer.example.com" };
+    const headers = { Authorization: `Bearer ${await sessionToken()}` };
+    const res = await app.request("/v1/me", { headers }, env);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
