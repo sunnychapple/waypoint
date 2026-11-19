@@ -206,6 +206,13 @@ describe("wallet", () => {
   });
 });
 
+describe("push tokens through createApp", () => {
+  test("POST /v1/push-tokens with no Authorization header gives 401", async () => {
+    const res = await setup().request("/v1/push-tokens", { method: "POST" }, env);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("webhook route through createApp", () => {
   test("POST /webhooks/clerk with no Authorization, no Idempotency-Key and no svix headers gives 401 invalid signature", async () => {
     const res = await setup().request(
