@@ -11,5 +11,7 @@
       "migrations_dir": "../../db/d1/migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }]
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "durable_objects": { "bindings": [{ "name": "WALLET", "class_name": "Wallet" }] },
+  "migrations": [{ "tag": "v1-wallet", "new_sqlite_classes": ["Wallet"] }]
 }
