@@ -22,7 +22,7 @@ const EXPECTED = {
   invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by"],
   links: ["id", "group_id", "blob_key", "passcode_hash", "expires_at", "revoked_at", "views"],
   purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
-  jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id"],
+  jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id", "command_key", "model", "retention", "bytes_sent", "deadline_at", "finished_at"],
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
   idempotency: ["user_id", "key", "request_hash", "state", "status", "body", "created_at"],
   push_tokens: ["user_id", "device_id", "token", "environment", "updated_at"],
@@ -45,7 +45,7 @@ const EXPECTED_TYPES = {
   invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?" },
   links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER" },
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
-  jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?" },
+  jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?", command_key: "TEXT?", model: "TEXT?", retention: "TEXT?", bytes_sent: "INTEGER", deadline_at: "INTEGER?", finished_at: "INTEGER?" },
   activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
   idempotency: { user_id: "TEXT", key: "TEXT", request_hash: "TEXT", state: "TEXT", status: "INTEGER?", body: "TEXT?", created_at: "INTEGER" },
   push_tokens: { user_id: "TEXT", device_id: "TEXT", token: "TEXT", environment: "TEXT", updated_at: "INTEGER" },
@@ -443,4 +443,18 @@ test("rejects the same notification_uuid for two rows", () => {
   );
   insert.run("n1", "REFUND", 1);
   assert.throws(() => insert.run("n1", "REFUND", 2), /UNIQUE constraint failed/);
+});
+
+test("rejects a bad jobs.retention; jobs.bytes_sent defaults to 0", () => {
+  const db = freshDb();
+  seedUser(db);
+  assert.throws(
+    () =>
+      db.prepare(
+        "INSERT INTO jobs (id, user_id, type, state, quoted, created_at, retention) VALUES ('j1', 'u1', 'research', 'queued', 5, 1, 'forever')",
+      ).run(),
+    /CHECK constraint failed/,
+  );
+  db.prepare("INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j2', 'u1', 'research', 'queued', 5, 1)").run();
+  assert.equal(db.prepare("SELECT bytes_sent FROM jobs WHERE id = 'j2'").get().bytes_sent, 0);
 });

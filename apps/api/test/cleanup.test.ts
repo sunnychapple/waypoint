@@ -64,6 +64,16 @@ describe("cleanup", () => {
     expect(counts.tmp_audio).toBe(1);
   });
 
+  test("tmp/input/ objects older than 24 hours are deleted and younger ones kept", async () => {
+    const { bucket, remaining } = fakeBucket([
+      { key: "tmp/input/old", uploaded: new Date(NOW - 25 * HOUR) },
+      { key: "tmp/input/young", uploaded: new Date(NOW - 23 * HOUR) },
+    ]);
+    const counts = await cleanup({ DB: createTestDb(), BUCKET: bucket }, NOW);
+    expect(remaining()).toEqual(["tmp/input/young"]);
+    expect(counts.tmp_input).toBe(1);
+  });
+
   test("objects under groups/ are never listed or deleted", async () => {
     const { bucket, listedPrefixes, remaining } = fakeBucket([
       { key: "groups/g1/keep", uploaded: new Date(NOW - 365 * DAY) },
@@ -71,7 +81,7 @@ describe("cleanup", () => {
     ]);
     await cleanup({ DB: createTestDb(), BUCKET: bucket }, NOW);
     expect(listedPrefixes).not.toContain("groups/");
-    expect(listedPrefixes.every((prefix) => prefix === "results/" || prefix === "tmp/audio/")).toBe(true);
+    expect(listedPrefixes.every((prefix) => prefix === "results/" || prefix === "tmp/audio/" || prefix === "tmp/input/")).toBe(true);
     expect(remaining()).toEqual(["groups/g1/keep"]);
   });
 
@@ -142,6 +152,6 @@ describe("cleanup", () => {
     const counts = await cleanup({ DB: db, BUCKET: bucket }, NOW);
     const rows = await db.prepare("SELECT nonce FROM request_nonces").all<{ nonce: string }>();
     expect(rows.results).toEqual([{ nonce: "now" }]);
-    expect(counts).toEqual({ results: 1, tmp_audio: 1, idempotency: 0, request_nonces: 1 });
+    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1 });
   });
 });
