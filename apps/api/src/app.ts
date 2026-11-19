@@ -20,6 +20,7 @@ import { doubleCheckRoute } from "./tasks/double-check.ts";
 import { explainRoute } from "./tasks/explain.ts";
 import { moreDetailRoute } from "./tasks/more-detail.ts";
 import { quoteRoute } from "./tasks/quote.ts";
+import { syncRoutes } from "./sync/routes.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
 
@@ -54,5 +55,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
   app.route("/", groupRoutes({ now: deps.now }));
+  app.route("/", syncRoutes({ now: deps.now }));
   return app;
 }

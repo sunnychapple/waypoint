@@ -10,3 +10,4 @@ export * from "./instant.ts";
 export * from "./purchases.ts";
 export * from "./keys.ts";
 export * from "./groups.ts";
+export * from "./sync.ts";
