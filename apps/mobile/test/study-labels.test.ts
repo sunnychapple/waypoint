@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import { availabilityMessage, intervalLabel, madeSummary, minutesLabel } from "../src/core/study/labels.ts";
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+describe("study labels", () => {
+  it("intervalLabel reads each boundary: under a minute, minutes, hours, days, months", () => {
+    expect(intervalLabel(0)).toBe("<1m");
+    expect(intervalLabel(MIN)).toBe("<1m");
+    expect(intervalLabel(MIN + 1)).toBe("1m");
+    expect(intervalLabel(6 * MIN)).toBe("6m");
+    expect(intervalLabel(59 * MIN + 29_000)).toBe("59m");
+    expect(intervalLabel(59.5 * MIN)).toBe("1h");
+    expect(intervalLabel(HOUR)).toBe("1h");
+    expect(intervalLabel(23 * HOUR)).toBe("23h");
+    expect(intervalLabel(23.6 * HOUR)).toBe("1d");
+    expect(intervalLabel(2 * DAY)).toBe("2d");
+    expect(intervalLabel(5 * DAY)).toBe("5d");
+    expect(intervalLabel(59 * DAY)).toBe("59d");
+    expect(intervalLabel(60 * DAY)).toBe("2mo");
+    expect(intervalLabel(90 * DAY)).toBe("3mo");
+  });
+
+  it("minutesLabel counts thirty seconds a card, rounded up", () => {
+    expect(minutesLabel(14)).toBe("About 7 min");
+    expect(minutesLabel(1)).toBe("About 1 min");
+    expect(minutesLabel(3)).toBe("About 2 min");
+  });
+
+  it("madeSummary counts terms and problems and leaves out questions", () => {
+    expect(madeSummary([{ kind: "term" }, { kind: "problem" }, { kind: "term" }, { kind: "question" }])).toEqual({ terms: 2, problems: 1 });
+    expect(madeSummary([])).toEqual({ terms: 0, problems: 0 });
+  });
+
+  it("availabilityMessage gives the copy for device_not_eligible", () => {
+    expect(availabilityMessage("device_not_eligible")).toBe(
+      "Flashcards, quizzes and help are made by Apple Intelligence, which this iPhone doesn't have. Recording, pages and search still work.",
+    );
+  });
+
+  it("availabilityMessage gives the copy for apple_intelligence_off", () => {
+    expect(availabilityMessage("apple_intelligence_off")).toBe("Turn on Apple Intelligence in Settings to make flashcards on this iPhone.");
+  });
+
+  it("availabilityMessage gives the copy for model_not_ready", () => {
+    expect(availabilityMessage("model_not_ready")).toBe("Apple Intelligence is still getting ready on this iPhone. Try again in a little while.");
+  });
+
+  it("availabilityMessage gives the copy for unavailable", () => {
+    expect(availabilityMessage("unavailable")).toBe("Flashcards can't be made on this iPhone right now.");
+  });
+});

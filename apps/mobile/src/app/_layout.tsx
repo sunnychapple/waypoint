@@ -19,6 +19,8 @@ function RootStack() {
         <Stack.Screen name="pages/new" />
         <Stack.Screen name="pages/[id]" />
         <Stack.Screen name="session/[id]" />
+        <Stack.Screen name="study/make" />
+        <Stack.Screen name="study/review" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />
