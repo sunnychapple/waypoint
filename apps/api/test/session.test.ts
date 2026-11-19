@@ -105,11 +105,12 @@ describe("requireSession", () => {
     expect(fetchJwks).toHaveBeenCalledTimes(1);
   });
 
-  test("GET /v1/config with no header is not 401 (it is 404 until PR 09)", async () => {
+  test("GET /v1/config with no header reaches the config route, not 401", async () => {
     const { app } = setup();
-    const res = await app.request("/v1/config", {}, envWith());
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ code: "not_found", message: "no such endpoint", retry_after: null });
+    // No CONFIG values in this env, so the config route itself answers 500; the point is it is not 401.
+    const res = await app.request("/v1/config", {}, { ...envWith(), CONFIG: { get: async () => null } });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ code: "internal", message: "config unavailable", retry_after: null });
   });
 
   test("a write with a good token and no Idempotency-Key gives 400", async () => {
