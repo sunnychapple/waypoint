@@ -1,8 +1,8 @@
 .expo/
 dist/
 expo-env.d.ts
-ios/
-android/
+/ios/
+/android/
 modules/.build/
 .env*.local
 *.tsbuildinfo
