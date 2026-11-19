@@ -12,6 +12,15 @@
     }
   ],
   "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
-  "durable_objects": { "bindings": [{ "name": "GROUP_ROOM", "class_name": "GroupRoom" }] },
-  "migrations": [{ "tag": "v2-group-room", "new_sqlite_classes": ["GroupRoom"] }]
+  "vars": { "CLERK_ISSUER": "https://clerk.example.com", "CLERK_AUTHORIZED_PARTIES": "" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "WALLET", "class_name": "Wallet" },
+      { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1-wallet", "new_sqlite_classes": ["Wallet"] },
+    { "tag": "v2-group-room", "new_sqlite_classes": ["GroupRoom"] }
+  ]
 }
