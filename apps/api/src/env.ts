@@ -1,3 +1,4 @@
+import type { SignedDevice } from "./auth/signature.ts";
 import type { SessionUser } from "./auth/users.ts";
 import type { PushMessage } from "./push/messages.ts";
 import type { GroupRoom } from "./room/object.ts";
@@ -23,4 +24,4 @@ export type Env = {
   APPLE_BUNDLE_ID: string;
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
 };
-export type AppEnv = { Bindings: Env; Variables: { user: SessionUser } };
+export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };
