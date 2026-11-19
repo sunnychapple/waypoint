@@ -81,14 +81,16 @@ export type CertOptions = {
   notBefore: number;
   notAfter: number;
   ca: boolean;
+  basicConstraints?: Uint8Array; // the extension's value; default is cA TRUE for a CA and no extension otherwise
   markers: readonly string[];
 };
 
 // One DER certificate. The signature hash follows the signer's curve: SHA-256 on P-256, SHA-384 on P-384.
 export async function makeCert(o: CertOptions): Promise<Uint8Array> {
   const algorithm = o.signerCurve === "P-256" ? ECDSA_SHA256 : ECDSA_SHA384;
+  const basicConstraints = o.basicConstraints ?? (o.ca ? seq(tlv(0x01, Uint8Array.of(0xff))) : undefined);
   const extensions = [
-    ...(o.ca ? [extension("2.5.29.19", seq(tlv(0x01, Uint8Array.of(0xff))), true)] : []),
+    ...(basicConstraints !== undefined ? [extension("2.5.29.19", basicConstraints, true)] : []),
     ...o.markers.map((marker) => extension(marker, tlv(0x05))),
   ];
   const exported = await crypto.subtle.exportKey("spki", o.publicKey);

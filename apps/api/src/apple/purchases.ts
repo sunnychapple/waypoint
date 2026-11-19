@@ -85,7 +85,7 @@ export async function applyTransaction(
   if (row.status === "refunded" || row.status === "revoked") return { ok: false, reason: "refunded" };
 
   let credits = 0;
-  if (row.status === "active") {
+  if (row.status === "active" && !expired) {
     const shared = txn.inAppOwnershipType !== "PURCHASED";
     if (product.kind !== "pack") {
       await db

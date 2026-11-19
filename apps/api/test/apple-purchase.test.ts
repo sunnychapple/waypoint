@@ -68,14 +68,14 @@ beforeEach(async () => {
   userB = await addUser(B);
 });
 
-function appFor(user: SessionUser): Hono<AppEnv> {
+function appFor(user: SessionUser, now = NOW): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.onError(handleError);
   app.use(async (c, next) => {
     c.set("user", user);
     await next();
   });
-  app.route("/", applePurchaseRoute({ now: () => NOW, rootSha256: chain.rootSha256 }));
+  app.route("/", applePurchaseRoute({ now: () => now, rootSha256: chain.rootSha256 }));
   return app;
 }
 
@@ -91,9 +91,9 @@ function envWith(overrides: Record<string, string> = {}): Record<string, unknown
 
 async function send(
   signed: string,
-  options: { user?: SessionUser; key?: string; env?: Record<string, unknown> } = {},
+  options: { user?: SessionUser; key?: string; env?: Record<string, unknown>; at?: number } = {},
 ): Promise<Response> {
-  return appFor(options.user ?? userA).request(
+  return appFor(options.user ?? userA, options.at).request(
     "/v1/purchases/apple",
     {
       method: "POST",
@@ -258,6 +258,81 @@ describe("POST /v1/purchases/apple", () => {
       .bind("2000000000000022")
       .first<{ status: string }>();
     expect(row?.status).toBe("expired");
+  });
+
+  test("replaying an active Plus transaction after it has expired does not reopen plus and replies 0 credits", async () => {
+    const expiresDate = NOW + 30 * DAY;
+    const jws = await jwsFor({
+      transactionId: "2000000000000025",
+      originalTransactionId: "2000000000000025",
+      productId: "waypoint.plus.monthly",
+      type: "Auto-Renewable Subscription",
+      expiresDate,
+    });
+    expect((await send(jws, { user: userA })).status).toBe(200);
+    // The lapse ends the entitlement. Nothing else in this path reopens it.
+    await db.prepare("UPDATE entitlements SET ended_at = ? WHERE user_id = ? AND product = 'plus'").bind(expiresDate, A).run();
+    const res = await send(jws, { user: userA, at: NOW + 60 * DAY });
+    expect(ApplePurchaseResponseSchema.parse(await res.json())).toEqual({
+      transaction_id: "2000000000000025",
+      product: "plus",
+      credits: 0,
+      plan: "free",
+    });
+    expect(commands.map((c) => c.type)).toEqual(["reset"]);
+    expect(walletFor(A).read().monthly).toBe(2000);
+  });
+
+  test("a refunded transaction sent again gives 409 refunded, grants nothing and its row stays refunded", async () => {
+    const jws = await jwsFor({ transactionId: "2000000000000060", originalTransactionId: "2000000000000060" });
+    expect((await send(jws, { user: userA })).status).toBe(200);
+    await db.prepare("UPDATE purchases SET status = 'refunded' WHERE transaction_id = ?").bind("2000000000000060").run();
+    const before = commands.length;
+    await expectError(await send(jws, { user: userA }), 409, "conflict", "purchase was refunded");
+    expect(commands).toHaveLength(before);
+    expect(walletFor(A).read().purchased).toBe(1000);
+    expect(await countRows("SELECT COUNT(*) AS n FROM purchases WHERE transaction_id = ? AND status = 'refunded'", "2000000000000060")).toBe(1);
+  });
+
+  test("a Family Sharing copy of a transaction the first user bought gives 409 and no entitlement for the second user", async () => {
+    const owned = {
+      transactionId: "2000000000000061",
+      originalTransactionId: "2000000000000061",
+      productId: "waypoint.own_it",
+      type: "Non-Consumable",
+    };
+    expect((await send(await jwsFor(owned), { user: userA })).status).toBe(200);
+    const shared = await jwsFor({ ...owned, inAppOwnershipType: "FAMILY_SHARED" });
+    await expectError(await send(shared, { user: userB }), 409, "conflict", "purchase belongs to another account");
+    expect(await countRows("SELECT COUNT(*) AS n FROM entitlements WHERE user_id = ?", B)).toBe(0);
+    expect(walletFor(B).read().purchased).toBe(0);
+  });
+
+  test("a transaction sent again with a different purchase date keeps the row it first recorded", async () => {
+    const id = "2000000000000062";
+    expect((await send(await jwsFor({ transactionId: id, originalTransactionId: id, purchaseDate: Date.UTC(2026, 10, 10) }), { user: userA })).status).toBe(200);
+    expect((await send(await jwsFor({ transactionId: id, originalTransactionId: id, purchaseDate: Date.UTC(2026, 10, 12) }), { user: userA })).status).toBe(200);
+    expect(await countRows("SELECT COUNT(*) AS n FROM purchases WHERE transaction_id = ?", id)).toBe(1);
+    const row = await db.prepare("SELECT purchased_at FROM purchases WHERE transaction_id = ?").bind(id).first<{ purchased_at: number }>();
+    expect(row?.purchased_at).toBe(Date.UTC(2026, 10, 10));
+  });
+
+  test("the 20,000-credit pack grants 20,000 purchased credits", async () => {
+    const jws = await jwsFor({ transactionId: "2000000000000063", originalTransactionId: "2000000000000063", productId: "waypoint.credits.20000" });
+    const res = await send(jws, { user: userA });
+    expect(ApplePurchaseResponseSchema.parse(await res.json())).toMatchObject({ product: "pack", credits: 20000 });
+    expect(walletFor(A).read().purchased).toBe(20000);
+  });
+
+  test("a productId of toString or __proto__ gives 400 unknown product", async () => {
+    await expectError(await send(await jwsFor({ productId: "toString", type: "Consumable" }), { user: userA }), 400, "bad_request", "unknown product");
+    await expectError(await send(await jwsFor({ productId: "__proto__", type: "Consumable" }), { user: userA }), 400, "bad_request", "unknown product");
+  });
+
+  test("a quantity over 100 gives 400 invalid purchase and grants nothing", async () => {
+    const jws = await jwsFor({ transactionId: "2000000000000064", originalTransactionId: "2000000000000064", quantity: 101 });
+    await expectError(await send(jws, { user: userA }), 400, "bad_request", "invalid purchase");
+    expect(walletFor(A).read().purchased).toBe(0);
   });
 
   test("a user with zero retention who buys a pack has it turned off afterwards", async () => {

@@ -9,6 +9,7 @@ import {
   LEAF_MARKER,
   makeChain,
   signJws,
+  tlv,
   toBase64Url,
   type TestChain,
 } from "./helpers/apple.ts";
@@ -163,5 +164,66 @@ describe("verifyAppleJws", () => {
 
   test("a string with two parts is rejected", async () => {
     await expectInvalid(verifyAppleJws("a.b", chain.rootSha256));
+  });
+
+  test("a string with four parts is rejected even though its first three are a valid JWS", async () => {
+    await expectInvalid(verifyAppleJws(`${await signJws(payload, chain)}.AAAA`, chain.rootSha256));
+  });
+
+  test("an intermediate that expired before signedDate is rejected", async () => {
+    const bad = await makeChain({ intermediate: { notAfter: Date.UTC(2027, 0, 1) } });
+    await expectInvalid(verifyAppleJws(await signJws({ ...payload, signedDate: Date.UTC(2028, 0, 1) }, bad), bad.rootSha256));
+  });
+
+  test("an intermediate that is not valid yet at signedDate is rejected", async () => {
+    const bad = await makeChain({ intermediate: { notBefore: Date.UTC(2029, 0, 1) } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad), bad.rootSha256));
+  });
+
+  test("a leaf whose issuer name is not the intermediate's subject is rejected", async () => {
+    const bad = await makeChain({ leaf: { issuer: "Other CA" } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad), bad.rootSha256));
+  });
+
+  test("an intermediate whose issuer name is not the root's subject is rejected", async () => {
+    const bad = await makeChain({ intermediate: { issuer: "Other CA" } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad), bad.rootSha256));
+  });
+
+  test("a signedDate that is not a safe integer is rejected", async () => {
+    await expectInvalid(verifyAppleJws(await signJws({ ...payload, signedDate: payload.signedDate + 0.5 }, chain), chain.rootSha256));
+    await expectInvalid(verifyAppleJws(await signJws({ ...payload, signedDate: 2 ** 53 }, chain), chain.rootSha256));
+  });
+
+  test("a leaf key on P-384 instead of P-256 is rejected", async () => {
+    const p384 = await ecKey("P-384");
+    const bad = await makeChain({ leaf: { publicKey: p384.publicKey } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad, { key: p384.privateKey }), bad.rootSha256));
+  });
+
+  test("a signature that is not 64 bytes is rejected", async () => {
+    const [header = "", body = ""] = (await signJws(payload, chain)).split(".");
+    await expectInvalid(verifyAppleJws(`${header}.${body}.${toBase64Url(new Uint8Array(63))}`, chain.rootSha256));
+    await expectInvalid(verifyAppleJws(`${header}.${body}.${toBase64Url(new Uint8Array(65))}`, chain.rootSha256));
+  });
+
+  test("an x5c entry in base64 with its padding removed is rejected", async () => {
+    // Padding appears when a certificate's DER length is not a multiple of 3; make a chain where some entry has it.
+    let bad = await makeChain();
+    while (!bad.x5c.some((entry) => entry.endsWith("="))) bad = await makeChain();
+    const x5c = bad.x5c.map((entry) => entry.replace(/=+$/, ""));
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad, { header: { alg: "ES256", x5c } }), bad.rootSha256));
+  });
+
+  test("a leaf that carries the same extension twice is rejected", async () => {
+    const bad = await makeChain({ leaf: { markers: [LEAF_MARKER, LEAF_MARKER] } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, bad), bad.rootSha256));
+  });
+
+  test("an intermediate whose basicConstraints says cA FALSE, or has no cA field, is rejected", async () => {
+    const explicitFalse = await makeChain({ intermediate: { basicConstraints: tlv(0x30, tlv(0x01, Uint8Array.of(0))) } });
+    const noField = await makeChain({ intermediate: { basicConstraints: tlv(0x30) } });
+    await expectInvalid(verifyAppleJws(await signJws(payload, explicitFalse), explicitFalse.rootSha256));
+    await expectInvalid(verifyAppleJws(await signJws(payload, noField), noField.rootSha256));
   });
 });
