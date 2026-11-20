@@ -211,6 +211,13 @@ function synced(db: SqlDb, spaceId: string): boolean {
   return db.get("SELECT 1 AS ok FROM space_groups WHERE space_id = ?", [spaceId]) !== null;
 }
 
+// When this iPhone's person joined the group, for an invite "from now"; 0 for "everything" (and for the group's owner).
+// A group or membership row that is missing reads as 0 (everything): this fails open, which is safe because the server
+// already sends a member only changes written after their history_from; this check only drops what the server cannot.
+function historyFrom(db: SqlDb, groupId: string): number {
+  return db.get<{ history_from: number }>("SELECT history_from FROM groups WHERE id = ?", [groupId])?.history_from ?? 0;
+}
+
 // A row that is not here but has a version was deleted.
 function wasDeleted(db: SqlDb, table: ChildTable, id: string): boolean {
   return db.get("SELECT 1 AS ok FROM row_versions WHERE table_name = ? AND row_id = ?", [table, id]) !== null;
@@ -219,7 +226,8 @@ function wasDeleted(db: SqlDb, table: ChildTable, id: string): boolean {
 // Applies one unlocked change from the group's log to this iPhone's tables, without marking anything dirty. Never
 // throws for a bad change:
 // - "applied": written; "older": not newer than what this iPhone has (an echo, a replay, a late change, or its
-//   session was deleted);
+//   session was deleted), or about a note started before this member joined a group that invited them "from now"
+//   (open question 56: they get only notes started after joining, and edits to older notes are dropped, not kept);
 // - "deferred": its session (or a card's photo) has not arrived, or the session is in another synced space here (it is
 //   being moved, M30b); kept in sync_pending and applied when it arrives or its own group moves it here;
 // - "rejected": unusable (unknown group, a row in another space, a value the tables refuse).
@@ -293,6 +301,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     const here = spaceOf(db, "sessions", key);
     // In another group's space here: it waits until that group moves it out (a delete with moved_to, M30b).
     if (here !== null && here !== space) return synced(db, here) ? defer(db, groupId, change, deviceId, table, key, key) : "rejected";
+    // A note started before this member joined "from now" (open question 56) is not theirs to see.
+    if (here === null && typeof change.row.started_at === "number" && change.row.started_at < historyFrom(db, groupId)) return "older";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
     upsertRow(db, "sessions", { ...change.row, space_id: space });
     retryPending(db, groupId, space, key);
@@ -302,7 +312,12 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   const sessionId = change.op === "segments" ? change.session_id : change.row.session_id;
   if (typeof sessionId !== "string") return "rejected";
   const parent = spaceOf(db, "sessions", sessionId);
-  if (parent === null) return wasDeleted(db, "sessions", sessionId) ? "older" : defer(db, groupId, change, deviceId, table, key, sessionId);
+  // Its session is not here. Deleted, or (a member invited "from now", open question 56) a note started before they
+  // joined, which they never get: dropped. Otherwise it waits for its session.
+  if (parent === null) {
+    if (wasDeleted(db, "sessions", sessionId) || historyFrom(db, groupId) > 0) return "older";
+    return defer(db, groupId, change, deviceId, table, key, sessionId);
+  }
   if (parent !== space) return synced(db, parent) ? defer(db, groupId, change, deviceId, table, key, sessionId) : "rejected";
   if (change.op === "segments") {
     if (!newer(db, table, key, change.at, deviceId)) return "older";
