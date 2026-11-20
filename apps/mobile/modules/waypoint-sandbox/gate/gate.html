@@ -14,6 +14,7 @@
 <meta http-equiv="refresh" content="3; url=http://HOST:8999/meta-refresh">
 </head>
 <body>
+<p id="marker">script: not run</p>
 <h3>Sandbox gate</h3><div class="f">font probe</div><ol id="out"></ol>
 <img src="http://HOST:8999/img">
 <img srcset="http://HOST:8999/srcset 2x">
@@ -24,6 +25,7 @@
 <a id="ping" href="#" ping="http://HOST:8999/a-ping">ping</a>
 <form id="form" action="http://HOST:8999/form" method="post"><input name="x" value="1"></form>
 <script>
+document.getElementById("marker").textContent = "script: ran";
 const H = "http://HOST:8999/";
 const out = document.getElementById("out");
 const say = (name, result) => { const li = document.createElement("li"); li.textContent = name + ": " + result; out.appendChild(li); };
@@ -38,9 +40,22 @@ probe("worker", () => new Worker("data:text/javascript,fetch('" + H + "worker')"
 probe("import", () => import(H + "import.js"));
 probe("image", () => new Promise((ok, no) => { const i = new Image(); i.onload = ok; i.onerror = () => no(new Error("img")); i.src = H + "js-image"; }));
 probe("window.open", () => { if (window.open(H + "open") === null) throw new Error("open"); });
-probe("localStorage", () => { localStorage.setItem("gate", String(Date.now())); say("localStorage before", String(localStorage.getItem("gate"))); });
-probe("indexedDB", () => new Promise((ok, no) => { const r = indexedDB.open("gate"); r.onsuccess = ok; r.onerror = () => no(new Error("idb")); }));
-probe("cookie", () => { document.cookie = "gate=1"; say("cookie", document.cookie || "(empty)"); });
+const storage = (name, run) => { try { const v = run(); say(name, v === undefined ? "blocked (undefined)" : "NOT BLOCKED"); } catch (e) { say(name, "blocked (" + (e && e.name) + ")"); } };
+storage("localStorage", () => { localStorage.setItem("gate", "1"); return localStorage.getItem("gate"); });
+storage("sessionStorage", () => { sessionStorage.setItem("gate", "1"); return sessionStorage.getItem("gate"); });
+storage("indexedDB", () => indexedDB.open("gate"));
+storage("caches", () => caches);
+document.cookie = "gate=1";
+say("cookie", document.cookie ? "NOT BLOCKED" : "blocked (empty)");
+const realm = (name, w) => {
+  if (!w) { say(name, "no frame window"); return; }
+  ["fetch", "RTCPeerConnection", "WebSocket", "Worker"].forEach((k) => {
+    try { say(name + " " + k, typeof w[k] === "undefined" ? "blocked (undefined)" : "NOT BLOCKED"); } catch (e) { say(name + " " + k, "blocked (" + (e && e.name) + ")"); }
+  });
+};
+const srcFrame = document.createElement("iframe"); srcFrame.srcdoc = "<p>srcdoc</p>"; document.body.appendChild(srcFrame);
+const blankFrame = document.createElement("iframe"); document.body.appendChild(blankFrame);
+setTimeout(() => { realm("srcdoc frame", srcFrame.contentWindow); realm("about:blank frame", blankFrame.contentWindow); for (let i = 0; i < window.frames.length; i++) realm("window.frames[" + i + "]", window.frames[i]); }, 300);
 probe("bridge", () => { if (window.webkit && window.webkit.messageHandlers && Object.keys(window.webkit.messageHandlers).length) throw new Error("bridge present"); say("bridge", "none"); });
 setTimeout(() => { document.getElementById("ping").click(); document.getElementById("form").submit(); }, 500);
 setTimeout(() => { location.href = H + "location"; }, 1000);

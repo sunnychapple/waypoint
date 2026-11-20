@@ -13,7 +13,8 @@ final class SandboxWebView: ExpoView, WKNavigationDelegate, WKUIDelegate {
   var page: String = ""
   var mermaid: Bool = false
 
-  private static let rules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^(about:blank|data:)"},"action":{"type":"ignore-previous-rules"}}]"#
+  // WebKit has no alternation in url-filter, so the allowed schemes are three rules: block everything, then re-allow.
+  private static let rules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^about:blank"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}}]"#
 
   private static let removeApis = #"["fetch","XMLHttpRequest","WebSocket","EventSource","RTCPeerConnection","webkitRTCPeerConnection","Worker","SharedWorker","caches","indexedDB","localStorage","sessionStorage"].forEach(function(k){try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false})}catch(e){}});try{Object.defineProperty(navigator,"sendBeacon",{value:undefined});Object.defineProperty(navigator,"serviceWorker",{value:undefined})}catch(e){}"#
 
@@ -74,8 +75,11 @@ final class SandboxWebView: ExpoView, WKNavigationDelegate, WKUIDelegate {
     guard !page.isEmpty else { return }
     var html = page
     if mermaid {
-      guard let script = SandboxWebView.mermaidScript else { return }
-      html = page.replacingOccurrences(of: "/*MERMAID*/", with: script)
+      // Only the first marker: the marker comes before the diagram source, so a label that contains it is inert.
+      guard let script = SandboxWebView.mermaidScript,
+            let marker = page.range(of: "/*MERMAID*/")
+      else { return }
+      html = page.replacingCharacters(in: marker, with: script)
     }
     ensureRules { [weak self] in
       guard let self else { return }
@@ -94,7 +98,12 @@ final class SandboxWebView: ExpoView, WKNavigationDelegate, WKUIDelegate {
       forIdentifier: "waypoint-sandbox", encodedContentRuleList: SandboxWebView.rules
     ) { [weak self] list, _ in
       DispatchQueue.main.async {
-        guard let self, let list else { return }
+        guard let self else { return }
+        // Nothing is loaded without the list. The log line carries no address, page or error text.
+        guard let list else {
+          NSLog("WaypointSandbox: the content rules could not be compiled, so nothing is shown")
+          return
+        }
         self.webView.configuration.userContentController.add(list)
         self.ruleListAdded = true
         load()
@@ -107,10 +116,14 @@ final class SandboxWebView: ExpoView, WKNavigationDelegate, WKUIDelegate {
     decidePolicyFor navigationAction: WKNavigationAction,
     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
   ) {
-    let isOwnLoad = allowLoad && navigationAction.targetFrame?.isMainFrame == true
-      && navigationAction.request.url?.absoluteString == "about:blank"
+    let url = navigationAction.request.url?.absoluteString
+    let isOwnLoad = allowLoad && navigationAction.targetFrame?.isMainFrame == true && url == "about:blank"
+    // Frames a page creates (srcdoc, or a blank frame) must run the user script and inherit the CSP; they load nothing else.
+    let isEmptyFrame = navigationAction.targetFrame?.isMainFrame == false && (url == "about:blank" || url == "about:srcdoc")
     if isOwnLoad {
       allowLoad = false
+      decisionHandler(.allow)
+    } else if isEmptyFrame {
       decisionHandler(.allow)
     } else {
       decisionHandler(.cancel)

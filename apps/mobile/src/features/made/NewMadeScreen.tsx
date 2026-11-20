@@ -44,7 +44,8 @@ export default function NewMadeScreen() {
   const sessionId = params.sessionId ?? null;
   const kind = kindOf(params.kind);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
-  const available = kind !== "mini_app" || miniAppsOn;
+  const diagramsOn = useConfig()?.flags.diagram_viewer === true;
+  const available = (kind !== "mini_app" || miniAppsOn) && (kind !== "diagram" || diagramsOn);
   const [focus, setFocus] = useState("");
   const [showSent, setShowSent] = useState(false);
   // The last failed request that may be re-sent (keepsKey), with its key and body. "Try again" reuses the key only
@@ -122,7 +123,7 @@ export default function NewMadeScreen() {
         </View>
       ) : null}
 
-      {!available ? <Caption>Mini apps aren't available yet.</Caption> : null}
+      {!available ? <Caption>{kind === "diagram" ? "Diagrams aren't available yet." : "Mini apps aren't available yet."}</Caption> : null}
       {hasText && available ? (
         <PrimaryButton
           label={price === null ? "Make" : `Make · ${creditsLabel(price)}`}
