@@ -7,19 +7,19 @@
     {
       "binding": "DB",
       "database_name": "waypoint",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b5f7d9cd-693d-4d13-8f80-414ea4422f18",
       "migrations_dir": "../../db/d1/migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "CONFIG", "id": "00000000000000000000000000000000" }],
+  "kv_namespaces": [{ "binding": "CONFIG", "id": "02c5f9f97df549c5af5aa583c1606b96" }],
   "vars": {
-    "CLERK_ISSUER": "https://clerk.example.com",
+    "CLERK_ISSUER": "https://renewing-bat-5625.clerk.accounts.dev",
     "CLERK_AUTHORIZED_PARTIES": "",
     "AI_GATEWAY_ID": "waypoint",
     "APNS_KEY_ID": "XXXXXXXXXX",
     "APNS_TEAM_ID": "XXXXXXXXXX",
-    "APNS_TOPIC": "app.waypoint.ios",
-    "APPLE_BUNDLE_ID": "app.waypoint.ios",
+    "APNS_TOPIC": "com.chapplestudios.waypoint",
+    "APPLE_BUNDLE_ID": "com.chapplestudios.waypoint",
     "APPLE_ENVIRONMENTS": "Production,Sandbox",
     "APPLE_APP_APPLE_ID": "0"
   },

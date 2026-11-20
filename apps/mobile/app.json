@@ -6,26 +6,59 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "ios": {
-      "bundleIdentifier": "app.waypoint.ios",
+      "bundleIdentifier": "com.chapplestudios.waypoint",
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Waypoint records a class or a talk so it can write down what is said, on this iPhone.",
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSCameraUsageDescription": "Waypoint uses the camera to snap pages of homework and books. Pages are read on this iPhone.",
-        "NSSpeechRecognitionUsageDescription": "Waypoint turns your recording into text on this iPhone. Nothing is sent anywhere."
+        "NSSpeechRecognitionUsageDescription": "Waypoint turns your recording into text on this iPhone. Nothing is sent anywhere.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "usesAppleSignIn": true
     },
     "plugins": [
       "expo-router",
-      ["expo-sqlite", { "enableFTS": true }],
-      ["expo-build-properties", { "ios": { "deploymentTarget": "26.0" } }],
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "26.0"
+          }
+        }
+      ],
       "expo-apple-authentication",
-      ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
       "@clerk/expo"
-    ]
+    ],
+    "owner": "chapple-studios",
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "218c0536-7964-4f77-bdcc-3808fc94f48e"
+      }
+    }
   }
 }
