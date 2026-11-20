@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { LinkPasscodeSchema } from "@waypoint/contracts";
 import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share/links.ts";
-import { useQuery } from "../../platform/db.ts";
+import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
+import { syncLimitHit } from "../../platform/sync.ts";
 import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -38,10 +39,13 @@ export default function ShareSessionScreen() {
       return;
     }
     setBusy(true);
+    const generation = dbGeneration();
     try {
       setMade(await createLink(sessionId, { passcode: passcodeOn ? passcode : null, expiry }));
     } catch (failure) {
-      setError(linkFailureText(failure, "make"));
+      // Today's sync is used up (open question 55): the sheet offers more for today.
+      if (syncLimitHit(failure, generation)) router.push("/sync-limit");
+      else setError(linkFailureText(failure, "make"));
     } finally {
       setBusy(false);
     }
