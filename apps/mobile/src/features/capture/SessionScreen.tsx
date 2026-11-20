@@ -13,7 +13,7 @@ import { researchForSession } from "../../core/research/research.ts";
 import { madeForSession, type MadeItem } from "../../core/made/made.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
-import { overviewsForSession, type OverviewState } from "../../core/overviews/overviews.ts";
+import { overviewsForSession, type Overview, type OverviewState } from "../../core/overviews/overviews.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
@@ -203,8 +203,8 @@ export default function SessionScreen() {
             <Row
               key={item.id}
               title={item.title}
-              right={<Caption>{OVERVIEW_STATE[item.state]}</Caption>}
-              onPress={() => router.push(`/overview/${encodeURIComponent(item.id)}`)}
+              right={<Caption>{overviewLabel(item)}</Caption>}
+              onPress={() => router.push(`${item.kind === "video" ? "/video/" : "/overview/"}${encodeURIComponent(item.id)}`)}
             />
           ))}
         </View>
@@ -248,6 +248,12 @@ const OVERVIEW_STATE: Record<OverviewState, string> = {
   failed: "Couldn't make the voices",
   no_voices: "Needs a second voice",
 };
+
+// A video row says "video" while it is made; the other states keep the shared wording.
+function overviewLabel(item: Overview): string {
+  if (item.kind === "video" && (item.state === "script" || item.state === "rendering")) return "Making the video…";
+  return OVERVIEW_STATE[item.state];
+}
 
 // Where a made item opens: practice sets, diagrams and mini apps each have their own screen.
 function madeRoute(item: MadeItem): string {

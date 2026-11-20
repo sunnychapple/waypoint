@@ -60,17 +60,26 @@ function errorCode(error: unknown): string | null {
   return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : null;
 }
 
-// Renders audio overviews whose voices are not made yet, at launch and when the app comes back.
+const RETRY_MS = 20_000;
+
+// Renders overviews whose voices or video are not made yet, at launch, every 20 seconds while the app is active,
+// and when the app comes back. A video held back by a recording is tried again on these ticks.
 export function useOverviewRenders(): void {
   useEffect(() => {
     const run = (): void => {
       for (const o of overviewsToRender(getDb())) void renderOverview(o.id);
     };
     run();
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") run();
+    }, RETRY_MS);
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") run();
     });
-    return () => sub.remove();
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
   }, []);
 }
 
