@@ -12,11 +12,10 @@ export function pushTokenRequest(deviceId: string, token: string, environment: "
   return parsed.success ? parsed.data : null;
 }
 
-// Kept in settings after a successful POST, so the same token is not sent on every launch.
+// Remembered after a successful POST, so the same token is not sent again.
 export function pushSentValue(request: PushTokenRequest): string {
   return `${request.device_id}:${request.environment}:${request.token}`;
 }
-export const PUSH_SENT_KEY = "push_token_sent";
 
 // What a tapped notification should do. Payloads carry only kind and ref (apps/api/src/push/messages.ts).
 export type PushAction =

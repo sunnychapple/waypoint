@@ -11,6 +11,7 @@ import {
   collectChanges,
   lastSeq,
   markMoved,
+  HISTORY_FROM_SLACK_MS,
   MAX_CHANGE_BYTES,
   MAX_PENDING,
   nextOutgoing,
@@ -403,7 +404,7 @@ describe("applying changes", () => {
     saveSegment(a.db, old.id, { tStart: 0, tEnd: 10, text: "before" });
     addFlag(a.db, a.deps, old.id, 5);
     const before = send(a);
-    b.db.run("UPDATE groups SET history_from = ? WHERE id = ?", [old.startedAt + 1, G]);
+    b.db.run("UPDATE groups SET history_from = ? WHERE id = ?", [old.startedAt + HISTORY_FROM_SLACK_MS + 1, G]);
     expect(before.map((c) => applyChange(b.db, G, c, "dev_a"))).toEqual(["older", "older", "older"]);
     expect(applyChange(b.db, G, { ...one(before, "upsert", "sessions"), at: 9_000, row: { ...one(before, "upsert", "sessions").row, title: "Renamed" } }, "dev_a")).toBe("older");
     expect(count(b, "sessions")).toBe(0);
@@ -412,6 +413,18 @@ describe("applying changes", () => {
     saveSegment(a.db, later.id, { tStart: 0, tEnd: 10, text: "after" });
     expect(send(a).map((c) => applyChange(b.db, G, c, "dev_a"))).toEqual(["applied", "applied"]);
     expect(b.db.get<{ text: string }>("SELECT text FROM segments WHERE session_id = ?", [later.id])?.text).toBe("after");
+  });
+  it("an author whose clock is a little behind the join time still lands; one far behind is dropped", () => {
+    const a = device("a");
+    const b = device("b");
+    const note = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const changes = send(a);
+    const sessionChange = one(changes, "upsert", "sessions");
+    b.db.run("UPDATE groups SET history_from = ? WHERE id = ?", [note.startedAt + HISTORY_FROM_SLACK_MS, G]);
+    expect(applyChange(b.db, G, sessionChange, "dev_a")).toBe("applied");
+    const c = device("c");
+    c.db.run("UPDATE groups SET history_from = ? WHERE id = ?", [note.startedAt + HISTORY_FROM_SLACK_MS + 1, G]);
+    expect(applyChange(c.db, G, sessionChange, "dev_a")).toBe("older");
   });
   it("a member invited with everything gets changes to notes from before they joined", () => {
     const a = device("a");
