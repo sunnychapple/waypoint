@@ -9,6 +9,7 @@ import { listSegments } from "../../core/capture/segments.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import type { SqlDb } from "../../core/db/sql.ts";
 import { getSpace } from "../../core/db/spaces.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { researchForSession } from "../../core/research/research.ts";
 import { linksForSession } from "../../core/share/links.ts";
 import { madeForSession, type MadeItem } from "../../core/made/made.ts";
@@ -18,7 +19,7 @@ import { overviewsForSession, type Overview, type OverviewState } from "../../co
 import { useConfig } from "../../platform/config.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
-import { revokeLink } from "../../platform/links.ts";
+import { linkRefused, revokeLink } from "../../platform/links.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -40,6 +41,7 @@ export default function SessionScreen() {
       made: madeForSession(db, id),
       overviews: overviewsForSession(db, id),
       links: linksForSession(db, id),
+      role: spaceGroups(db).get(session.spaceId)?.role ?? null,
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
@@ -52,7 +54,7 @@ export default function SessionScreen() {
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research, second, overviews, links } = data;
+  const { session, spaceName, pages, segments, research, second, overviews, links, role } = data;
   // A mini app or a diagram is listed only while its flag is on (M25b).
   const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
   const offset = -new Date().getTimezoneOffset();
@@ -69,8 +71,13 @@ export default function SessionScreen() {
     const canSecond = session.kind === "recording" && (session.state === "saved" || session.state === "interrupted");
     Alert.alert(session.title, undefined, [
       ...(canSecond ? [{ text: "Second transcript", onPress: () => router.push(`/second-transcript?sessionId=${id}`) }] : []),
-      { text: "Move to another space", onPress: () => router.push(`/space-picker?sessionId=${id}`) },
-      { text: "Share a link", onPress: () => router.push(`/share/${id}`) },
+      // A viewer can neither take a session out of a shared space nor link to it (the server refuses both).
+      ...(role === "viewer"
+        ? []
+        : [
+            { text: "Move to another space", onPress: () => router.push(`/space-picker?sessionId=${id}`) },
+            { text: "Share a link", onPress: () => router.push(`/share/${id}`) },
+          ]),
       { text: "Delete", style: "destructive", onPress: confirmDelete },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -91,8 +98,9 @@ export default function SessionScreen() {
   async function deleteSession() {
     try {
       for (const link of links) if (link.revokedAt === null) await revokeLink(link.id);
-    } catch {
-      Alert.alert("Couldn't turn off the links", "This session is still here. Try again when you're online.");
+    } catch (error) {
+      if (linkRefused(error)) Alert.alert("Couldn't turn off a link", "Only the person who made it, or an owner of the shared space, can turn it off. This session is still here.");
+      else Alert.alert("Couldn't turn off the links", "This session is still here. Try again when you're online.");
       return;
     }
     writeDb((db) => deleteSessionRow(db, id));

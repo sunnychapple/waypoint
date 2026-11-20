@@ -191,6 +191,175 @@ describe("moving a session (M30b)", () => {
   });
 });
 
+// Maps a new space on d to group id (a second group on the same iPhone, or the only one).
+function join(d: Device, groupId: string, name: string, kind: "personal" | "shared" = "shared", role = "editor") {
+  const space = createSpace(d.db, d.deps, name);
+  d.db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES (?, ?, ?, 1, 0)", [groupId, kind, role]);
+  d.db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, ?)", [space.id, groupId]);
+  d.db.run("DELETE FROM dirty");
+  return space;
+}
+type Sent = { change: SyncChange; groupId: string };
+function sendAll(d: Device): Sent[] {
+  collectChanges(d.db, d.deps);
+  const out = nextOutgoing(d.db, 1_000);
+  for (const o of out) sent(d.db, o.id);
+  return out.map((o) => ({ change: SyncChangeSchema.parse(JSON.parse(o.body)), groupId: o.groupId }));
+}
+// Applies each group's changes in the given group order, as M29b's pull does (one group at a time).
+function pull(d: Device, changes: Sent[], order: string[], from = "dev_a") {
+  for (const g of order) for (const c of changes.filter((x) => x.groupId === g)) applyChange(d.db, g, c.change, from);
+}
+function where(d: Device, id: string): string | null {
+  return d.db.get<{ space_id: string }>("SELECT space_id FROM sessions WHERE id = ?", [id])?.space_id ?? null;
+}
+
+describe("moving a session between synced spaces (M30b probes)", () => {
+  const G2 = "grp_fedcba9876543210";
+  const G3 = "grp_3333333333333333";
+  // a has Biology (G) and Chemistry (G2); a session with a segment, a flag and a photo is made and sent everywhere.
+  function setup() {
+    const a = device("a");
+    const aY = join(a, G2, "Chemistry");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    addFlag(a.db, a.deps, s.id, 5);
+    const photo = addPhoto(a.db, a.deps, s.id, 6, "p.jpg");
+    const first = sendAll(a);
+    return { a, aY, s, photo, first };
+  }
+  function moveOn(a: Device, sessionId: string, to: string) {
+    const from = where(a, sessionId);
+    const old = a.db.get<{ group_id: string }>("SELECT group_id FROM space_groups WHERE space_id = ?", [from])?.group_id ?? null;
+    moveSession(a.db, sessionId, to, 2_000);
+    markMoved(a.db, sessionId, old);
+  }
+
+  it("the delete is a millisecond older than the upserts and names the new group", () => {
+    const { a, aY, s } = setup();
+    moveOn(a, s.id, aY.id);
+    const out = sendAll(a);
+    const del = out.find((o) => o.change.op === "delete");
+    const up = out.find((o) => o.change.op === "upsert" && o.change.table === "sessions");
+    expect(del?.groupId).toBe(G);
+    expect(del?.change).toMatchObject({ table: "sessions", row_id: s.id, moved_to: G2 });
+    expect(up?.groupId).toBe(G2);
+    expect((up?.change.at ?? 0) - (del?.change.at ?? 0)).toBe(1);
+    // a's own echoes change nothing.
+    pull(a, out, [G, G2]);
+    expect(where(a, s.id)).toBe(aY.id);
+    expect(count(a, "flags")).toBe(1);
+  });
+
+  for (const order of [[G, G2], [G2, G]]) {
+    it(`a device in both groups keeps the moved session, its rows and its files (pulled ${order[0] === G ? "old" : "new"} group first)`, () => {
+      const { a, aY, s, first } = setup();
+      const b = device("b");
+      const bY = join(b, G2, "Chem");
+      pull(b, first, [G]);
+      b.db.run("UPDATE captures SET file = 'b.jpg'");
+      expect(where(b, s.id)).toBe(b.space.id);
+      a.db.run("UPDATE sessions SET title = 'Moved'");
+      moveOn(a, s.id, aY.id);
+      pull(b, sendAll(a), order);
+      expect(where(b, s.id)).toBe(bY.id);
+      expect(title(b, s.id)).toBe("Moved");
+      expect([count(b, "flags"), count(b, "captures"), count(b, "segments")]).toEqual([1, 1, 1]);
+      expect(b.db.get<{ file: string }>("SELECT file FROM captures")?.file).toBe("b.jpg");
+      expect(count(b, "sync_pending")).toBe(0);
+    });
+  }
+
+  it("a device only in the old group drops it; one only in the new group gets it", () => {
+    const { a, aY, s, first } = setup();
+    const c = device("c");
+    pull(c, first, [G]);
+    const d = device("d", { synced: false });
+    const dY = join(d, G2, "Chem");
+    a.db.run("UPDATE sessions SET title = 'Moved'");
+    moveOn(a, s.id, aY.id);
+    const out = sendAll(a);
+    pull(c, out, [G]);
+    expect([count(c, "sessions"), count(c, "flags")]).toEqual([0, 0]);
+    pull(d, out, [G2]);
+    expect(where(d, s.id)).toBe(dY.id);
+    expect([title(d, s.id), count(d, "flags"), count(d, "captures"), count(d, "segments")]).toEqual(["Moved", 1, 1, 1]);
+  });
+
+  it("moved twice before sending: both old groups get a delete naming the last group", () => {
+    const { a, aY, s, first } = setup();
+    const aZ = join(a, G3, "Physics");
+    moveOn(a, s.id, aY.id);
+    moveOn(a, s.id, aZ.id);
+    const out = sendAll(a);
+    const deletes = out.filter((o) => o.change.op === "delete").map((o) => [o.groupId, o.change.op === "delete" ? o.change.moved_to : null]);
+    expect(deletes).toEqual([[G, G3], [G2, G3]]);
+    expect(out.filter((o) => o.change.op !== "delete").every((o) => o.groupId === G3)).toBe(true);
+    const c = device("c");
+    pull(c, first, [G]);
+    pull(c, out, [G]);
+    expect(count(c, "sessions")).toBe(0);
+    for (const order of [[G, G3], [G3, G], [G2, G3, G]]) {
+      const b = device("b");
+      const bZ = join(b, G3, "Phys");
+      join(b, G2, "Chem");
+      pull(b, first, [G]);
+      pull(b, out, order);
+      expect(where(b, s.id)).toBe(bZ.id);
+      expect(count(b, "flags")).toBe(1);
+    }
+  });
+
+  it("moved then deleted before sending: both groups get a plain delete", () => {
+    const { a, aY, s, first } = setup();
+    moveOn(a, s.id, aY.id);
+    a.db.run("DELETE FROM sessions WHERE id = ?", [s.id]);
+    const out = sendAll(a);
+    const deletes = out.filter((o) => o.change.op === "delete" && o.change.table === "sessions");
+    expect(deletes.map((o) => o.groupId).sort()).toEqual([G, G2].sort());
+    expect(deletes.every((o) => o.change.op === "delete" && o.change.moved_to === undefined)).toBe(true);
+    const b = device("b");
+    join(b, G2, "Chem");
+    pull(b, first, [G]);
+    pull(b, out, [G2, G]);
+    expect(count(b, "sessions")).toBe(0);
+  });
+
+  it("moved away and back before sending: no delete for the group it is in", () => {
+    const { a, aY, s } = setup();
+    moveOn(a, s.id, aY.id);
+    moveOn(a, s.id, a.space.id);
+    const out = sendAll(a);
+    expect(out.filter((o) => o.change.op === "delete").map((o) => o.groupId)).toEqual([G2]);
+    expect(out.filter((o) => o.change.op !== "delete").every((o) => o.groupId === G)).toBe(true);
+  });
+
+  it("a move into a private space is a plain delete; the other device drops it", () => {
+    const { a, s, first } = setup();
+    moveOn(a, s.id, ensureDefaultSpace(a.db, a.deps).id);
+    const out = sendAll(a);
+    expect(out.map((o) => [o.groupId, o.change.op])).toEqual([[G, "delete"]]);
+    expect(out[0]?.change).not.toHaveProperty("moved_to");
+  });
+
+  it("another group can never pull a session out of its space: its upsert only waits", () => {
+    const { s, first } = setup();
+    const b = device("b");
+    const bY = join(b, G2, "Chem");
+    pull(b, first, [G]);
+    const up = first.find((o) => o.change.op === "upsert" && o.change.table === "sessions")?.change;
+    if (up?.op !== "upsert") throw new Error("no session upsert");
+    const evil = { ...up, at: 4_000_000_000_000, row: { ...up.row, title: "Mine now" } };
+    expect(applyChange(b.db, G2, evil, "dev_x")).toBe("deferred");
+    expect([where(b, s.id), title(b, s.id)]).toEqual([b.space.id, "New recording"]);
+    expect(count(b, "sync_pending")).toBe(1);
+    // A delete whose moved_to names a group this iPhone does not map deletes, as a plain delete does; nothing moves.
+    const del: SyncChange = { v: 1, id: "del_000000000000001", at: 3_000, op: "delete", table: "sessions", row_id: s.id, moved_to: "grp_not_mine_00000" };
+    expect(applyChange(b.db, G, del, "dev_c")).toBe("applied");
+    expect([count(b, "sessions"), where(b, s.id) === bY.id]).toEqual([0, false]);
+  });
+});
+
 describe("applying changes", () => {
   it("applies into the group's space, never marks rows dirty, and keeps the newest", () => {
     const a = device("a");
@@ -327,7 +496,7 @@ describe("applying changes", () => {
     const session = one(send(a), "upsert", "sessions");
     applyChange(b.db, G, { ...session, at: 900_000 }, "dev_a");
     b.db.run("UPDATE sessions SET title = 'Later'");
-    expect(one(send(b), "upsert", "sessions").at).toBe(900_001);
+    expect(one(send(b), "upsert", "sessions").at).toBe(900_002);
   });
   it("a transcript piece replaces only its own 10 minutes", () => {
     const a = device("a");

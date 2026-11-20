@@ -8,6 +8,7 @@ export const LINK_MAX_BYTES = 4_000_000;
 const TRANSCRIPT_LINE_MAX = 10_000;
 const TRANSCRIPT_LINES_MAX = 20_000;
 const PAGE_TEXT_MAX = 50_000;
+const PAGES_MAX = 200;
 const DAY_MS = 86_400_000;
 
 export type LinkExpiry = "none" | "day" | "week" | "month";
@@ -25,36 +26,61 @@ export type LinkRow = {
 type SessionText = { title: string; started_at: number };
 
 // The session as SharedItem JSON: its title, when it started, the device transcript as { t, text } lines and the page
-// text. When the item is over maxBytes, transcript lines are dropped from the end until it fits (cut: true).
+// text. Anything past SharedItemSchema's limits is cut. When the item is over maxBytes, transcript lines are dropped
+// from the end; when the pages alone are still over, pages are dropped from the end and the last one kept is
+// shortened. cut is true whenever anything was left out.
 export function sharedItem(db: SqlDb, sessionId: string, maxBytes = LINK_MAX_BYTES): { item: SharedItem; cut: boolean } | null {
   const session = db.get<SessionText>("SELECT title, started_at FROM sessions WHERE id = ?", [sessionId]);
   if (session === null) return null;
-  const lines = db
-    .all<{ t: number; text: string }>("SELECT t_start AS t, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start", [sessionId])
-    .slice(0, TRANSCRIPT_LINES_MAX)
-    .map((r) => ({ t: r.t, text: r.text.slice(0, TRANSCRIPT_LINE_MAX) }));
-  const pages = db
-    .all<{ text: string | null }>("SELECT found_text AS text FROM captures WHERE session_id = ? AND kind = 'page' ORDER BY position, id", [sessionId])
-    .map((r) => ({ text: (r.text ?? "").slice(0, PAGE_TEXT_MAX) }))
-    .slice(0, 200);
-  const build = (count: number): SharedItem => ({
+  const allLines = db.all<{ t: number; text: string }>(
+    "SELECT t_start AS t, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
+    [sessionId],
+  );
+  const allPages = db.all<{ text: string | null }>("SELECT found_text AS text FROM captures WHERE session_id = ? AND kind = 'page' ORDER BY position, id", [
+    sessionId,
+  ]);
+  let cut = allLines.length > TRANSCRIPT_LINES_MAX || allPages.length > PAGES_MAX;
+  const lines = allLines.slice(0, TRANSCRIPT_LINES_MAX).map((r) => {
+    if (r.text.length > TRANSCRIPT_LINE_MAX) cut = true;
+    return { t: r.t, text: r.text.slice(0, TRANSCRIPT_LINE_MAX) };
+  });
+  const pages = allPages.slice(0, PAGES_MAX).map((r) => {
+    const text = r.text ?? "";
+    if (text.length > PAGE_TEXT_MAX) cut = true;
+    return { text: text.slice(0, PAGE_TEXT_MAX) };
+  });
+  const build = (count: number, kept: { text: string }[]): SharedItem => ({
     v: 1,
     kind: "session",
     title: session.title.slice(0, 200).trim() || "Untitled session",
     created_at: Math.max(0, session.started_at),
     transcript: lines.slice(0, count),
-    pages,
+    pages: kept,
   });
-  // The size grows with the line count, so the largest count that fits is found by bisection.
-  let low = 0;
-  let high = lines.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (utf8Length(JSON.stringify(build(mid))) <= maxBytes) low = mid;
-    else high = mid - 1;
+  const fits = (item: SharedItem): boolean => utf8Length(JSON.stringify(item)) <= maxBytes;
+  // The size grows with each count, so the largest count that fits is found by bisection.
+  const largest = (max: number, ok: (n: number) => boolean): number => {
+    let low = 0;
+    let high = max;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (ok(mid)) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+  const count = largest(lines.length, (n) => fits(build(n, pages)));
+  let kept = pages;
+  if (count < lines.length) cut = true;
+  if (!fits(build(count, pages))) {
+    const whole = largest(pages.length, (n) => fits(build(0, pages.slice(0, n))));
+    const next = pages[whole]?.text ?? "";
+    const chars = largest(next.length, (n) => fits(build(0, [...pages.slice(0, whole), { text: next.slice(0, n) }])));
+    kept = chars > 0 ? [...pages.slice(0, whole), { text: next.slice(0, chars) }] : pages.slice(0, whole);
+    cut = true;
   }
-  const item = SharedItemSchema.parse(build(low));
-  return { item, cut: low < lines.length };
+  const item = SharedItemSchema.parse(build(count, kept));
+  return { item, cut };
 }
 
 // The URL: the key only after "#k=", which a browser never sends to the server.
@@ -62,14 +88,12 @@ export function linkUrl(apiUrl: string, linkId: string, key: string): string {
   return `${apiUrl.replace(/\/+$/, "")}/l/${linkId}#k=${key}`;
 }
 
-// The expiry time for a choice made at `now` (a calendar month for "month"); null for no expiry.
+// The expiry time for a choice made at `now` ("1 month" is 30 days, as for invites); null for no expiry.
 export function expiryFor(choice: LinkExpiry, now: number): number | null {
   if (choice === "none") return null;
   if (choice === "day") return now + DAY_MS;
   if (choice === "week") return now + 7 * DAY_MS;
-  const date = new Date(now);
-  date.setMonth(date.getMonth() + 1);
-  return date.getTime();
+  return now + 30 * DAY_MS;
 }
 
 type LinkDbRow = {

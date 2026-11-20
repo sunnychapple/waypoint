@@ -1,9 +1,10 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsLabel, usedLabel } from "../../core/capture/labels.ts";
 import { getSession, moveSession } from "../../core/capture/sessions.ts";
 import { getSavingTo, listSpaces, setSavingTo } from "../../core/db/spaces.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { markMoved } from "../../core/sync/changes.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -13,11 +14,30 @@ import { useColors } from "../../ui/theme.ts";
 export default function SpacePickerScreen() {
   const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
-  const spaces = useQuery(listSpaces);
+  const all = useQuery(listSpaces);
+  const groups = useQuery(spaceGroups);
   const currentId = useQuery((db) => (sessionId ? (getSession(db, sessionId)?.spaceId ?? null) : getSavingTo(db).id), sessionId ?? "");
   const offset = -new Date().getTimezoneOffset();
+  // A viewer cannot add to a shared space (the server refuses their changes), so it is not offered.
+  const spaces = all.filter((space) => groups.get(space.id)?.role !== "viewer" || space.id === currentId);
+  const nameOf = (id: string | null) => all.find((space) => space.id === id)?.name ?? "the shared space";
 
+  // Moving a session into or out of a shared space is confirmed: everyone there gains or loses it (M30b).
   function choose(spaceId: string) {
+    const into = groups.get(spaceId)?.kind === "shared";
+    const outOf = currentId !== null && groups.get(currentId)?.kind === "shared";
+    if (!sessionId || spaceId === currentId || (!into && !outOf)) return move(spaceId);
+    const lines = [
+      outOf ? `It will be removed for everyone in ${nameOf(currentId)}.` : null,
+      into ? `Everyone in ${nameOf(spaceId)} will see this session.` : null,
+    ];
+    Alert.alert("Move this session?", lines.filter((line) => line !== null).join(" "), [
+      { text: "Cancel", style: "cancel" },
+      { text: "Move", onPress: () => move(spaceId) },
+    ]);
+  }
+
+  function move(spaceId: string) {
     writeDb((db) => {
       if (sessionId) {
         // A move to another space: the rows follow the new space's group, and the old group drops the session (M30b).
@@ -36,7 +56,7 @@ export default function SpacePickerScreen() {
       {spaces.map((space) => {
         const parts = space.isDefault
           ? ["Everything not in a space yet"]
-          : [usedLabel(space.lastUsedAt, Date.now(), offset), sessionsLabel(space.sessionCount)];
+          : [groups.get(space.id)?.kind === "shared" ? "Shared" : null, usedLabel(space.lastUsedAt, Date.now(), offset), sessionsLabel(space.sessionCount)];
         return (
           <Row
             key={space.id}

@@ -2,11 +2,9 @@ import { useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { LinkPasscodeSchema } from "@waypoint/contracts";
-import { failureCopy } from "../../core/cloud/failure.ts";
 import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share/links.ts";
 import { useQuery } from "../../platform/db.ts";
-import { createLink, revokeLink } from "../../platform/links.ts";
-import { toFailure } from "../../platform/tasks.ts";
+import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
 import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -43,7 +41,7 @@ export default function ShareSessionScreen() {
     try {
       setMade(await createLink(sessionId, { passcode: passcodeOn ? passcode : null, expiry }));
     } catch (failure) {
-      setError(failureCopy(toFailure(failure)).title);
+      setError(linkFailureText(failure, "make"));
     } finally {
       setBusy(false);
     }
@@ -54,7 +52,7 @@ export default function ShareSessionScreen() {
     try {
       await revokeLink(link.id);
     } catch (failure) {
-      setError(failureCopy(toFailure(failure)).title);
+      setError(linkFailureText(failure, "turn_off"));
     }
   }
 
@@ -107,7 +105,7 @@ export default function ShareSessionScreen() {
         <View style={styles.block}>
           <Caption>Your link</Caption>
           <Text selectable style={[styles.url, { color: colors.ink }]}>{made.url}</Text>
-          {made.cut ? <Caption>The transcript was too long; the link has the first part.</Caption> : null}
+          {made.cut ? <Caption>This session was too long for one link; the link has the first part.</Caption> : null}
           <SecondaryButton label="Share…" icon="square.and.arrow.up" tone="accent" onPress={() => share(made.url)} />
         </View>
       ) : null}
@@ -118,7 +116,12 @@ export default function ShareSessionScreen() {
           key={link.id}
           title={link.hasPasscode ? "Passcode link" : "Link"}
           subtitle={link.expiresAt === null ? "No expiry" : `Expires ${new Date(link.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`}
-          right={<SecondaryButton label="Turn off" onPress={() => turnOff(link)} />}
+          right={
+            <View style={styles.actions}>
+              <SecondaryButton label="Share…" icon="square.and.arrow.up" onPress={() => share(link.url)} />
+              <SecondaryButton label="Turn off" onPress={() => void turnOff(link)} />
+            </View>
+          }
         />
       ))}
     </Screen>
@@ -130,4 +133,5 @@ const styles = StyleSheet.create({
   error: { marginTop: 8 },
   block: { gap: 8, marginTop: 12 },
   url: { fontSize: 13 },
+  actions: { flexDirection: "row", gap: 8 },
 });

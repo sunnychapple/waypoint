@@ -53,6 +53,29 @@ describe("sharedItem", () => {
     expect(kept).toBeLessThan(40);
     expect(out?.item.transcript[0]?.text.startsWith("line 0 ")).toBe(true);
   });
+  it("too many lines, or a line too long, is cut and reported", () => {
+    const { db, session } = setup();
+    for (let i = 0; i < 20_005; i += 1) saveSegment(db, session.id, { tStart: i, tEnd: i, text: "a" });
+    const many = sharedItem(db, session.id);
+    expect([many?.cut, many?.item.transcript.length]).toEqual([true, 20_000]);
+    const other = setup();
+    saveSegment(other.db, other.session.id, { tStart: 0, tEnd: 1, text: "x".repeat(12_000) });
+    const long = sharedItem(other.db, other.session.id);
+    expect([long?.cut, long?.item.transcript[0]?.text.length]).toEqual([true, 10_000]);
+  });
+  it("page text alone over the limit: no transcript, pages from the start, the last one shortened, and cut", () => {
+    const { db, deps, session } = setup();
+    saveSegment(db, session.id, { tStart: 0, tEnd: 1, text: "spoken" });
+    const ids = addPages(db, deps, session.id, ["1.jpg", "2.jpg", "3.jpg", "4.jpg"]);
+    ids.forEach((id, i) => setPageText(db, id, `${i}${"p".repeat(2_999)}`, "[]"));
+    const out = sharedItem(db, session.id, 7_000);
+    expect(out?.cut).toBe(true);
+    expect(utf8Length(JSON.stringify(out?.item))).toBeLessThanOrEqual(7_000);
+    expect(out?.item.transcript).toEqual([]);
+    expect(out?.item.pages.map((p) => p.text.length)).toEqual([3_000, 3_000, expect.any(Number)]);
+    expect(out?.item.pages[2]?.text.startsWith("2")).toBe(true);
+    expect(out?.item.pages[2]?.text.length).toBeLessThan(3_000);
+  });
   it("a session that is not there gives null", () => {
     const { db } = setup();
     expect(sharedItem(db, "missing")).toBeNull();
@@ -98,5 +121,6 @@ describe("links", () => {
     expect(expiryFor("day", now)).toBe(now + 86_400_000);
     expect(expiryFor("week", now)).toBe(now + 7 * 86_400_000);
     expect(expiryFor("month", now)).toBe(Date.UTC(2026, 11, 20));
+    expect(expiryFor("month", Date.UTC(2026, 0, 31))).toBe(Date.UTC(2026, 2, 2));
   });
 });
