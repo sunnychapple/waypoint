@@ -26,7 +26,8 @@ export default function SecondTranscriptSheet() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [plan] = useState(() => secondPlan(sessionId));
   const tooLong = plan !== null && plan.minutes > MAX_SECOND_MINUTES;
-  const quote = useQuote(plan !== null && !tooLong ? { task: "retranscribe", minutes: plan.minutes } : null);
+  const offered = plan !== null && plan.complete && !tooLong;
+  const quote = useQuote(offered ? { task: "retranscribe", minutes: plan.minutes } : null);
   // Made once when the sheet opens; "Try again" re-sends with it only when the request did not run (keepsKey).
   const [key, setKey] = useState(() => randomUUID());
   const [failure, setFailure] = useState<CloudFailure | null>(null);
@@ -65,8 +66,9 @@ export default function SecondTranscriptSheet() {
 
       {plan === null ? <Body>This session has no recording.</Body> : null}
       {tooLong ? <Body>This recording is too long for a second transcript.</Body> : null}
+      {plan !== null && !plan.complete ? <Body>This recording's audio isn't on this iPhone.</Body> : null}
 
-      {plan !== null && !tooLong ? (
+      {offered ? (
         <>
           <Body style={[styles.first, { color: colors.ink }]}>
             {"Your recording's audio will be sent to Waypoint's cloud for this one job, and deleted when it ends."}

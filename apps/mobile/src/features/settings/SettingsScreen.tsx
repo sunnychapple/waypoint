@@ -145,7 +145,7 @@ export default function SettingsScreen() {
       <Row title="Apple Intelligence" right={<Caption>{appleIntelligenceLabel(availability)}</Caption>} />
       <Link title="Permissions" onPress={() => router.push("/settings-permissions")} />
       <Link title="Storage & search" onPress={() => router.push("/settings-storage")} />
-      <Row title="Offer a second transcript after each recording" right={<Switch value={offerSecond} onValueChange={setOffer} />} />
+      <Row title="Offer a second transcript after each recording" right={<Switch accessibilityLabel="Offer a second transcript after each recording" value={offerSecond} onValueChange={setOffer} />} />
 
       <Caption style={styles.section}>ABOUT</Caption>
       <Row title={versionLabel(Constants.expoConfig?.version ?? null, Constants.nativeBuildVersion)} />

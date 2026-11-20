@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
@@ -36,6 +36,8 @@ export default function SessionScreen() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [showSecond, setShowSecond] = useState(view === "second");
+  // A push to ?view=second while this screen is already open moves the switch too.
+  useEffect(() => setShowSecond(view === "second"), [view]);
 
   if (!data) return <Screen>{null}</Screen>;
   const { session, spaceName, pages, segments, second } = data;
