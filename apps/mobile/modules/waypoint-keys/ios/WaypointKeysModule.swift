@@ -69,6 +69,39 @@ public class WaypointKeysModule: Module {
     AsyncFunction("finishAccountRotation") { (userId: String, accountId: String, keep: Bool) throws in
       try coded { try KeysOps.finishAccountRotation(userId: userId, accountId: accountId, keep: keep) }
     }
+    // M28a: group keys, wrapping and opening them, locked content, files and links (GroupOps.swift).
+    AsyncFunction("makeGroupKey") { (userId: String, groupId: String, keyVersion: Int) throws in
+      try coded { try KeysOps.makeGroupKey(userId: userId, groupId: groupId, keyVersion: keyVersion) }
+    }
+    AsyncFunction("dropGroupKey") { (userId: String, groupId: String, keyVersion: Int) throws in
+      try coded { try KeysOps.dropGroupKey(userId: userId, groupId: groupId, keyVersion: keyVersion) }
+    }
+    Function("heldGroupKeyVersions") { (userId: String, groupId: String) throws -> [Int] in
+      try coded { try KeysOps.heldGroupKeyVersions(userId: userId, groupId: groupId) }
+    }
+    AsyncFunction("wrapGroupKeys") { (userId: String, groupId: String, keyVersions: [Int], recipients: [[String: String]], knownAccounts: [String: String]) throws -> [String: Any] in
+      try coded { try KeysOps.wrapGroupKeys(userId: userId, groupId: groupId, keyVersions: keyVersions, recipients: recipients, knownAccounts: knownAccounts) }
+    }
+    AsyncFunction("openGroupKeys") { (userId: String, groupId: String, recipientId: String, envelopes: [[String: Any]], signers: [[String: String]], knownAccounts: [String: String]) throws -> [String: Any] in
+      try coded {
+        try KeysOps.openGroupKeys(userId: userId, groupId: groupId, recipientId: recipientId, envelopes: envelopes, signers: signers, knownAccounts: knownAccounts)
+      }
+    }
+    AsyncFunction("lockContent") { (userId: String, groupId: String, keyVersion: Int, label: String, fields: [String], plaintext: String) throws -> String in
+      try coded { try KeysOps.lockContent(userId: userId, groupId: groupId, keyVersion: keyVersion, label: label, fields: fields, plaintext: plaintext) }
+    }
+    AsyncFunction("unlockContent") { (userId: String, groupId: String, label: String, fields: [String], locked: String) throws -> String in
+      try coded { try KeysOps.unlockContent(userId: userId, groupId: groupId, label: label, fields: fields, locked: locked) }
+    }
+    AsyncFunction("lockFile") { (userId: String, groupId: String, keyVersion: Int, blobId: String, inPath: String, outPath: String) throws -> Int in
+      try coded { try KeysOps.lockFile(userId: userId, groupId: groupId, keyVersion: keyVersion, blobId: blobId, inPath: inPath, outPath: outPath) }
+    }
+    AsyncFunction("unlockFile") { (userId: String, groupId: String, blobId: String, inPath: String, outPath: String) throws in
+      try coded { try KeysOps.unlockFile(userId: userId, groupId: groupId, blobId: blobId, inPath: inPath, outPath: outPath) }
+    }
+    AsyncFunction("lockLink") { (linkId: String, plaintext: String) throws -> [String: String] in
+      try coded { try KeysOps.lockLink(linkId: linkId, plaintext: plaintext) }
+    }
   }
 }
 
