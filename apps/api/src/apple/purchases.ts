@@ -10,7 +10,7 @@ export type PurchaseOutcome =
   | { ok: true; product: ProductKind; credits: number; plan: Plan }
   | { ok: false; reason: "other_account" | "refunded" };
 
-type PurchaseRow = { billing_account_id: string; status: "active" | "refunded" | "revoked" | "expired" };
+type PurchaseRow = { billing_account_id: string; status: "active" | "refunded" | "revoked" | "expired"; released_at: number | null };
 
 // The wallet command id for everything a transaction grants. The app's POST and Apple's notice share it,
 // so a transaction is granted once however often it arrives.
@@ -54,7 +54,16 @@ export async function applyTransaction(
 ): Promise<PurchaseOutcome> {
   if (txn.revocationDate !== undefined) return { ok: false, reason: "refunded" };
   if (txn.inAppOwnershipType === "PURCHASED") {
-    // A subscription or purchase belongs to the account that recorded it first, renewals included.
+    // Rows released by a deleted account (released_at, open question 7) are claimed first, in one statement that moves
+    // only rows whose account is gone: of two accounts claiming at once, the second finds them owned and moves nothing.
+    await db
+      .prepare(
+        `UPDATE purchases SET billing_account_id = ? WHERE original_id = ? AND billing_account_id <> ? AND released_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM users u WHERE u.billing_account_id = purchases.billing_account_id)`,
+      )
+      .bind(account.billing_account_id, txn.originalTransactionId, account.billing_account_id)
+      .run();
+    // Then, as before: a subscription or purchase belongs to the account that recorded it first, renewals included.
     const owner = await db
       .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND billing_account_id <> ? LIMIT 1")
       .bind(txn.originalTransactionId, account.billing_account_id)
@@ -77,7 +86,7 @@ export async function applyTransaction(
     )
     .run();
   const row = await db
-    .prepare("SELECT billing_account_id, status FROM purchases WHERE transaction_id = ?")
+    .prepare("SELECT billing_account_id, status, released_at FROM purchases WHERE transaction_id = ?")
     .bind(txn.transactionId)
     .first<PurchaseRow>();
   if (row === null) throw new Error("purchase row missing after insert");
@@ -95,7 +104,8 @@ export async function applyTransaction(
         .bind(account.user_id, product.kind, shared ? "family_share" : "purchase", now)
         .run();
     }
-    if (!shared) {
+    // A released row gives the entitlement only: its credits or monthly reset went to the deleted account.
+    if (!shared && row.released_at === null) {
       const id = transactionCommandId(txn.transactionId);
       const ref = `apple:${txn.transactionId}`;
       if (product.kind === "plus") {

@@ -3,12 +3,22 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
+import type { Db } from "../storage.ts";
 import { AppleJwsError, verifyAppleJws } from "./jws.ts";
 import { appleProduct } from "./products.ts";
 import { applyTransaction } from "./purchases.ts";
 import { allowedEnvironments, AppleTransactionSchema } from "./transaction.ts";
 
 export type ApplePurchaseDeps = { now: () => number; rootSha256: string };
+
+// True when the account named by `token` no longer exists and rows of this purchase were released (open question 7).
+async function releasedByDeletedAccount(db: Db, originalId: string, token: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND released_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users WHERE id = ?) LIMIT 1")
+    .bind(originalId, token)
+    .first<{ found: number }>();
+  return row !== null;
+}
 
 export function applePurchaseRoute(deps: ApplePurchaseDeps): Hono<AppEnv> {
   return new Hono<AppEnv>().post("/v1/purchases/apple", idempotent(deps), async (c) => {
@@ -32,10 +42,13 @@ export function applePurchaseRoute(deps: ApplePurchaseDeps): Hono<AppEnv> {
     }
     const product = appleProduct(txn.productId);
     if (product === undefined || product.appleType !== txn.type) throw new ApiFailure("bad_request", "unknown product");
+    // Another person's token is refused, unless that account is gone and released this purchase (open question 7):
+    // then applyTransaction decides who may claim it.
     if (
       txn.inAppOwnershipType === "PURCHASED" &&
       txn.appAccountToken !== undefined &&
-      txn.appAccountToken.toLowerCase() !== user.id.toLowerCase()
+      txn.appAccountToken.toLowerCase() !== user.id.toLowerCase() &&
+      !(await releasedByDeletedAccount(c.env.DB, txn.originalTransactionId, txn.appAccountToken.toLowerCase()))
     ) {
       throw new ApiFailure("conflict", "purchase belongs to another account");
     }
