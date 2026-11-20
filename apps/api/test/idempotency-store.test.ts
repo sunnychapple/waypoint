@@ -288,6 +288,24 @@ describe("idempotent: what is stored", () => {
     expect(runs).toBe(2);
   });
 
+  test("a 409 with Retry-After from the handler (a hold still in progress) is not stored: the same request runs again", async () => {
+    const db = createTestDb();
+    await seedUser(db, "u1", "clerk_1");
+    let runs = 0;
+    const app = makeApp(db, () => {
+      runs += 1;
+      if (runs === 1) throw new ApiFailure("conflict", "request in progress", 1);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const first = await post(app, db, PATH, { name: "a" });
+    expect(first.status).toBe(409);
+    expect(first.headers.get("Retry-After")).toBe("1");
+    expect(await rowCount(db)).toBe(0);
+    const second = await post(app, db, PATH, { name: "a" });
+    expect(second.status).toBe(200);
+    expect(runs).toBe(2);
+  });
+
   test("a plain Error (500) is not stored: the row is deleted", async () => {
     const db = createTestDb();
     await seedUser(db, "u1", "clerk_1");

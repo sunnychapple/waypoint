@@ -34,10 +34,12 @@ async function hashRequest(method: string, target: string, body: ArrayBuffer): P
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// A reply that says "try again later" (Retry-After, such as 409 "request in progress" from a wallet hold still open)
+// is not stored: replayed, it would keep answering "in progress" for 24 hours after the work ended.
 function isStorable(reply: Response): boolean {
   const status = reply.status;
   const statusOk = (status >= 200 && status <= 299) || status === 400 || status === 404 || status === 409;
-  return statusOk && (reply.headers.get("Content-Type") ?? "").startsWith("application/json");
+  return statusOk && !reply.headers.has("Retry-After") && (reply.headers.get("Content-Type") ?? "").startsWith("application/json");
 }
 
 export function idempotent(deps: { now: () => number }): MiddlewareHandler<AppEnv> {
