@@ -53,9 +53,10 @@ export function freshNonce(): string {
 // Builds a signed request. `as` overrides the Waypoint-Device header (for example "new" when registering).
 export async function signedInit(
   device: TestDevice,
-  request: { method: string; path: string; body?: unknown; now: number; nonce?: string; as?: string; idempotencyKey?: string },
+  request: { method: string; path: string; body?: unknown; rawBody?: string; now: number; nonce?: string; as?: string; idempotencyKey?: string },
 ): Promise<RequestInit> {
-  const bodyText = request.body === undefined ? "" : JSON.stringify(request.body);
+  // rawBody: sent and signed exactly as given (a body that is not JSON).
+  const bodyText = request.rawBody ?? (request.body === undefined ? "" : JSON.stringify(request.body));
   const nonce = request.nonce ?? freshNonce();
   const deviceId = request.as ?? device.id;
   const input = requestSigningInput({

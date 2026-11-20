@@ -6,11 +6,14 @@ import { ZERO_RETENTION_KEY } from "../core/cloud/activity.ts";
 import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { api } from "./api.ts";
 import { useQuery, writeDb } from "./db.ts";
+import { requireApprovedDevice } from "./device.ts";
 
 export type SwitchResult = "ok" | "plan_required" | "offline" | "failed";
 
-// PUT /v1/settings/zero-retention (PR 32). Plus only; the server answers 403 plan_required otherwise.
+// PUT /v1/settings/zero-retention (PR 32). Plus only; the server answers 403 plan_required otherwise. Signed by this
+// iPhone (H12), so it needs an approved device; otherwise the screen that explains why opens.
 export async function setZeroRetention(enabled: boolean): Promise<SwitchResult> {
+  if (!requireApprovedDevice()) return "failed";
   try {
     const reply = await api.setZeroRetention(enabled);
     writeDb((db) => setSetting(db, ZERO_RETENTION_KEY, reply.zero_retention ? "1" : "0"));
