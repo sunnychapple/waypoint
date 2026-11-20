@@ -4,7 +4,7 @@ import { runScheduled } from "../src/index.ts";
 import { createTestDb } from "./helpers/d1.ts";
 
 // index.ts imports the Durable Object classes, which need the Workers runtime; the tests only call runScheduled().
-vi.mock("cloudflare:workers", () => ({ DurableObject: class {} }));
+vi.mock("cloudflare:workers", () => ({ DurableObject: class {}, WorkflowEntrypoint: class {} }));
 
 const NOW = Date.UTC(2026, 10, 19, 12);
 const YEARLY_START = Date.UTC(2026, 0, 31, 10);
