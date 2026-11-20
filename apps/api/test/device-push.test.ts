@@ -10,7 +10,7 @@ import { handleError } from "../src/errors.ts";
 import type { PushMessage, PushQueue } from "../src/push/messages.ts";
 import type { BatchDb } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
-import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
+import { insertDevice, makeTestDevice, selfCertFor, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
 const U1: SessionUser = { id: "u1", clerk_id: "clerk_u1", plan: "free", billing_account_id: "ba_u1", zero_retention: false };
@@ -92,7 +92,7 @@ async function rotation(w: World, next: TestDevice) {
       sign: w.phone.sign,
     }),
   );
-  return { account: { id: "acct_0002", sign_pub: next.signPub, box_pub: next.boxPub }, devices: [{ id: "phone_0001", cert, account_envelope: envelope }] };
+  return { account: { id: "acct_0002", sign_pub: next.signPub, box_pub: next.boxPub, self_cert: await selfCertFor(next, "u1", "acct_0002") }, devices: [{ id: "phone_0001", cert, account_envelope: envelope }] };
 }
 
 // Push tokens for the phone and the tablet of u1, and for the waiting device's id under u2 (a different user).
@@ -158,7 +158,7 @@ describe("S1F device pushes and push-token cleanup", () => {
       platform: "ios",
       sign_pub: w.ipad.signPub,
       box_pub: w.ipad.boxPub,
-      account: { id: "acct_0001", sign_pub: w.account.signPub, box_pub: w.account.boxPub, cert },
+      account: { id: "acct_0001", sign_pub: w.account.signPub, box_pub: w.account.boxPub, cert, self_cert: await selfCertFor(w.account, "u1", "acct_0001") },
     };
     const res = await app().request(path, await signedInit(w.ipad, { method: "POST", path, body, now: NOW, as: "new" }), { DB: w.db, PUSH_QUEUE: w.queue });
     expect(res.status).toBe(201);

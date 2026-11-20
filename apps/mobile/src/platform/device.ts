@@ -113,7 +113,7 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
     if (clerkId !== clerkUserId) return;
     try {
       await api.registerDevice(
-        { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert } },
+        { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert, self_cert: account.selfCert } },
         registerSigner,
       );
       if (clerkId !== clerkUserId) return;

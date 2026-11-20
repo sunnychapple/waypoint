@@ -4,13 +4,14 @@ import { requireNativeModule } from "expo";
 // public keys and signatures are base64url text. Errors carry error.code: "no_secure_enclave", "no_identity",
 // "keychain", or a format error such as "badInput".
 export type DeviceKeys = { deviceId: string; signPub: string; boxPub: string; hardware: boolean };
-export type AccountKey = { accountId: string; signPub: string; boxPub: string; cert: string };
+// cert: this device's certificate. selfCert: the account key's certificate for its own row (docs/security.md section 6).
+export type AccountKey = { accountId: string; signPub: string; boxPub: string; cert: string; selfCert: string };
 export type SignedRequest = { nonce: string; signature: string };
 export type HeldAccountKey = { accountId: string; signPub: string; boxPub: string };
 export type Certified = { cert: string; accountEnvelope: string };
 export type MadeRecoveryKey = { accountId: string; words: string[]; blob: string };
 export type RotatedAccountKey = {
-  account: { id: string; signPub: string; boxPub: string };
+  account: { id: string; signPub: string; boxPub: string; selfCert: string };
   devices: { id: string; cert: string; accountEnvelope: string }[];
 };
 

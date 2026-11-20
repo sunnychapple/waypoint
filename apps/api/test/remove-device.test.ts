@@ -22,7 +22,7 @@ import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
 import type { BatchDb, Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
-import { freshNonce, insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
+import { freshNonce, insertDevice, makeTestDevice, selfCertFor, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
 const PATH = "/v1/devices/ipad_1";
@@ -100,7 +100,7 @@ async function world(): Promise<World> {
 // change one part at a time.
 async function rotation(
   w: World,
-  options: { accountId?: string; certKey?: TestDevice; envelopeSigner?: TestDevice; envelopeSignerId?: string; keep?: TestDevice } = {},
+  options: { accountId?: string; certKey?: TestDevice; envelopeSigner?: TestDevice; envelopeSignerId?: string; keep?: TestDevice; selfCert?: string } = {},
 ) {
   const keep = options.keep ?? w.phone;
   const accountId = options.accountId ?? "acct_2";
@@ -117,7 +117,7 @@ async function rotation(
     }),
   );
   return {
-    account: { id: accountId, sign_pub: w.next.signPub, box_pub: w.next.boxPub },
+    account: { id: accountId, sign_pub: w.next.signPub, box_pub: w.next.boxPub, self_cert: options.selfCert ?? (await selfCertFor(w.next, "u1", accountId)) },
     devices: [{ id: keep.id, cert, account_envelope: envelope }],
   };
 }
@@ -195,10 +195,10 @@ describe("DELETE /v1/devices/:id", () => {
     expect(await removedAt("acct_1")).toBe(NOW);
 
     const next = await w.db
-      .prepare("SELECT user_id, kind, removed_at, approved_at, approved_by FROM devices WHERE id = ?")
+      .prepare("SELECT user_id, kind, removed_at, approved_at, approved_by, cert FROM devices WHERE id = ?")
       .bind("acct_2")
       .first();
-    expect(next).toEqual({ user_id: "u1", kind: "account", removed_at: null, approved_at: NOW, approved_by: "phone_1" });
+    expect(next).toEqual({ user_id: "u1", kind: "account", removed_at: null, approved_at: NOW, approved_by: "phone_1", cert: body.account.self_cert });
 
     const [sent] = body.devices;
     if (sent === undefined) throw new Error("the rotation sends one device");
@@ -245,6 +245,26 @@ describe("DELETE /v1/devices/:id", () => {
     expect((await errorOf(otherSigner)).message).toBe("invalid envelope");
     const noAccount = await remove(w, w.phone, PATH, {});
     expect(noAccount.status).toBe(400);
+    expect(await snapshot(w.db)).toEqual(before);
+  });
+
+  test("a new account key whose self_cert does not verify gets 400 and nothing changes", async () => {
+    const w = await world();
+    const before = await snapshot(w.db);
+    const body = await rotation(w);
+    const cases = [
+      // The attack: the new key's real sign_pub and self_cert with a box_pub someone else chose.
+      { ...body, account: { ...body.account, box_pub: w.ipad.boxPub } },
+      // Signed by the old account key.
+      await rotation(w, { selfCert: await selfCertFor(w.account, "u1", "acct_2") }),
+      // Made for another account row id.
+      await rotation(w, { selfCert: await selfCertFor(w.next, "u1", "acct_9") }),
+    ];
+    for (const bad of cases) {
+      const res = await remove(w, w.phone, PATH, bad);
+      expect(res.status).toBe(400);
+      expect((await errorOf(res)).message).toBe("invalid certificate");
+    }
     expect(await snapshot(w.db)).toEqual(before);
   });
 

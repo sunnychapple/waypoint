@@ -1,4 +1,4 @@
-import { deviceCertificateInput, toBase64Url } from "@waypoint/crypto";
+import { accountCertificateInput, deviceCertificateInput, toBase64Url } from "@waypoint/crypto";
 import { DeviceListSchema, DeviceViewSchema, type ApiError } from "@waypoint/contracts";
 import { Hono } from "hono";
 import { describe, expect, test } from "vitest";
@@ -9,7 +9,7 @@ import { handleError } from "../src/errors.ts";
 import { devicesRoute } from "../src/devices/register.ts";
 import type { Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
-import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
+import { insertDevice, makeTestDevice, selfCertFor, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
 const COMMITMENT = "C".repeat(43);
@@ -65,14 +65,14 @@ async function certFor(account: TestDevice, userId: string, device: TestDevice):
   return toBase64Url(await account.sign(deviceCertificateInput(userId, device.id, device.signPub, device.boxPub)));
 }
 
-function firstBody(device: TestDevice, account: TestDevice, cert: string, accountId: string = account.id) {
+async function firstBody(device: TestDevice, account: TestDevice, cert: string, accountId: string = account.id) {
   return {
     id: device.id,
     name: "Mina's iPhone",
     platform: "ios",
     sign_pub: device.signPub,
     box_pub: device.boxPub,
-    account: { id: accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert },
+    account: { id: accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert, self_cert: await selfCertFor(account, "u1", accountId) },
   };
 }
 
@@ -100,12 +100,13 @@ describe("POST /v1/devices", () => {
     const account = await makeTestDevice("account_1");
     const device = await makeTestDevice("device_1");
     const cert = await certFor(account, "u1", device);
-    const res = await postDevice(db, "u1", firstBody(device, account, cert), device);
+    const sent = await firstBody(device, account, cert);
+    const res = await postDevice(db, "u1", sent, device);
     expect(res.status).toBe(201);
     const body = (await res.json()) as { device: unknown };
     expect(DeviceViewSchema.parse(body.device)).toMatchObject({ id: "device_1", kind: "device", approved_by: "account_1" });
     expect(await rowsOf(db, "u1")).toEqual([
-      { id: "account_1", kind: "account", approved_at: NOW, approved_by: null, cert: null, can_approve: 1 },
+      { id: "account_1", kind: "account", approved_at: NOW, approved_by: null, cert: sent.account.self_cert, can_approve: 1 },
       { id: "device_1", kind: "device", approved_at: NOW, approved_by: "account_1", cert, can_approve: 1 },
     ]);
   });
@@ -116,13 +117,39 @@ describe("POST /v1/devices", () => {
     const other = await makeTestDevice("other_1");
     const device = await makeTestDevice("device_1");
     const wrongCert = await certFor(other, "u1", device);
-    const badCert = await postDevice(db, "u1", firstBody(device, account, wrongCert), device);
+    const badCert = await postDevice(db, "u1", await firstBody(device, account, wrongCert), device);
     expect(badCert.status).toBe(400);
     expect(await badCert.json()).toEqual({ code: "bad_request", message: "invalid certificate", retry_after: null });
 
-    const sameId = await postDevice(db, "u1", firstBody(device, account, await certFor(account, "u1", device), device.id), device);
+    const sameId = await postDevice(db, "u1", await firstBody(device, account, await certFor(account, "u1", device), device.id), device);
     expect(sameId.status).toBe(400);
     expect(await sameId.json()).toEqual({ code: "bad_request", message: "invalid certificate", retry_after: null });
+    expect(await rowsOf(db, "u1")).toEqual([]);
+  });
+
+  test("a first device whose account self_cert does not verify gives 400 and no rows; without one, 400 invalid request", async () => {
+    const db = await fixture();
+    const account = await makeTestDevice("account_1");
+    const other = await makeTestDevice("other_1");
+    const device = await makeTestDevice("device_1");
+    const body = await firstBody(device, account, await certFor(account, "u1", device));
+    const cases = [
+      // The attack: the account's real sign_pub and self_cert with a box_pub someone else chose.
+      { ...body, account: { ...body.account, box_pub: other.boxPub } },
+      // The right fields, signed by another key.
+      { ...body, account: { ...body.account, self_cert: toBase64Url(await other.sign(accountCertificateInput("u1", "account_1", account.signPub, account.boxPub))) } },
+      // Made for another user.
+      { ...body, account: { ...body.account, self_cert: await selfCertFor(account, "u2") } },
+    ];
+    for (const bad of cases) {
+      const res = await postDevice(db, "u1", bad, device);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ code: "bad_request", message: "invalid certificate", retry_after: null });
+    }
+    const { self_cert: _unused, ...noSelfCert } = body.account;
+    const missing = await postDevice(db, "u1", { ...body, account: noSelfCert }, device);
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
     expect(await rowsOf(db, "u1")).toEqual([]);
   });
 
@@ -131,7 +158,7 @@ describe("POST /v1/devices", () => {
     const account = await makeTestDevice("account_1");
     await seedAccount(db, "u1", account);
     const device = await makeTestDevice("device_1");
-    const res = await postDevice(db, "u1", firstBody(device, account, await certFor(account, "u1", device)), device);
+    const res = await postDevice(db, "u1", await firstBody(device, account, await certFor(account, "u1", device)), device);
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ code: "conflict", message: "account key already set", retry_after: null });
     expect((await rowsOf(db, "u1")).map((row) => row.id)).toEqual(["account_1"]);
@@ -141,7 +168,7 @@ describe("POST /v1/devices", () => {
     const db = await fixture();
     const account = await makeTestDevice("account_1");
     const first = await makeTestDevice("device_1");
-    await postDevice(db, "u1", firstBody(first, account, await certFor(account, "u1", first)), first);
+    await postDevice(db, "u1", await firstBody(first, account, await certFor(account, "u1", first)), first);
     const waiting = await makeTestDevice("device_2");
     const res = await postDevice(db, "u1", newBody(waiting), waiting);
     expect(res.status).toBe(201);
@@ -246,7 +273,7 @@ describe("POST /v1/devices", () => {
     const account = await makeTestDevice("account_1");
     const device = await makeTestDevice("device_1");
     const offCurve = toBase64Url(new Uint8Array([4, ...new Array<number>(64).fill(1)]));
-    const body = firstBody(device, account, await certFor(account, "u1", device));
+    const body = await firstBody(device, account, await certFor(account, "u1", device));
     const cases = [
       { ...body, box_pub: offCurve },
       { ...body, account: { ...body.account, sign_pub: offCurve } },
@@ -274,7 +301,7 @@ describe("POST /v1/devices", () => {
     await insertDevice(db, await makeTestDevice("account_0"), { userId: "u1", kind: "account", removedAt: NOW - 1 });
     const account = await makeTestDevice("account_1");
     const device = await makeTestDevice("device_1");
-    const res = await postDevice(db, "u1", firstBody(device, account, await certFor(account, "u1", device)), device);
+    const res = await postDevice(db, "u1", await firstBody(device, account, await certFor(account, "u1", device)), device);
     expect(res.status).toBe(201);
     expect((await rowsOf(db, "u1")).map((row) => row.id)).toEqual(["account_0", "account_1", "device_1"]);
   });
