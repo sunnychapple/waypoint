@@ -35,5 +35,6 @@ export type Env = {
   TURNSTILE_SECRET_KEY: string; // secret: wrangler secret put TURNSTILE_SECRET_KEY
   LINK_VIEWS: RateLimit;
   LINK_PASSCODES: RateLimit;
+  ASSETS: Fetcher;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };

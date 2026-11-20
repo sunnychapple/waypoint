@@ -47,6 +47,7 @@
     { "name": "waypoint-retranscribe", "binding": "RETRANSCRIBE_WORKFLOW", "class_name": "RetranscribeWorkflow" },
     { "name": "waypoint-research", "binding": "RESEARCH_WORKFLOW", "class_name": "ResearchWorkflow" }
   ],
+  "assets": { "directory": "../viewer/dist", "binding": "ASSETS", "html_handling": "none", "not_found_handling": "none" },
   "durable_objects": {
     "bindings": [
       { "name": "WALLET", "class_name": "Wallet" },
