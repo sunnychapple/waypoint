@@ -197,6 +197,24 @@ describe("POST /v1/jobs", () => {
     expect(JobResponseSchema.parse(await res.json()).job.quoted).toBe(15);
   });
 
+  test("when JOB_STARTS says no: 429 with retry_after 60, keyed by the user id, and no hold, row or Workflow", async () => {
+    const w = await makeJobsWorld();
+    const keys: string[] = [];
+    const limit = async (options: { key: string }) => {
+      keys.push(options.key);
+      return { success: false };
+    };
+    const env = { ...w.env, JOB_STARTS: { limit } };
+    const res = await post(w, appFor(U1, w), OVERVIEW, { env });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    expect(await errorOf(res)).toEqual({ code: "rate_limited", message: "too many jobs", retry_after: 60 });
+    expect(keys).toEqual(["u1"]);
+    expect(holdCommands(w)).toHaveLength(0);
+    expect(w.workflow.created).toHaveLength(0);
+    expect(await w.db.prepare("SELECT count(*) AS n FROM jobs").first<{ n: number }>()).toEqual({ n: 0 });
+  });
+
   test("fallback_voice true gives 400 with no hold, no row and no Workflow; false quotes 50 as without it", async () => {
     const w = await makeJobsWorld();
     for (const type of ["overview_script", "video_slides"] as const) {
