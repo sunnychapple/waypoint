@@ -103,4 +103,32 @@ describe("pages", () => {
     expect(long.startsWith(`${cut} `)).toBe(true);
     expect(titleFromText(null, "Pages")).toBe("Pages");
   });
+
+  it("titleFromText keeps a word that ends exactly at the 60th character, and cuts inside a word at the space before it", () => {
+    expect(titleFromText(`${"a".repeat(55)} bbbb dd ee`, "Pages")).toBe(`${"a".repeat(55)} bbbb`);
+    expect(titleFromText(`${"a".repeat(55)} bbbbbbbb`, "Pages")).toBe("a".repeat(55));
+  });
+
+  it("pagesToRead also returns photos taken during a recording", () => {
+    db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at) VALUES ('rec', ?, 'recording', 'Lecture', 'saved', 1)", [spaceId]);
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file) VALUES ('ph', 'rec', 'photo', 5000, 0, 'board.jpg')");
+    expect(pagesToRead(db, 10).map((p) => p.file)).toEqual(["board.jpg"]);
+  });
+
+  it("movePage clamps a position below 0 (here -1) to the first place and one past the end to the last", () => {
+    const session = newSession();
+    const [a, , c] = addPages(db, deps(), session, ["a.jpg", "b.jpg", "c.jpg"]);
+    movePage(db, c ?? "", -1);
+    expect(positionsOf(session).map((p) => p.file)).toEqual(["c.jpg", "a.jpg", "b.jpg"]);
+    movePage(db, c ?? "", 99);
+    expect(positionsOf(session).map((p) => p.file)).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+    movePage(db, a ?? "", 99);
+    expect(positionsOf(session).map((p) => p.position)).toEqual([0, 1, 2]);
+  });
+
+  it("titleFromText skips a line with only two letters, and cuts a 61-character word to 60", () => {
+    expect(titleFromText("ab 12\nAbc def", "Pages")).toBe("Abc def");
+    expect(titleFromText("x".repeat(61), "Pages")).toBe("x".repeat(60));
+    expect(titleFromText("x".repeat(60), "Pages")).toBe("x".repeat(60));
+  });
 });
