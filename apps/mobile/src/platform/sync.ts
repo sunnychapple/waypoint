@@ -5,8 +5,9 @@ import { Directory, File, Paths } from "expo-file-system";
 import * as Notifications from "expo-notifications";
 import * as TaskManager from "expo-task-manager";
 import { ApiCallError, type ChangesPage } from "@waypoint/api-client";
-import { SyncServerMessageSchema } from "@waypoint/contracts";
-import { deleteSetting, setSetting } from "../core/db/settings.ts";
+import { SYNC_EXTRA_CREDITS, SyncServerMessageSchema } from "@waypoint/contracts";
+import type { CloudFailure } from "../core/cloud/failure.ts";
+import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { getSpace } from "../core/db/spaces.ts";
 import type { SqlDb } from "../core/db/sql.ts";
 import { getGroup, type StoredGroup } from "../core/groups/groups.ts";
@@ -32,12 +33,14 @@ import {
   retryPlan,
   syncedMediaPath,
 } from "../core/sync/rules.ts";
+import { SYNC_LIMIT_KEY, extraOutcome, isSyncLimit, limitUntil, sendingPaused } from "../core/sync/limit.ts";
 import { getDeviceKeys, heldGroupKeyVersions, lockContent, lockFile, unlockContent, unlockFile } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
-import { dbGeneration, dbUser, getDb, writeDb } from "./db.ts";
-import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
+import { dbGeneration, dbUser, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
+import { currentUserId, requireApprovedDevice, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
+import { toFailure } from "./tasks.ts";
 
 // The background task for silent "sync" pushes (defined at module scope, as expo-task-manager requires).
 export const SYNC_TASK = "waypoint-sync";
@@ -287,21 +290,63 @@ async function runNow(groupId: string, pull: boolean): Promise<void> {
   if (user === null || keys === null || group === null || group.leftAt !== null || !syncedGroupIds(getDb()).includes(groupId)) return;
   try {
     collectChanges(getDb(), { now: Date.now, newId: randomUUID, deviceId: keys.deviceId });
-    await sendPending(user, group, keys.deviceId, generation);
+    // Today's sync is used up (open question 55): changes wait in the outbox; pulls go on.
+    if (!sendingPaused(getSetting(getDb(), SYNC_LIMIT_KEY), Date.now())) await sendPending(user, group, keys.deviceId, generation);
   } catch (error) {
-    await afterFailure(groupId, error);
+    await afterFailure(groupId, error, generation);
   }
   if (!pull) return;
   try {
     await pullAll(user, groupId, keys.deviceId, generation);
     await fetchMedia(user, groupId, generation);
   } catch (error) {
-    await afterFailure(groupId, error);
+    await afterFailure(groupId, error, generation);
   }
 }
 
+// True when `error` says today's sync is used up (open question 55). Sending then waits until the time the server gave,
+// and the space screen offers more (the sync-limit sheet). The share screen calls this for a link, too. `generation` is
+// dbGeneration() from before the request: if someone else's notes are open by now, nothing is written.
+export function syncLimitHit(error: unknown, generation: number): boolean {
+  if (!(error instanceof ApiCallError && isSyncLimit(error.status, error.message))) return false;
+  const until = limitUntil(Date.now(), error.retryAfter);
+  writeDbIf(generation, (db) => setSetting(db, SYNC_LIMIT_KEY, String(until)));
+  return true;
+}
+
+// The Idempotency-Key of the purchase the sheet is trying. Kept until the purchase is done or the server says this key
+// can never buy (extraOutcome), so a tap after buying credits, after a lost reply or while the last one is still running
+// never pays twice.
+let extraKey: string | null = null;
+
+// The sheet's "Add 1 GB": spends SYNC_EXTRA_CREDITS for more sync today (POST /v1/sync/extra, D5), then sends what
+// waited. null when it is bought, by this tap or by an earlier one whose reply was lost. "price_changed" when the server
+// charges another price. Otherwise why not: an iPhone that is not approved yet gets the screen that says why, and
+// "device" back. The API client already waits and retries "request in progress" and server errors with the same key.
+export async function buyMoreSync(): Promise<CloudFailure | "price_changed" | null> {
+  if (!requireApprovedDevice()) return { kind: "device" };
+  extraKey ??= randomUUID();
+  const generation = dbGeneration();
+  try {
+    await api.buySyncExtra(SYNC_EXTRA_CREDITS, extraKey);
+  } catch (error) {
+    const outcome = error instanceof ApiCallError ? extraOutcome(error.status, error.message) : "same_key";
+    if (outcome !== "bought") {
+      if (outcome !== "same_key") extraKey = null;
+      return outcome === "price_changed" ? "price_changed" : toFailure(error);
+    }
+  }
+  extraKey = null;
+  if (!stillSame(generation)) return null; // signed out meanwhile: the next sign-in finds the limit again
+  // Sending starts again now. If today's budget is still used up, the next send finds the limit again.
+  writeDb((db) => deleteSetting(db, SYNC_LIMIT_KEY));
+  for (const groupId of syncedGroupIds(getDb())) void syncNow(groupId);
+  return null;
+}
+
 // The group's key moved on (a member was removed): take the new key now; the outbox waits for it.
-async function afterFailure(groupId: string, error: unknown): Promise<void> {
+async function afterFailure(groupId: string, error: unknown, generation: number): Promise<void> {
+  if (syncLimitHit(error, generation)) return;
   if (error instanceof ApiCallError && error.status === 409 && error.message === KEY_STALE_MESSAGE) {
     await refreshGroups().catch(() => undefined);
     await ensureKeys(groupId, { now: false }).catch(() => undefined);

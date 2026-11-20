@@ -6,22 +6,25 @@ import { sessionsInSpace } from "../../core/capture/sessions.ts";
 import { getSetting } from "../../core/db/settings.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { countLabel, formatClock } from "../../core/format.ts";
-import { useQuery } from "../../platform/db.ts";
+import { SYNC_LIMIT_KEY, sendingPaused } from "../../core/sync/limit.ts";
+import { useMinuteNow, useQuery } from "../../platform/db.ts";
 import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts";
-import { Body, Row, Screen, Title } from "../../ui/kit.tsx";
+import { Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 export default function SpaceScreen() {
   const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const now = useMinuteNow();
   const data = useQuery(
     (db) => ({
       space: getSpace(db, id),
       sessions: sessionsInSpace(db, id),
       synced: isSpaceSynced(db, id),
       planRequired: getSetting(db, SYNC_PLAN_KEY) === "1",
+      limited: sendingPaused(getSetting(db, SYNC_LIMIT_KEY), now),
     }),
-    id,
+    `${id}:${now}`,
   );
   const name = data.space?.name ?? "";
   const [busy, setBusy] = useState(false);
@@ -43,6 +46,12 @@ export default function SpaceScreen() {
         right={<Switch value={data.synced} disabled={data.synced || busy} onValueChange={startSync} />}
       />
       {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
+      {data.synced && data.limited ? (
+        <>
+          <Body>Today's sync is used up. Changes wait on this iPhone.</Body>
+          <SecondaryButton label="Add more for today" icon="arrow.up.circle" onPress={() => router.push("/sync-limit")} />
+        </>
+      ) : null}
       {failed ? <Body>Couldn't start sync. Try again.</Body> : null}
       {data.sessions.length === 0 ? (
         <Body>Nothing here yet. Things you save to {name} show up here.</Body>

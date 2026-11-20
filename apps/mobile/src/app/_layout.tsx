@@ -49,6 +49,7 @@ function RootStack() {
         <Stack.Screen name="settings-cloud" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="new-space" options={{ presentation: "formSheet" }} />
+        <Stack.Screen name="sync-limit" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="space/[id]" options={{ presentation: "card" }} />
         <Stack.Screen name="pages/new" />
         <Stack.Screen name="pages/[id]" />
