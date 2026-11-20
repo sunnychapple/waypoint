@@ -13,6 +13,8 @@ final class LiveTranscriber: AudioBufferSink {
   private var analyzer: SpeechAnalyzer?             // lock
   private var converter: AVAudioConverter?          // lock
   private var continuation: AsyncStream<AnalyzerInput>.Continuation? // lock
+  private var results: Task<Void, Never>?           // lock: the running run's results loop
+  private var finishing: Task<Void, Never>?         // lock: the last ended run, until its final words are sent
 
   /// Stores the locale and the analyzer format for it. A nil locale means no speech pack, so nothing runs live.
   func configure(locale: Locale?) async {
@@ -34,15 +36,10 @@ final class LiveTranscriber: AudioBufferSink {
     let analyzer = SpeechAnalyzer(modules: [module])
     let converter = AVAudioConverter(from: format, to: analyzerFormat)
     let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-    lock.withLock {
-      self.analyzer = analyzer
-      self.converter = converter
-      self.continuation = continuation
-    }
     Task {
       do { try await analyzer.start(inputSequence: stream) } catch { self.speechFailed(sessionId, error) }
     }
-    Task {
+    let results = Task {
       do {
         if let t = module as? SpeechTranscriber {
           for try await result in t.results {
@@ -56,6 +53,12 @@ final class LiveTranscriber: AudioBufferSink {
       } catch {
         self.speechFailed(sessionId, error)
       }
+    }
+    lock.withLock {
+      self.analyzer = analyzer
+      self.converter = converter
+      self.continuation = continuation
+      self.results = results
     }
   }
 
@@ -77,15 +80,31 @@ final class LiveTranscriber: AudioBufferSink {
   }
 
   func runEnded() {
-    let (analyzer, continuation) = lock.withLock { (self.analyzer, self.continuation) }
+    let (analyzer, continuation, results) = lock.withLock { (self.analyzer, self.continuation, self.results) }
     continuation?.finish()
-    if let analyzer {
-      Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+    // Done once the analyzer has finished the input and the results loop has sent the last final words.
+    let finishing = Task {
+      if let analyzer { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+      await results?.value
     }
     lock.withLock {
       self.analyzer = nil
       self.converter = nil
       self.continuation = nil
+      self.results = nil
+      self.finishing = finishing
+    }
+  }
+
+  /// Waits until the last ended run's final words have been sent as onTranscript events, at most `seconds`.
+  /// stop() calls it before it resolves, so the app still listens when the last words arrive.
+  func waitForFinals(seconds: Double) async {
+    guard let finishing = lock.withLock({ self.finishing }) else { return }
+    await withTaskGroup(of: Void.self) { group in
+      group.addTask { await finishing.value }
+      group.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+      await group.next()
+      group.cancelAll()
     }
   }
 
