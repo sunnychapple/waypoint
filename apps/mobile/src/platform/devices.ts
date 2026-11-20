@@ -105,7 +105,7 @@ export async function removeDevice(targetId: string): Promise<RemoveResult> {
     const rotated = await rotateAccountKey(user, accountId, plan.remaining);
     try {
       await api.removeDevice(targetId, {
-        account: { id: rotated.account.id, sign_pub: rotated.account.signPub, box_pub: rotated.account.boxPub },
+        account: { id: rotated.account.id, sign_pub: rotated.account.signPub, box_pub: rotated.account.boxPub, self_cert: rotated.account.selfCert },
         devices: rotated.devices.map((d) => ({ id: d.id, cert: d.cert, account_envelope: d.accountEnvelope })),
       });
     } catch (error) {
