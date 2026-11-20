@@ -50,7 +50,13 @@ export function memberRoutes(deps: { now: () => number }) {
         .first<{ n: number }>();
       if ((owners?.n ?? 0) <= 1) throw new ApiFailure("conflict", "a group needs an owner");
     }
-    await db.batch(endMembershipStatements(db, groupId, targetId, now));
+    try {
+      await db.batch(endMembershipStatements(db, groupId, targetId, now));
+    } catch (err) {
+      // The trigger memberships_keep_an_owner refuses ending the last owner when two owners leave at once.
+      if (err instanceof Error && err.message.includes("last owner")) throw new ApiFailure("conflict", "a group needs an owner");
+      throw err;
+    }
     const group = await db.prepare("SELECT key_version FROM groups WHERE id = ?").bind(groupId).first<{ key_version: number }>();
     if (group === null) throw new ApiFailure("not_found", "no such group");
     return c.json({ group_id: groupId, user_id: targetId, key_version: group.key_version });

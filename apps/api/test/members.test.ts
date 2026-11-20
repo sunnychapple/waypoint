@@ -260,7 +260,7 @@ describe("endExpiredMemberships", () => {
     await seedGroup(db, G1);
     await seedGroup(db, G2);
     await seedGroup(db, G3);
-    await seedMember(db, G1, "u1", { role: "owner", endsAt: NOW - 1 });
+    await seedMember(db, G1, "u1", { role: "editor", endsAt: NOW - 1 });
     await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u2', 'clerk_u2', 0, 'ba2')").run();
     await seedMember(db, G2, "u2", { role: "viewer", endsAt: NOW });
     await seedMember(db, G3, "u1", { role: "owner", endsAt: NOW + 1 });
@@ -278,6 +278,27 @@ describe("endExpiredMemberships", () => {
     expect(await leftAt(db, G3, "u2")).toBeNull();
     expect(await leftAt(db, G1, "u2")).toBe(NOW - 5);
     expect(await endExpiredMemberships(db, NOW)).toBe(0);
+  });
+
+  test("an owner's membership never expires, so a group keeps its owner", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba1')").run();
+    await seedGroup(db, G1);
+    await seedMember(db, G1, "u1", { role: "owner", endsAt: NOW - 1 });
+    expect(await endExpiredMemberships(db, NOW)).toBe(0);
+    expect(await leftAt(db, G1, "u1")).toBeNull();
+    expect(await keyVersion(db, G1)).toBe(1);
+  });
+
+  test("the database refuses ending a group's last owner", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba1')").run();
+    await seedGroup(db, G1);
+    await seedMember(db, G1, "u1", { role: "owner", endsAt: null });
+    await expect(
+      db.prepare("UPDATE memberships SET left_at = ? WHERE group_id = ? AND user_id = 'u1'").bind(NOW, G1).run(),
+    ).rejects.toThrow("last owner");
+    expect(await leftAt(db, G1, "u1")).toBeNull();
   });
 
   test("a member who renewed between the select and the batch keeps the new membership, and no bump happens", async () => {

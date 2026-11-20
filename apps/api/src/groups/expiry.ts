@@ -8,7 +8,7 @@ export const MAX_EXPIRED_PER_RUN = 500;
 // one batch per membership, as a removal does. Returns how many were ended.
 export async function endExpiredMemberships(db: BatchDb, now: number): Promise<number> {
   const { results } = await db
-    .prepare("SELECT group_id, user_id, starts_at, ends_at FROM memberships WHERE left_at IS NULL AND ends_at IS NOT NULL AND ends_at <= ? ORDER BY ends_at LIMIT ?")
+    .prepare("SELECT group_id, user_id, starts_at, ends_at FROM memberships WHERE left_at IS NULL AND role <> 'owner' AND ends_at IS NOT NULL AND ends_at <= ? ORDER BY ends_at LIMIT ?")
     .bind(now, MAX_EXPIRED_PER_RUN)
     .all<{ group_id: string; user_id: string; starts_at: number; ends_at: number }>();
   for (const row of results) {
