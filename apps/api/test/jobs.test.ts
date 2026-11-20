@@ -466,6 +466,19 @@ describe("GET /v1/jobs/:id/result", () => {
     expect(res.status).toBe(404);
   });
 
+  test.each(["running", "failed", "cancelled"])(
+    "a %s job with a result key and an object at that key gives 404 when signed by the phone",
+    async (state) => {
+      const w = await makeJobsWorld();
+      const id = `job_${state}`;
+      await insertJob(w, { id, state });
+      await w.db.prepare("UPDATE jobs SET result_key = ? WHERE id = ?").bind(`results/${id}`, id).run();
+      w.objects.set(`results/${id}`, { value: new Uint8Array([7, 8, 9]), contentType: null });
+      const res = await appFor(U1, w).request(resultPath(id), await signedInit(w.phone, { method: "GET", path: resultPath(id), now: w.clock.now }), w.env);
+      expect(res.status).toBe(404);
+    },
+  );
+
   test("a succeeded job whose object is gone gives 404", async () => {
     const w = await makeJobsWorld();
     await succeeded(w, "job_gone", { withObject: false });
@@ -567,6 +580,10 @@ describe("DELETE /v1/jobs/:id", () => {
     const res = await del(w, appFor(U2, w), "job_mine", { device: w.other });
     expect(res.status).toBe(404);
     expect(await errorOf(res)).toEqual({ code: "not_found", message: "no such job", retry_after: null });
+    expect(await jobRow(w, "job_mine")).toMatchObject({ state: "running" });
+    expect(w.store.read().monthly).toBe(60);
+    expect(w.workflow.terminated).toEqual([]);
+    expect(w.commands).toEqual([]);
   });
 
   test("an unknown id gives 404 no such job", async () => {

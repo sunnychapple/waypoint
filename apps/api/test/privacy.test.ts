@@ -71,6 +71,14 @@ describe("PUT /v1/settings/zero-retention", () => {
     expect(await zeroRetentionColumn(db, "u1")).toBe(1);
   });
 
+  test("turning it on for u1 leaves another user's column at 0", async () => {
+    const db = await fixture();
+    const res = await put(setup(PLUS), { DB: db }, '{"enabled":true}', "key-on-only-u1-0001");
+    expect(res.status).toBe(200);
+    expect(await zeroRetentionColumn(db, "u1")).toBe(1);
+    expect(await zeroRetentionColumn(db, "u2")).toBe(0);
+  });
+
   test("a Plus user turning it off gets 200 and the column is 0", async () => {
     const db = await fixture();
     await db.prepare("UPDATE users SET zero_retention = 1 WHERE id = ?").bind("u1").run();
@@ -173,6 +181,15 @@ describe("GET /v1/activity", () => {
       query = `?limit=1&before=${body.next}`;
     }
     expect(seen).toEqual(["x3", "x2", "x1"]);
+  });
+
+  test("two rows with the same at, the smaller id inserted first, come back larger id first", async () => {
+    const db = await fixture([
+      { user: "u1", id: "y1", at: 6000 },
+      { user: "u1", id: "y2", at: 6000 },
+    ]);
+    const body = (await (await activityGet(setup(PLUS), { DB: db }, "?limit=10")).json()) as ActivityResponse;
+    expect(body.items.map((item) => item.id)).toEqual(["y2", "y1"]);
   });
 
   test("a user with no rows gets an empty page with next null", async () => {
