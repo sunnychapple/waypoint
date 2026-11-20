@@ -1,4 +1,4 @@
-import { ChangesPageSchema, PostChangeResponseSchema, type ApiError } from "@waypoint/contracts";
+import { ChangesPageSchema, PostChangeResponseSchema, SYNC_DAILY_BYTES, type ApiError } from "@waypoint/contracts";
 import { context, fromBase64Url, importContentKey, lockContent, toBase64Url, utf8 } from "@waypoint/crypto";
 import { Hono } from "hono";
 import { expect, test } from "vitest";
@@ -185,6 +185,20 @@ test("the same request with the same Idempotency-Key returns the stored { seq: 1
   const replay = await call(w.env, "u1", "POST", CHANGES, body, key);
   expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
   expect(await replay.json()).toEqual({ seq: 1 });
+  expect(w.env.GROUP_ROOM.roomFor(G).store.after(0, 10).changes).toHaveLength(1);
+});
+
+test("a post over the day's sync budget gets 429 'daily sync limit reached' and nothing is appended; the bytes are counted otherwise", async () => {
+  const w = await world();
+  const locked = await sealed(U1A, "note_edit");
+  expect((await call(w.env, "u1", "POST", CHANGES, changeBody(U1A, locked))).status).toBe(201);
+  const day = Math.floor(NOW / 86_400_000);
+  const counted = await w.env.DB.prepare("SELECT bytes FROM sync_days WHERE user_id = 'u1' AND day = ?").bind(day).first<{ bytes: number }>();
+  expect(counted?.bytes).toBe(fromBase64Url(locked).length);
+  await w.env.DB.prepare("UPDATE sync_days SET bytes = ? WHERE user_id = 'u1'").bind(SYNC_DAILY_BYTES).run();
+  const res = await call(w.env, "u1", "POST", CHANGES, changeBody(U1A, await sealed(U1A, "note_edit")));
+  expect(res.status).toBe(429);
+  expect(await errorOf(res)).toEqual({ code: "rate_limited", message: "daily sync limit reached" });
   expect(w.env.GROUP_ROOM.roomFor(G).store.after(0, 10).changes).toHaveLength(1);
 });
 

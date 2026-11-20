@@ -36,3 +36,9 @@ export const ChangesPageSchema = z.strictObject({
 // The socket only says that something changed; the app then calls GET /v1/groups/:id/changes?after=.
 export const SyncServerMessageSchema = z.strictObject({ type: z.literal("changed"), last_seq: z.number().int().min(0) });
 export const SyncAckMessageSchema = z.strictObject({ type: z.literal("ack"), seq: z.number().int().min(0) });
+
+// Open question 55: each person may send this many bytes of locked changes and shared-link data per UTC day. Over it,
+// POST /v1/groups/:id/changes and POST /v1/links answer 429 rate_limited with this message and retry_after = the
+// seconds until 00:00 UTC.
+export const SYNC_DAILY_BYTES = 200_000_000;
+export const SYNC_DAILY_LIMIT_MESSAGE = "daily sync limit reached";

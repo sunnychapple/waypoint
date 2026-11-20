@@ -1,4 +1,4 @@
-import { LinkRevokedSchema, LinkViewSchema } from "@waypoint/contracts";
+import { LinkRevokedSchema, LinkViewSchema, SYNC_DAILY_BYTES } from "@waypoint/contracts";
 import { context, importContentKey, linkPasscodeHash, lockContent, toBase64Url, utf8 } from "@waypoint/crypto";
 import { Hono } from "hono";
 import { describe, expect, test, vi } from "vitest";
@@ -207,6 +207,25 @@ describe("POST /v1/links", () => {
     expect(LinkViewSchema.safeParse(body).success).toBe(true);
     expect(rig.mem.objects.get(linkKey(LINK))).toEqual(await lockedFor(LINK));
     expect(await rowOf(rig, LINK)).toMatchObject({ blob_key: `links/${LINK}/data`, created_by: "u2", created_at: NOW, views: 0, passcode_hash: null });
+  });
+
+  test("a link over the day's sync budget gets 429 'daily sync limit reached' with no row and nothing in R2", async () => {
+    const rig = await makeRig();
+    await rig.db.prepare("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u2', ?, ?)").bind(Math.floor(NOW / 86_400_000), SYNC_DAILY_BYTES).run();
+    const res = await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, toBase64Url(await lockedFor(LINK))));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ code: "rate_limited", message: "daily sync limit reached" });
+    expect(await rowOf(rig, LINK)).toBeNull();
+    expect(rig.mem.state.puts).toBe(0);
+  });
+
+  test("a link id that is taken gets 409 and its bytes are not counted", async () => {
+    const rig = await makeRig();
+    const data = toBase64Url(await lockedFor(LINK));
+    expect((await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, data))).status).toBe(201);
+    expect((await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, data))).status).toBe(409);
+    const row = await rig.db.prepare("SELECT bytes FROM sync_days WHERE user_id = 'u2'").first<{ bytes: number }>();
+    expect(row?.bytes).toBe((await lockedFor(LINK)).length);
   });
 
   test("a passcode is stored only as its peppered hash, and no column holds the passcode", async () => {

@@ -8,6 +8,7 @@ import { activeMembership } from "../groups/membership.ts";
 import { idempotent } from "../idempotency.ts";
 import { isUniqueViolation } from "../keys/envelopes.ts";
 import type { FetchLike } from "../push/apns.ts";
+import { spendSyncBytes } from "../sync/budget.ts";
 import { verifyTurnstile } from "./turnstile.ts";
 
 export const RATE_LIMIT_RETRY_AFTER = 60;
@@ -68,6 +69,13 @@ export function linkRoutes(deps: { now: () => number; fetch: FetchLike }) {
           .run();
       } catch (error) {
         if (isUniqueViolation(error)) throw new ApiFailure("conflict", "link id taken");
+        throw error;
+      }
+      // Counted once the link exists (open question 55); over the day's budget, the row goes again and nothing is stored.
+      try {
+        await spendSyncBytes(db, user.id, data.length, now);
+      } catch (error) {
+        await db.prepare("DELETE FROM links WHERE id = ?").bind(req.id).run();
         throw error;
       }
       const bucket: LinkBucket = c.env.BUCKET;

@@ -30,6 +30,8 @@ const EXPECTED = {
   device_pairings: ["device_id", "commitment", "approver_id", "approver_nonce", "device_nonce", "expires_at"],
   request_nonces: ["device_id", "nonce", "expires_at"],
   apple_notifications: ["notification_uuid", "notification_type", "received_at"],
+  sync_days: ["user_id", "day", "bytes"],
+  sync_extras: ["user_id", "key", "day", "bytes"],
 };
 
 // "TEXT" is NOT NULL; "TEXT?" is nullable. Nullable columns are the ones the
@@ -54,6 +56,8 @@ const EXPECTED_TYPES = {
   device_pairings: { device_id: "TEXT", commitment: "TEXT", approver_id: "TEXT?", approver_nonce: "TEXT?", device_nonce: "TEXT?", expires_at: "INTEGER" },
   request_nonces: { device_id: "TEXT", nonce: "TEXT", expires_at: "INTEGER" },
   apple_notifications: { notification_uuid: "TEXT", notification_type: "TEXT", received_at: "INTEGER" },
+  sync_days: { user_id: "TEXT", day: "INTEGER", bytes: "INTEGER" },
+  sync_extras: { user_id: "TEXT", key: "TEXT", day: "INTEGER", bytes: "INTEGER" },
 };
 
 // Indexes the card requires, as [table, indexed columns in order].
@@ -557,4 +561,21 @@ test("0010 releases the Own it and Plus rows of accounts already deleted, and no
     rows.map((r) => [r.transaction_id, r.released_at]),
     [["t_gone_own", 0], ["t_gone_pack", null], ["t_gone_plus", 0], ["t_live_own", null]],
   );
+});
+
+test("deleting a user deletes their sync_days and sync_extras rows", () => {
+  const db = freshDb();
+  seedUser(db);
+  db.exec("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u1', 20000, 10)");
+  db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)");
+  db.prepare("DELETE FROM users WHERE id = 'u1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_days"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_extras"), 0);
+});
+
+test("a purchase's key can add a sync_extras row only once per user", () => {
+  const db = freshDb();
+  seedUser(db);
+  db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)");
+  assert.throws(() => db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)"), /UNIQUE constraint failed/);
 });

@@ -9,6 +9,7 @@ import type { PushMessage } from "../push/messages.ts";
 import { ROOM_DEVICE_HEADER, ROOM_UNTIL_HEADER, ROOM_USER_HEADER, type PushTarget } from "../room/sockets.ts";
 import type { Change } from "../room/store.ts";
 import type { Db } from "../storage.ts";
+import { spendSyncBytes } from "./budget.ts";
 
 export const DEFAULT_PAGE = 100;
 export const MAX_PAGE = 500;
@@ -81,6 +82,7 @@ export function syncRoutes(deps: { now: () => number }) {
         throw new ApiFailure("bad_request", "invalid request");
       }
       if (req.blob_key !== null && !req.blob_key.startsWith(`groups/${groupId}/media/`)) throw new ApiFailure("bad_request", "invalid request");
+      await spendSyncBytes(db, user.id, bytes.length, now);
 
       const targets = (await db.prepare(TARGETS_SQL).bind(groupId, now, req.device_id).all<PushTarget>()).results;
       const room = c.env.GROUP_ROOM.get(c.env.GROUP_ROOM.idFromName(groupId));
