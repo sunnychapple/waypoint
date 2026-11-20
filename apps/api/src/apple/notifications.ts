@@ -84,6 +84,15 @@ async function endEntitlement(
     .run();
 }
 
+// True when a later period of the same subscription is recorded and active.
+async function laterPeriodActive(db: Db, txn: AppleTransaction): Promise<boolean> {
+  const later = await db
+    .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND status = 'active' AND purchased_at > ? LIMIT 1")
+    .bind(txn.originalTransactionId, txn.purchaseDate)
+    .first<{ found: number }>();
+  return later !== null;
+}
+
 export type NoticeInput = {
   db: Db;
   wallet: WalletCommands;
@@ -111,6 +120,15 @@ export async function applyNotice(input: NoticeInput): Promise<void> {
       .prepare("SELECT status FROM purchases WHERE transaction_id = ? AND billing_account_id = ?")
       .bind(txn.transactionId, account.billing_account_id)
       .first<{ status: string }>();
+    if (row !== null && product.kind === "plus" && (await laterPeriodActive(db, txn))) {
+      // An earlier Plus period refunded after the subscription renewed: that period's allowance was already replaced
+      // by the later one's, so only its row changes. The monthly credits, the entitlement and the plan stay.
+      await db
+        .prepare("UPDATE purchases SET status = ? WHERE transaction_id = ? AND status IN ('active', 'expired')")
+        .bind(action === "refund" ? "refunded" : "revoked", txn.transactionId)
+        .run();
+      return;
+    }
     if (row === null) {
       // Never granted here. Record it as refunded or revoked, so a grant that arrives later
       // (a retried purchase notice, or the app's own request) finds the row and grants nothing.
@@ -150,11 +168,7 @@ export async function applyNotice(input: NoticeInput): Promise<void> {
   }
 
   if (action === "lapse" && product.kind === "plus") {
-    const later = await db
-      .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND status = 'active' AND purchased_at > ? LIMIT 1")
-      .bind(txn.originalTransactionId, txn.purchaseDate)
-      .first<{ found: number }>();
-    if (later !== null) return; // a later period is already active: this notice is out of date
+    if (await laterPeriodActive(db, txn)) return; // a later period is already active: this notice is out of date
     await db
       .prepare("UPDATE purchases SET status = 'expired' WHERE original_id = ? AND status = 'active'")
       .bind(txn.originalTransactionId)

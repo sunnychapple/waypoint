@@ -100,6 +100,15 @@ describe("sanitizeMiniApp", () => {
     expect(out.match(/<\/script>/g)).toHaveLength(1);
   });
 
+  it("keeps a JSON data script as data under its id (never run), and drops other non-JavaScript types", () => {
+    expect(sanitizeMiniApp('<script type="application/json" id="data" onload="x()">{"q": "a</script"}</script>')).toBe(
+      '<script type="application/json" id="data">{"q":"a\\u003c/script"}</script>',
+    );
+    expect(sanitizeMiniApp('<script type="application/json">not json</script>')).toBe("");
+    expect(sanitizeMiniApp('<script type="text/babel">x()</script>')).toBe("");
+    expect(sanitizeMiniApp('<script type="text/javascript">x()</script>').startsWith("<script>(function(s){")).toBe(true);
+  });
+
   it("drops scripts with src, styles holding <, comments and doctypes", () => {
     expect(sanitizeMiniApp("<script src=x></script>")).toBe("");
     expect(sanitizeMiniApp("<style>a{}</style><style>b<c{}</style>")).toBe("<style>a{}</style>");

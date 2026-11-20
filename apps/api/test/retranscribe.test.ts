@@ -109,6 +109,37 @@ describe("retranscribe job", () => {
     expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 1 });
   });
 
+  test("one part with ten minutes of audio for 1 quoted minute: the transcript stops at 90 s, truncated, charged 1", async () => {
+    const f = await makeJobFixture("retranscribe", { credits: 1, minutes: 1, input: null });
+    await withParts(f);
+    const segments = [
+      { start: 0, end: 40, text: " First. " },
+      { start: 60, end: 95, text: "Second." },
+      { start: 100, end: 120, text: "Paid for by nobody." },
+      { start: 500, end: 600, text: "Nor this." },
+    ];
+    const { ai, calls } = fakeWhisper(() => whisperReply("First. Second. Paid for by nobody. Nor this.", 600, segments));
+    expect(await runRetranscribeJob(deps(f, ai), { ...fakeSteps().steps, waitForUpload: async () => ({ chunks: 2, bytes: 5 }) }, f.input)).toBe(true);
+    expect(calls).toHaveLength(1);
+    const opened = await openResult(f.objects.get("results/job_1")?.value ?? new Uint8Array(), "job_1", "device_1", f.device.boxPrivate);
+    expect(RetranscribeResultSchema.parse(JSON.parse(new TextDecoder().decode(opened)))).toEqual({
+      v: 1,
+      truncated: true,
+      chunks: [
+        {
+          n: 0,
+          duration: 90,
+          text: "First. Second.",
+          segments: [
+            { start: 0, end: 40, text: "First." },
+            { start: 60, end: 90, text: "Second." },
+          ],
+        },
+      ],
+    });
+    expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 1 });
+  });
+
   test("an upload bigger than minutes × 600,000 bytes: no Whisper call, the job fails, the hold is released and the parts are deleted", async () => {
     const f = await makeJobFixture("retranscribe", { credits: 10, minutes: 10, input: null });
     await withParts(f);
