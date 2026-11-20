@@ -17,7 +17,7 @@ export async function setZeroRetention(enabled: boolean): Promise<SwitchResult> 
   const generation = dbGeneration();
   try {
     const reply = await api.setZeroRetention(enabled);
-    writeDbIf(generation,(db) => setSetting(db, ZERO_RETENTION_KEY, reply.zero_retention ? "1" : "0"));
+    writeDbIf(generation, (db) => setSetting(db, ZERO_RETENTION_KEY, reply.zero_retention ? "1" : "0"));
     return "ok";
   } catch (error) {
     if (error instanceof ApiCallError && error.code === "plan_required") return "plan_required";

@@ -69,7 +69,7 @@ async function uploadRest(job: LocalJob): Promise<void> {
       return;
     }
     await api.uploadAudio(job.id, n, bytes);
-    writeDbIf(generation,(db) => setDetail(db, job.id, { uploaded: n + 1 }, Date.now()));
+    writeDbIf(generation, (db) => setDetail(db, job.id, { uploaded: n + 1 }, Date.now()));
   }
   // The key is stored with the job, so a repeat after a cut-off reply is the same request to the server.
   try {

@@ -84,7 +84,7 @@ export async function leave(groupId: string): Promise<void> {
   if (me === null) throw new Error("signed out");
   const generation = dbGeneration();
   await removeGroupMember(groupId, me);
-  writeDbIf(generation,(db) => db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]));
+  writeDbIf(generation, (db) => db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]));
 }
 
 // An owner removes a member. The new key is made at once.

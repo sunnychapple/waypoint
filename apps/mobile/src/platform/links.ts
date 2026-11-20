@@ -28,7 +28,7 @@ async function groupForLink(sessionId: string): Promise<string> {
   if (known !== null) return known;
   const generation = dbGeneration();
   const id = await createGroup("personal", SHARED_LINKS_NAME);
-  writeDbIf(generation,(db) => setSetting(db, SHARED_LINKS_KEY, id));
+  writeDbIf(generation, (db) => setSetting(db, SHARED_LINKS_KEY, id));
   return id;
 }
 
