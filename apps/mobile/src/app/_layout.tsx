@@ -13,6 +13,7 @@ function RootStack() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
+        <Stack.Screen name="plans" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />
