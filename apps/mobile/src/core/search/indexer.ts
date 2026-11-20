@@ -7,12 +7,13 @@ export type Embedder = { modelVersion: string; embed(texts: string[]): Promise<n
 
 const EMBED_BATCH = 16;
 
-// Saved sessions that have not been indexed yet, oldest first.
+// Finished sessions (saved, or interrupted by a crash and recovered) that have not been indexed yet, oldest first.
 export function sessionsToIndex(db: SqlDb, limit: number): string[] {
   return db
-    .all<{ id: string }>("SELECT id FROM sessions WHERE state = 'saved' AND indexed_at IS NULL ORDER BY started_at ASC LIMIT ?", [
-      limit,
-    ])
+    .all<{ id: string }>(
+      "SELECT id FROM sessions WHERE state IN ('saved', 'interrupted') AND indexed_at IS NULL ORDER BY started_at ASC LIMIT ?",
+      [limit],
+    )
     .map((row) => row.id);
 }
 
@@ -20,14 +21,20 @@ export function sessionsToIndex(db: SqlDb, limit: number): string[] {
 export async function indexSession(db: SqlDb, embedder: Embedder, sessionId: string, now: number): Promise<number> {
   const before = db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [sessionId]);
   if (!before) return 0;
-  const segments = db.all<{ tStart: number; tEnd: number; text: string }>(
-    "SELECT t_start AS tStart, t_end AS tEnd, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
-    [sessionId],
-  );
-  const captures = db.all<{ id: string; kind: "page" | "photo"; t: number; found_text: string | null }>(
-    "SELECT id, kind, t, found_text FROM captures WHERE session_id = ? AND kind IN ('page', 'photo') ORDER BY t, position",
-    [sessionId],
-  );
+  const read = () => ({
+    segments: db.all<{ tStart: number; tEnd: number; text: string }>(
+      "SELECT t_start AS tStart, t_end AS tEnd, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
+      [sessionId],
+    ),
+    captures: db.all<{ id: string; kind: "page" | "photo"; t: number; found_text: string | null }>(
+      "SELECT id, kind, t, found_text FROM captures WHERE session_id = ? AND kind IN ('page', 'photo') ORDER BY t, position",
+      [sessionId],
+    ),
+  });
+  const { segments, captures } = read();
+  // What was read, to compare inside the transaction: text written while the embedder ran (a transcription, a page)
+  // leaves indexed_at as it was, so only this comparison notices it.
+  const seen = JSON.stringify({ segments, captures });
   const drafts: ChunkDraft[] = [
     ...chunkTranscript(segments),
     ...captures.flatMap((c) => chunkCapture({ id: c.id, kind: c.kind, t: c.t, text: c.found_text ?? "" })),
@@ -44,7 +51,8 @@ export async function indexSession(db: SqlDb, embedder: Embedder, sessionId: str
   let replaced = false;
   db.transaction(() => {
     const after = db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [sessionId]);
-    if (!after || after.indexed_at !== before.indexed_at) return;
+    // Changed meanwhile: nothing is written and indexed_at stays as it was, so the next pass indexes the new text.
+    if (!after || after.indexed_at !== before.indexed_at || JSON.stringify(read()) !== seen) return;
     db.run("DELETE FROM chunks WHERE session_id = ?", [sessionId]);
     drafts.forEach((draft, i) => {
       const inserted = db.run(
@@ -85,8 +93,8 @@ export function markStale(db: SqlDb, modelVersion: string): number {
 export function indexStatus(db: SqlDb, modelVersion: string): { sessions: number; indexed: number; chunks: number; vectors: number } {
   const count = (sql: string, params: string[] = []): number => db.get<{ n: number }>(sql, params)?.n ?? 0;
   return {
-    sessions: count("SELECT count(*) AS n FROM sessions WHERE state = 'saved'"),
-    indexed: count("SELECT count(*) AS n FROM sessions WHERE state = 'saved' AND indexed_at IS NOT NULL"),
+    sessions: count("SELECT count(*) AS n FROM sessions WHERE state IN ('saved', 'interrupted')"),
+    indexed: count("SELECT count(*) AS n FROM sessions WHERE state IN ('saved', 'interrupted') AND indexed_at IS NOT NULL"),
     chunks: count("SELECT count(*) AS n FROM chunks"),
     vectors: count("SELECT count(*) AS n FROM search_index WHERE model_version = ?", [modelVersion]),
   };

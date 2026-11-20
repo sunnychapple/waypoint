@@ -3,6 +3,7 @@ import { migrate } from "../src/core/db/migrate.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import { indexSession, type Embedder } from "../src/core/search/indexer.ts";
 import { clearVectorCache, searchNotes } from "../src/core/search/query.ts";
+import { moveSession } from "../src/core/capture/sessions.ts";
 import { quantize } from "../src/core/search/vectors.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
@@ -73,6 +74,16 @@ describe("searchNotes", () => {
     await indexSession(db, fakeEmbedder(table), "work", 5000);
     const hits = await searchNotes(db, fakeEmbedder(table), "deadweight", { spaceId: "space-2" });
     expect(hits.map((h) => h.spaceName)).toEqual(["Work"]);
+  });
+
+  it("a session moved to another space after the vectors were loaded is found by meaning in its new space only", async () => {
+    addSession("shop", "space-1", "Shopping", ["price of goods"]);
+    const table = { "price of goods": [1, 0, 0], supply: [1, 0, 0] };
+    await indexSession(db, fakeEmbedder(table), "shop", 5000);
+    await searchNotes(db, fakeEmbedder(table), "supply", {}); // loads the cache
+    moveSession(db, "shop", "space-2", 6000);
+    expect((await searchNotes(db, fakeEmbedder(table), "supply", { spaceId: "space-2" })).map((h) => h.sessionId)).toEqual(["shop"]);
+    expect(await searchNotes(db, fakeEmbedder(table), "supply", { spaceId: "space-1" })).toEqual([]);
   });
 
   it("returns at most limit hits", async () => {
