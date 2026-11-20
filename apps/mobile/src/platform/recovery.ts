@@ -84,7 +84,7 @@ export async function recoverWithWords(words: string): Promise<RecoverResult> {
       if (!(error instanceof ApiCallError && error.status === 409)) throw error;
     }
     await refreshDeviceNow();
-    // The group keys come back through the account row. A failure here is not a failed recovery: the next launch retries.
+    // The group keys come back through the account row. A failure here is not a failed recovery, but nothing retries it.
     await recoverGroupKeys(user, found.account_device_id).catch(() => undefined);
     return "approved";
   } catch (error) {

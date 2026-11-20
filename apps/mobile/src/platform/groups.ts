@@ -250,6 +250,11 @@ export async function envelopesForDevice(user: string, device: KeyTarget): Promi
   return out.slice(0, BATCH);
 }
 
+// Right after a device removal: brings every group's keys up to date now (no random wait). Best effort per group.
+export async function ensureAllKeysNow(): Promise<void> {
+  for (const g of listGroups(getDb())) await ensureKeys(g.id, { now: true }).catch(() => undefined);
+}
+
 // After this iPhone replaced the account key (a device removal): wrap every held version for the new account row.
 export async function rewrapForNewAccount(user: string, account: { id: string; signPub: string; boxPub: string; selfCert: string }): Promise<void> {
   const now = Date.now();
@@ -265,11 +270,16 @@ export async function rewrapForNewAccount(user: string, account: { id: string; s
 }
 
 // After a recovery with the words: open the group keys the account row holds, then wrap them for this iPhone.
+// A group whose keys fail is skipped, and nothing retries it: its envelopes are read only here, from the account row.
 export async function recoverGroupKeys(user: string, accountId: string): Promise<void> {
   await refreshGroups();
   for (const g of listGroups(getDb())) {
-    await readGroup(user, g.id, accountId);
-    await ensureKeys(g.id, { now: false });
+    try {
+      await readGroup(user, g.id, accountId);
+      await ensureKeys(g.id, { now: false });
+    } catch {
+      // This group stays without its keys; the others still go on.
+    }
   }
 }
 

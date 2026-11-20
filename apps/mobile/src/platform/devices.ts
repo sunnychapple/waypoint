@@ -13,7 +13,7 @@ import {
 import { approverStep, removalPlan } from "../core/device/devices.ts";
 import { api } from "./api.ts";
 import { currentUserId, refreshDeviceNow } from "./device.ts";
-import { envelopesForDevice, rewrapForNewAccount } from "./groups.ts";
+import { ensureAllKeysNow, envelopesForDevice, refreshGroups, rewrapForNewAccount } from "./groups.ts";
 
 // This iPhone's nonce for each pairing it started, this launch only, keyed by user id and device id.
 const approverNonces = new Map<string, string>();
@@ -86,15 +86,27 @@ export async function approveWaiting(deviceId: string): Promise<void> {
   const target = (await api.devices()).devices.find((d) => d.kind === "device" && d.id === deviceId);
   if (target === undefined) throw new Error("no such device");
   const made = await certifyDevice(user, { id: target.id, signPub: target.sign_pub, boxPub: target.box_pub }, false);
-  const envelopes = await envelopesForDevice(user, {
-    id: target.id,
-    userId: user,
-    kind: "device",
-    signPub: target.sign_pub,
-    boxPub: target.box_pub,
-    cert: made.cert,
-  });
-  await api.approveDevice(deviceId, { cert: made.cert, account_envelope: made.accountEnvelope, envelopes });
+  const send = async (): Promise<void> => {
+    const envelopes = await envelopesForDevice(user, {
+      id: target.id,
+      userId: user,
+      kind: "device",
+      signPub: target.sign_pub,
+      boxPub: target.box_pub,
+      cert: made.cert,
+    });
+    await api.approveDevice(deviceId, { cert: made.cert, account_envelope: made.accountEnvelope, envelopes });
+  };
+  // A group this iPhone still lists but the server has left (or whose key version moved) makes the server refuse
+  // the whole set (409): refresh the local groups, then try once more.
+  await refreshGroups();
+  try {
+    await send();
+  } catch (error) {
+    if (!(error instanceof ApiCallError && error.status === 409)) throw error;
+    await refreshGroups();
+    await send();
+  }
   approverNonces.delete(slot(user, deviceId));
 }
 
@@ -126,12 +138,22 @@ export async function removeDevice(targetId: string): Promise<RemoveResult> {
       throw error;
     }
     await finishAccountRotation(user, accountId, true);
-    await rewrapForNewAccount(user, rotated.account);
+    // Removing this iPhone itself: the server has just refused its signature, so the other devices wrap for the new
+    // account row instead. Removing another device: the removal went through, so a failed re-wrap is not a failure;
+    // the next first set makes the envelopes.
+    if (targetId !== me.deviceId) {
+      try {
+        await rewrapForNewAccount(user, rotated.account);
+      } catch {
+        // Repaired by the next key set (docs/security.md section 10).
+      }
+    }
   }
   if (targetId === me.deviceId) {
     await deleteDeviceKeys(user);
     return "removed_self";
   }
   await refreshDeviceNow();
+  await ensureAllKeysNow(); // members can write with the new key version at once, not after the random wait
   return "removed";
 }
