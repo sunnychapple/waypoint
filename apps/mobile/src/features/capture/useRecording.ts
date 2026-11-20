@@ -23,7 +23,9 @@ import {
   type SpeechStatus,
 } from "../../../modules/waypoint-audio/index.ts";
 import { isScannerSupported, scanPages } from "../../../modules/waypoint-pages/index.ts";
+import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
 import { addPiece, EMPTY_LIVE, type LiveTranscript, type Piece } from "../../core/capture/transcript.ts";
+import { getSetting } from "../../core/db/settings.ts";
 import { addFlag, addPhoto, finishRecording, savePart, saveSegment, setPaused, startRecordingSession } from "../../core/capture/recording.ts";
 import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.ts";
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
@@ -223,6 +225,7 @@ export function useRecording(): RecordingModel {
         finishRecording(db, current.id, Date.now(), recordedMs);
       });
       router.replace(`/session/${current.id}`);
+      if (writeDb((db) => getSetting(db, SECOND_ALWAYS_KEY)) === "1") router.push(`/second-transcript?sessionId=${current.id}`);
     } catch (error) {
       stoppingRef.current = false;
       setStopping(false);
