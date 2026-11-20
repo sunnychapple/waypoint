@@ -11,13 +11,14 @@ type YearlyRow = { transaction_id: string; billing_account_id: string; purchased
 // Plus yearly renews once a year, but its allowance is monthly. For each yearly subscription still active,
 // in month k (1 to 11) of its year, reset monthly to 2,000 once, with command id plus-month:<transaction id>:<k>.
 // Month 0 was reset when the year was bought (PR 17). Family Sharing members get no credits, so only accounts
-// with an open Plus entitlement from a purchase are topped up. Returns how many resets were applied.
+// with an open Plus entitlement from a purchase are topped up. A year claimed from a deleted account (released_at)
+// gets no top-ups: it gives the entitlement only. Returns how many resets were applied.
 export async function topUpYearlyPlus(db: Db, walletFor: (billingAccountId: string) => WalletCommands, now: number): Promise<number> {
   if (YEARLY_PLUS.length === 0) return 0;
   const { results } = await db
     .prepare(
       `SELECT p.transaction_id, p.billing_account_id, p.purchased_at FROM purchases p
-       WHERE p.product_id IN (${YEARLY_PLUS.map(() => "?").join(", ")}) AND p.status = 'active'
+       WHERE p.product_id IN (${YEARLY_PLUS.map(() => "?").join(", ")}) AND p.status = 'active' AND p.released_at IS NULL
          AND p.purchased_at = (SELECT MAX(q.purchased_at) FROM purchases q WHERE q.original_id = p.original_id)
          AND EXISTS (SELECT 1 FROM users u JOIN entitlements e ON e.user_id = u.id
                      WHERE u.billing_account_id = p.billing_account_id AND e.product = 'plus'

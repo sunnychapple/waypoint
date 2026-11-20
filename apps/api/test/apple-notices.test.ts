@@ -254,6 +254,21 @@ describe("refunds, revokes and lapses", () => {
     expect(await planOf(A)).toBe("free");
   });
 
+  test("a refund of Own it claimed from a deleted account makes no wallet command, ends the new entitlement and sets the plan to free", async () => {
+    const txn = transaction("t1", "waypoint.own_it");
+    await record(accountA, txn);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(A).run();
+    await record(accountB, txn);
+    expect(await planOf(B)).toBe("own");
+    commands.splice(0);
+    await apply(accountB, notice("REFUND", uuid(2)), txn);
+    expect(commands).toHaveLength(0);
+    expect(read(accountB).purchased).toBe(0);
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t1")).status).toBe("refunded");
+    expect(await planOf(B)).toBe("free");
+  });
+
   test("a refund of Plus resets monthly to 0 under the notice's id, ends the entitlement and turns zero retention off", async () => {
     await db.prepare("UPDATE users SET zero_retention = 1 WHERE id = ?").bind(A).run();
     const txn = transaction("t1", "waypoint.plus.monthly", { expiresDate: NOW + 30 * DAY });
