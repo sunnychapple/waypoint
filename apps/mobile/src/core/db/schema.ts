@@ -221,4 +221,45 @@ CREATE TABLE overviews (
 CREATE INDEX overviews_session ON overviews (session_id, created_at);
 `,
   },
+  {
+    version: 7,
+    sql: `
+CREATE TABLE groups (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('personal', 'shared')),
+  name TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+  key_version INTEGER NOT NULL CHECK (key_version >= 1),
+  created_by TEXT,
+  history_from INTEGER NOT NULL DEFAULT 0,
+  ends_at INTEGER,
+  members TEXT NOT NULL DEFAULT '[]',
+  left_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE key_versions (
+  group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+  key_version INTEGER NOT NULL CHECK (key_version >= 1),
+  learned_at INTEGER NOT NULL,
+  PRIMARY KEY (group_id, key_version)
+);
+
+CREATE TABLE known_accounts (
+  user_id TEXT PRIMARY KEY,
+  sign_pub TEXT NOT NULL,
+  pending_sign_pub TEXT,
+  first_seen INTEGER NOT NULL,
+  changed_at INTEGER
+);
+
+CREATE TABLE trusted_signers (
+  device_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  sign_pub TEXT NOT NULL,
+  box_pub TEXT NOT NULL,
+  cert TEXT NOT NULL
+);
+`,
+  },
 ];
