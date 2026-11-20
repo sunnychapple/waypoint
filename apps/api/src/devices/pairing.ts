@@ -187,7 +187,12 @@ export function pairingRoutes(deps: { now: () => number }) {
             )
             .bind(e.group_id, e.key_version, target.id, e.wrapped_key, target.id, signer.id, req.account_envelope),
         ),
-        db.prepare("DELETE FROM device_pairings WHERE device_id = ?").bind(target.id),
+        // Same condition as the envelopes: a rejected approval keeps the pairing, so "try again" can still approve.
+        db
+          .prepare(
+            "DELETE FROM device_pairings WHERE device_id = ? AND EXISTS (SELECT 1 FROM devices WHERE id = ? AND approved_by = ? AND account_envelope = ? AND removed_at IS NULL)",
+          )
+          .bind(target.id, target.id, signer.id, req.account_envelope),
       ];
       let results: { meta: { changes: number } }[];
       try {

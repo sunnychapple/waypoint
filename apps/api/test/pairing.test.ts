@@ -367,6 +367,7 @@ describe("S1C pairing and approval", () => {
     const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
     expect(row?.approved_at).toBeNull();
     expect(await count(w.db, "SELECT COUNT(*) AS n FROM key_envelopes WHERE device_id = ?", "ipad_1")).toBe(0);
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM device_pairings WHERE device_id = ?", "ipad_1")).toBe(1);
   });
 
   test("an approval whose approving phone is removed between the reads and the batch: 409 'devices changed, try again', still waiting", async () => {
