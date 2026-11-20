@@ -22,6 +22,9 @@ struct WaypointV1: Decodable {
     let user_id: String, device_id: String, sign_pub: String, box_pub: String, signing_input: String
     let account_private_key: String, account_sign_pub: String, signature: String
   }
+  struct AccountCert: Decodable {
+    let user_id: String, account_id: String, account_key: String, sign_pub: String, box_pub: String, signing_input: String, signature: String
+  }
   struct GroupEnvelope: Decodable {
     let group_id: String, key_version: Int, recipient_device_id: String, recipient_private_key: String, recipient_box_pub: String
     let group_key: String, signer_id: String, signer_private_key: String, signer_sign_pub: String, info: String
@@ -47,6 +50,7 @@ struct WaypointV1: Decodable {
   let request: Request
   let pairing: PairingV
   let device_certificate: Certificate
+  let account_certificate: AccountCert
   let group_key_envelope: GroupEnvelope
   let account_key_envelope: AccountEnvelope
   let sealed_result: Sealed

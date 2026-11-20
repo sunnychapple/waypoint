@@ -59,6 +59,11 @@ public struct AccountKey {
   public var signPub: String { sign.publicKeyText }
   public var boxPub: String { boxKeyText(box.publicKey) }
 
+  // The certificate for this key's own row (self_cert in POST /v1/devices and DELETE /v1/devices/:id).
+  public func selfCertificate(userId: String, accountId: String) throws -> String {
+    try AccountCertificate.sign(sign, userId: userId, accountId: accountId, boxPub: boxPub)
+  }
+
   // A device's certificate and the account key wrapped for it (an envelope, purpose 2). The envelope is signed by
   // `signer` under `signerId`: the approving device, or the account key itself while recovering (signerId = accountId).
   public func certify(userId: String, accountId: String, deviceId: String, signPub: String, boxPub: String, signerId: String, signer: some SigningKey) throws -> (cert: String, envelope: String) {

@@ -87,8 +87,9 @@ extension KeysOps {
     try IdentityStore.save(identity, userId: userId)
   }
 
-  // Removing an approved device (docs/security.md section 12): a new account key, kept pending, with a certificate
-  // and an account-key envelope (signed by this device) for every device that stays.
+  // Removing an approved device (docs/security.md section 12): a new account key, kept pending, with its own
+  // certificate (selfCert), and a certificate and an account-key envelope (signed by this device) for every device
+  // that stays.
   static func rotateAccountKey(userId: String, accountId: String, devices: [[String: String]]) throws -> [String: Any] {
     lock.lock(); defer { lock.unlock() }
     var identity = try identity(userId)
@@ -104,7 +105,8 @@ extension KeysOps {
     identity.pendingAccountId = accountId
     identity.pendingAccountKey = key.raw
     try IdentityStore.save(identity, userId: userId)
-    return ["account": ["id": accountId, "signPub": key.signPub, "boxPub": key.boxPub], "devices": out]
+    let selfCert = try key.selfCertificate(userId: userId, accountId: try checkId(accountId))
+    return ["account": ["id": accountId, "signPub": key.signPub, "boxPub": key.boxPub, "selfCert": selfCert], "devices": out]
   }
 
   // keep: the server accepted the removal, so the pending key becomes the account key. Otherwise it is dropped.
