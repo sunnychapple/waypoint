@@ -57,8 +57,9 @@ export function createSpace(db: SqlDb, deps: Deps, name: string): Space {
   const length = [...trimmed].length;
   if (length === 0) throw new SpaceNameError("empty");
   if (length > NAME_MAX) throw new SpaceNameError("too_long");
-  const taken = db.get<{ id: string }>("SELECT id FROM spaces WHERE name = ? COLLATE NOCASE", [trimmed]);
-  if (taken) throw new SpaceNameError("taken");
+  // Compared in JavaScript: SQLite's NOCASE folds only A to Z, so "Écologie" and "écologie" would both be allowed.
+  const fold = (text: string): string => text.normalize("NFC").toLocaleLowerCase();
+  if (listSpaces(db).some((space) => fold(space.name) === fold(trimmed))) throw new SpaceNameError("taken");
   const id = deps.newId();
   const now = deps.now();
   db.run("INSERT INTO spaces (id, name, is_default, created_at, last_used_at) VALUES (?, ?, 0, ?, ?)", [

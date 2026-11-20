@@ -1,7 +1,7 @@
 import type { SqlDb } from "../db/sql.ts";
 import { chunkCapture, chunkTranscript, type ChunkDraft } from "./chunks.ts";
 import { clearVectorCache } from "./query.ts";
-import { quantize } from "./vectors.ts";
+import { hasDirection, quantize } from "./vectors.ts";
 
 export type Embedder = { modelVersion: string; embed(texts: string[]): Promise<number[][]> };
 
@@ -38,9 +38,10 @@ export async function indexSession(db: SqlDb, embedder: Embedder, sessionId: str
   for (let i = 0; i < texts.length; i += EMBED_BATCH) {
     vectors.push(...(await embedder.embed(texts.slice(i, i + EMBED_BATCH))));
   }
-  const stored = vectors.map((v) => (v.length === 0 ? null : quantize(v)));
+  const stored = vectors.map((v) => (hasDirection(v) ? quantize(v) : null));
 
   let written = 0;
+  let replaced = false;
   db.transaction(() => {
     const after = db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [sessionId]);
     if (!after || after.indexed_at !== before.indexed_at) return;
@@ -63,8 +64,9 @@ export async function indexSession(db: SqlDb, embedder: Embedder, sessionId: str
     });
     db.run("UPDATE sessions SET indexed_at = ? WHERE id = ?", [now, sessionId]);
     written = drafts.length;
+    replaced = true;
   });
-  if (written > 0) clearVectorCache();
+  if (replaced) clearVectorCache();
   return written;
 }
 

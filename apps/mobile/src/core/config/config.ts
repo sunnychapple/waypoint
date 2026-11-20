@@ -25,7 +25,8 @@ export function needsUpdate(native: string | null, minNative: string): boolean {
 }
 
 export function isStale(fetchedAt: number | null, now: number): boolean {
-  return fetchedAt === null || now - fetchedAt >= CONFIG_MAX_AGE_MS || now < fetchedAt;
+  // A value that is not a number (a damaged setting) counts as stale; NaN would fail every comparison below.
+  return fetchedAt === null || !Number.isFinite(fetchedAt) || now - fetchedAt >= CONFIG_MAX_AGE_MS || now < fetchedAt;
 }
 
 // The cached config from the settings table, or null when it is missing or does not match the contract.

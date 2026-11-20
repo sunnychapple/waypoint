@@ -29,14 +29,14 @@ async function fixture(): Promise<Db> {
 }
 
 // A throwaway POST /v1/x behind the middleware; it answers with the signed device and the body it read.
-function appFor(user: SessionUser, options?: SignatureOptions) {
+function appFor(user: SessionUser, options?: SignatureOptions, now = NOW) {
   const app = new Hono<AppEnv>();
   app.onError(handleError);
   app.use(async (c, next) => {
     c.set("user", user);
     await next();
   });
-  app.post("/v1/x", requireDeviceSignature({ now: () => NOW }, options), async (c) =>
+  app.post("/v1/x", requireDeviceSignature({ now: () => now }, options), async (c) =>
     c.json({ device: c.get("device"), body: await c.req.json() }),
   );
   return app;
@@ -249,5 +249,45 @@ describe("requireDeviceSignature", () => {
         expect(String(value)).not.toContain(bodyText);
       }
     }
+  });
+
+  test("a request accepted at NOW is 401 when the same request is sent again with the clock at NOW + 300,000", async () => {
+    const db = await fixture();
+    const device = await makeTestDevice("dev_one");
+    await insertDevice(db, device, { userId: "u1" });
+    const init = await signedInit(device, { method: "POST", path: "/v1/x", body: BODY, now: NOW });
+    expect((await send(db, init)).status).toBe(200);
+    const late = await appFor(userOf("u1"), undefined, NOW + WINDOW).request("/v1/x", init, { DB: db });
+    expect(late.status).toBe(401);
+    expect(await late.json()).toEqual(UNAUTHORIZED);
+  });
+
+  test("a request signed for a query string is 401 with another query string, and with none", async () => {
+    const db = await fixture();
+    const device = await makeTestDevice("dev_one");
+    await insertDevice(db, device, { userId: "u1" });
+    const app = appFor(userOf("u1"));
+    const signed = await signedInit(device, { method: "POST", path: "/v1/x?a=1", body: BODY, now: NOW });
+    expect((await app.request("/v1/x?a=1", signed, { DB: db })).status).toBe(200);
+    expect((await app.request("/v1/x?a=2", signed, { DB: db })).status).toBe(401);
+    expect((await app.request("/v1/x", signed, { DB: db })).status).toBe(401);
+    const bare = await signedInit(device, { method: "POST", path: "/v1/x", body: BODY, now: NOW });
+    expect((await app.request("/v1/x?a=2", bare, { DB: db })).status).toBe(401);
+  });
+
+  test("a good request deletes no expired nonce row of another device", async () => {
+    const db = await fixture();
+    const device = await makeTestDevice("dev_one");
+    const other = await makeTestDevice("dev_two");
+    await insertDevice(db, device, { userId: "u1" });
+    await insertDevice(db, other, { userId: "u1" });
+    await db
+      .prepare("INSERT INTO request_nonces (device_id, nonce, expires_at) VALUES (?, ?, ?)")
+      .bind("dev_two", "other-old-nonce", NOW - 1)
+      .run();
+    const init = await signedInit(device, { method: "POST", path: "/v1/x", body: BODY, now: NOW });
+    expect((await send(db, init)).status).toBe(200);
+    const left = await db.prepare("SELECT nonce FROM request_nonces WHERE device_id = ? AND nonce = ?").bind("dev_two", "other-old-nonce").first();
+    expect(left).not.toBeNull();
   });
 });

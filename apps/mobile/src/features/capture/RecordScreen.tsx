@@ -25,6 +25,7 @@ const PAUSE_REASONS: Record<string, string> = {
   interruption: "Paused for a call or another app.",
   route_change: "The microphone changed.",
   media_reset: "Audio restarted.",
+  write_failed: "Your iPhone couldn't save the recording. Free up some space, then resume.",
 };
 
 // The live recording screen (C1, C3, C8, P5, P11, cut to stage 1). It cannot be swiped away; the close button asks first.

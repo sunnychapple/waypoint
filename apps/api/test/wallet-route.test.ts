@@ -124,6 +124,30 @@ describe("GET /v1/wallet", () => {
     ]);
   });
 
+  test("available is the monthly plus the purchased credits when nothing is held", async () => {
+    const { env, wallet } = await fixture();
+    apply(wallet, [
+      { type: "grant", id: "g1", bucket: "monthly", credits: 10, ref: "plan" },
+      { type: "grant", id: "g2", bucket: "purchased", credits: 5, ref: "pack" },
+    ]);
+    const res = await setup().request("/v1/wallet", {}, env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      balance: { monthly: 10, purchased: 5, held: 0, owed: 0, available: 15 },
+    });
+  });
+
+  test("an entitlement whose ended_at is exactly now is not returned", async () => {
+    const { env, db } = await fixture();
+    await db
+      .prepare("INSERT INTO entitlements (user_id, product, source, granted_at, ended_at) VALUES (?, ?, ?, ?, ?)")
+      .bind("u1", "ended", "purchase", 1000, NOW)
+      .run();
+    const res = await setup().request("/v1/wallet", {}, env);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ entitlements: [] });
+  });
+
   test("a new wallet with no rows gives all zeros and no entitlements", async () => {
     const { env } = await fixture();
     const res = await setup().request("/v1/wallet", {}, env);
@@ -141,10 +165,11 @@ describe("GET /v1/wallet", () => {
 
 describe("GET /v1/wallet/ledger", () => {
   test("limit=2 gives 2 entries, next 2 and the open hold, and a later page continues from after", async () => {
-    const { env, wallet } = await fixture();
+    const { env, wallet, names } = await fixture();
     seedBalances(wallet);
     const first = await setup().request("/v1/wallet/ledger?limit=2", {}, env);
     expect(first.status).toBe(200);
+    expect(names).toEqual(["billing-1"]);
     const firstBody: unknown = await first.json();
     expect(LedgerResponseSchema.safeParse(firstBody).success).toBe(true);
     const page = firstBody as LedgerResponse;
@@ -164,7 +189,7 @@ describe("GET /v1/wallet/ledger", () => {
     seedBalances(wallet);
     let after = 0;
     let entries = 0;
-    for (;;) {
+    for (let pages = 0; pages < 10; pages++) {
       const res = await setup().request(`/v1/wallet/ledger?after=${after}&limit=2`, {}, env);
       const page = (await res.json()) as LedgerResponse;
       entries += page.entries.length;
@@ -174,7 +199,9 @@ describe("GET /v1/wallet/ledger", () => {
       }
       after = page.next;
     }
+    const all = (await (await setup().request("/v1/wallet/ledger?limit=100", {}, env)).json()) as LedgerResponse;
     expect(entries).toBeGreaterThan(0);
+    expect(entries).toBe(all.entries.length);
   });
 
   test("with no query it gives up to 50 entries from the start", async () => {

@@ -40,15 +40,21 @@ async function capture(fromPhotos: boolean, existingId: string | undefined): Pro
       return;
     }
     writeDb((db) => addPages(db, deps, sessionId, files));
-    router.replace(`/pages/${sessionId}`);
+    // Added to an existing session: go back to its Your pages screen, which re-reads the new pages.
+    if (created) router.replace(`/pages/${sessionId}`);
+    else router.back();
   } catch (error) {
     if (created) discardSession(sessionId);
-    Alert.alert("Couldn't add the pages.", messageOf(error), [{ text: "OK", onPress: () => router.back() }]);
+    // Plain words only; the native error text is not for students.
+    const message = error instanceof ScannerUnsupported ? "This iPhone can't scan pages. Try From Photos instead." : "Please try again.";
+    Alert.alert("Couldn't add the pages.", message, [{ text: "OK", onPress: () => router.back() }]);
   }
 }
 
+class ScannerUnsupported extends Error {}
+
 async function scanWithCamera(sessionId: string): Promise<string[]> {
-  if (!isScannerSupported()) throw new Error("The document camera is not supported on this device");
+  if (!isScannerSupported()) throw new ScannerUnsupported();
   return (await scanPages(sessionId)).map((page) => page.file);
 }
 
@@ -71,8 +77,4 @@ async function pickFromPhotos(sessionId: string): Promise<string[]> {
 function discardSession(sessionId: string): void {
   writeDb((db) => deleteSessionRow(db, sessionId));
   deleteSessionFiles(sessionId);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -6,7 +6,7 @@ import type { SessionUser } from "../src/auth/users.ts";
 import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
 import { PushMessageSchema } from "../src/push/messages.ts";
-import { syncRoutes } from "../src/sync/routes.ts";
+import { MAX_PAGE_BYTES, syncRoutes } from "../src/sync/routes.ts";
 import type { BatchDb } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
 import { fakeRoomNamespace } from "./helpers/room.ts";
@@ -313,4 +313,56 @@ test("GET sync without an upgrade gets 400, and another user's or a waiting devi
     expect(res.status).toBe(404);
   }
   expect(w.env.GROUP_ROOM.roomFor(G).fetches).toHaveLength(0);
+});
+
+test("a member who left gets no sync push after a post, even with an approved phone", async () => {
+  const w = await world();
+  await addUser(w.env.DB, "u4");
+  await insertDevice(w.env.DB, await makeTestDevice(U4A), { userId: "u4" });
+  await w.env.DB.prepare("INSERT INTO memberships (group_id, user_id, role, starts_at, history_from, left_at) VALUES (?, 'u4', 'editor', ?, 0, ?)").bind(G, NOW, NOW).run();
+  const res = await call(w.env, "u1", "POST", CHANGES, changeBody(U1A, await sealed(U1A, "note_edit")));
+  expect(res.status).toBe(201);
+  expect(w.sent.map((m) => m.body)).toEqual([
+    { user_id: "u1", kind: "sync", ref: G, device_id: U1B },
+    { user_id: "u2", kind: "sync", ref: G, device_id: U2A },
+    { user_id: "u3", kind: "sync", ref: G, device_id: U3A },
+  ]);
+});
+
+test("an approved account row of another member gets no sync push after a post", async () => {
+  const w = await world();
+  await insertDevice(w.env.DB, await makeTestDevice("device_u2acct"), { userId: "u2", kind: "account" });
+  const res = await call(w.env, "u1", "POST", CHANGES, changeBody(U1A, await sealed(U1A, "note_edit")));
+  expect(res.status).toBe(201);
+  expect(w.sent.map((m) => m.body)).toEqual([
+    { user_id: "u1", kind: "sync", ref: G, device_id: U1B },
+    { user_id: "u2", kind: "sync", ref: G, device_id: U2A },
+    { user_id: "u3", kind: "sync", ref: G, device_id: U3A },
+  ]);
+});
+
+test("GET changes passes fromAt and maxBytes to the room's after", async () => {
+  const w = await world();
+  const seen: unknown[] = [];
+  const rooms = w.env.GROUP_ROOM;
+  const env: Env = {
+    ...w.env,
+    GROUP_ROOM: {
+      ...rooms,
+      get: (name: string) => {
+        const stub = rooms.get(name);
+        const after = stub.after;
+        return {
+          ...stub,
+          after: async (...args: Parameters<typeof after>) => {
+            seen.push(args[2]);
+            return after(...args);
+          },
+        };
+      },
+    },
+  };
+  const res = await call(env, "u1", "GET", CHANGES);
+  expect(res.status).toBe(200);
+  expect(seen).toEqual([{ fromAt: 0, maxBytes: MAX_PAGE_BYTES }]);
 });
