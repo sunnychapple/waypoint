@@ -36,5 +36,6 @@ export type Env = {
   LINK_VIEWS: RateLimit;
   LINK_PASSCODES: RateLimit;
   ASSETS: Fetcher;
+  JOB_STARTS: RateLimit;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };

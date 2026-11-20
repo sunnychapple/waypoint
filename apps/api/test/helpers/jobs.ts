@@ -128,6 +128,7 @@ export async function makeJobsWorld(options: { monthly?: number; zeroRetention?:
     WALLET: { idFromName: (name: string) => name, get: (name: string) => walletFor(name) },
     USAGE_QUEUE: { send: async (event: UsageEvent) => void usage.push(event) },
     PUSH_QUEUE: { send: async (message: PushMessage) => void pushes.push(message) },
+    JOB_STARTS: { limit: async (_options: { key: string }) => ({ success: true }) },
   };
   const deps: JobDeps = { db, bucket, wallet: walletFor("ba_u1"), usage: env.USAGE_QUEUE, push: env.PUSH_QUEUE, now: () => clock.now };
   return { db, env, deps, store, commands, usage, pushes, bucket, objects, workflow, clock, phone, ipad, other };

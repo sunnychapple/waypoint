@@ -14,6 +14,9 @@ import { JOB_RETENTION, jobTimeLimitMs, WHISPER_MODEL, type JobRunInput, type Jo
 
 type JobRoute = { tier: Tier; model: string; retention: "standard" | "zero" };
 
+// Seconds to wait after JOB_STARTS says no (its period is 60 s, wrangler.jsonc).
+export const JOB_STARTS_RETRY_AFTER = 60;
+
 // The route is picked before anything is held or run. Jobs have a fixed tier per type (routes.fixed); retranscribe
 // always uses Whisper, which is not confirmed zero-retention. null: the user has zero retention on and no route fits.
 export function jobRoute(config: LoadedConfig, type: CreateJobRequest["type"], zeroRetention: boolean): JobRoute | null {
@@ -32,6 +35,10 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
   return new Hono<AppEnv>()
     .post("/v1/jobs", requireDeviceSignature(deps), idempotent(deps), async (c) => {
       const user = c.get("user");
+      // At most 30 new jobs a minute per person (open question 29). A job cancelled before it settles costs nothing,
+      // so this bounds how often a modified client can run the models for free.
+      const starts = await c.env.JOB_STARTS.limit({ key: user.id });
+      if (!starts.success) throw new ApiFailure("rate_limited", "too many jobs", JOB_STARTS_RETRY_AFTER);
       const device = c.get("device");
       const key = c.req.header(IDEMPOTENCY_KEY_HEADER) ?? "";
       const request = await readTaskBody(c, CreateJobRequestSchema);
