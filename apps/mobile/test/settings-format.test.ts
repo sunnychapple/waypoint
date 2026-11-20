@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bytesLabel, percentLabel } from "../src/core/settings/format.ts";
+import { bytesLabel, percentLabel, versionLabel } from "../src/core/settings/format.ts";
 
 describe("settings format", () => {
   it("bytesLabel and percentLabel give the boundary values", () => {
@@ -16,5 +16,11 @@ describe("settings format", () => {
     expect(percentLabel(98, 100)).toBe("98%");
     expect(percentLabel(999, 1_000)).toBe("99%");
     expect(percentLabel(100, 100)).toBe("100%");
+  });
+
+  it("versionLabel leaves out a missing build number", () => {
+    expect(versionLabel("1.0.0", "42")).toBe("Version 1.0.0 (42)");
+    expect(versionLabel("1.0.0", null)).toBe("Version 1.0.0");
+    expect(versionLabel("1.0.0", "")).toBe("Version 1.0.0");
   });
 });

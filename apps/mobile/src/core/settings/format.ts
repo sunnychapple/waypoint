@@ -11,3 +11,9 @@ export function percentLabel(done: number, total: number): string {
   if (total === 0) return "100%";
   return `${Math.floor((done / total) * 100)}%`;
 }
+
+// "Version 1.0.0 (42)"; the build number is left out when there is none (Expo Go, web).
+export function versionLabel(version: string | null, build: string | null): string {
+  const name = `Version ${version ?? "unknown"}`;
+  return build === null || build === "" ? name : `${name} (${build})`;
+}
