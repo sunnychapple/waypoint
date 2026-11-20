@@ -241,6 +241,24 @@ describe("POST /v1/blobs", () => {
     expect(await rowCount(db, "SELECT COUNT(*) AS n FROM blobs WHERE id = ?", BLOB)).toBe(0);
   });
 
+  test("the reservation deleted while the upload ran (a failed retry of the same id): 409 upload interrupted, and the object is deleted", async () => {
+    const { db } = await world();
+    const { bucket, objects } = memoryBucket();
+    const racing: BlobBucket = {
+      ...bucket,
+      async put(key, value, options) {
+        const stored = await bucket.put(key, value, options);
+        await db.prepare("DELETE FROM blobs WHERE id = ? AND stored_at IS NULL").bind(BLOB).run();
+        return stored;
+      },
+    };
+    const res = await put(appFor("u1"), { DB: db, BUCKET: racing }, query(BLOB), bytesOf(100));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ code: "conflict", message: "upload interrupted, try again", retry_after: null });
+    expect(objects.size).toBe(0);
+    expect(await rowCount(db, "SELECT COUNT(*) AS n FROM blobs WHERE id = ?", BLOB)).toBe(0);
+  });
+
   test("a bucket that reports another size is 400 upload incomplete; the object and the row are gone", async () => {
     const { db } = await world();
     const { bucket, objects } = memoryBucket({ sizeDelta: 1 });
