@@ -42,6 +42,7 @@ function RootStack() {
           name="explain"
           options={{ presentation: "formSheet", sheetAllowedDetents: [0.4, 0.75, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true }}
         />
+        <Stack.Screen name="second-transcript" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="study/make" />
         <Stack.Screen name="study/review" />
         <Stack.Screen name="study/quiz" />

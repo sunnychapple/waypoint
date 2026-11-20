@@ -101,6 +101,17 @@ describe("jobs", () => {
     expect(h(sent[0]!, "Content-Type")).toBe("audio/mp4");
     expect(h(sent[0]!, "Waypoint-Signature")).toBeUndefined();
   });
+  it("audioDone sends the key it is given, so a repeat has the same key; without one, a new key", async () => {
+    const DONE = { chunks: 2, bytes: 6 };
+    const { client, sent } = fakeApi([jsonReply(202, DONE), jsonReply(202, DONE), jsonReply(202, DONE)]);
+    expect(await client.audioDone(JOB.id, 2, "done-key-0000000000001")).toEqual(DONE);
+    await client.audioDone(JOB.id, 2, "done-key-0000000000001");
+    await client.audioDone(JOB.id, 2);
+    expect(sent[0]?.url).toBe(`${BASE}/v1/jobs/${JOB.id}/audio/done`);
+    expect(h(sent[0]!, "Idempotency-Key")).toBe("done-key-0000000000001");
+    expect(h(sent[1]!, "Idempotency-Key")).toBe("done-key-0000000000001");
+    expect(h(sent[2]!, "Idempotency-Key")).toBe("key_000000000001");
+  });
   it("jobEvents calls onState per state event and skips keep-alives", async () => {
     const seen: string[] = [];
     const { client } = fakeApi([

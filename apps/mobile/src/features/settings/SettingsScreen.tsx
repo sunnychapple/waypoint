@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import Constants from "expo-constants";
 import { SymbolView } from "expo-symbols";
 import { downloadSpeechPack, getSpeechStatus, onSpeechPackProgress, type SpeechStatus } from "../../../modules/waypoint-audio/index.ts";
 import { getAvailability, type ModelAvailability } from "../../../modules/waypoint-model/index.ts";
+import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
+import { deleteSetting, getSetting, setSetting } from "../../core/db/settings.ts";
 import { percentLabel, versionLabel } from "../../core/settings/format.ts";
 import { useProfile, useSignOut } from "../../platform/auth.tsx";
+import { getDb, writeDb } from "../../platform/db.ts";
 import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -60,7 +63,13 @@ export default function SettingsScreen() {
   const signOut = useSignOut();
   const [speech, setSpeech] = useState<SpeechStatus | null>(null);
   const [fraction, setFraction] = useState<number | null>(null);
+  const [offerSecond, setOfferSecond] = useState(() => getSetting(getDb(), SECOND_ALWAYS_KEY) === "1");
   const availability = getAvailability();
+
+  function setOffer(on: boolean) {
+    setOfferSecond(on);
+    writeDb((db) => (on ? setSetting(db, SECOND_ALWAYS_KEY, "1") : deleteSetting(db, SECOND_ALWAYS_KEY)));
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -143,6 +152,7 @@ export default function SettingsScreen() {
       <Row title="Apple Intelligence" right={<Caption>{appleIntelligenceLabel(availability)}</Caption>} />
       <Link title="Permissions" onPress={() => router.push("/settings-permissions")} />
       <Link title="Storage & search" onPress={() => router.push("/settings-storage")} />
+      <Row title="Offer a second transcript after each recording" right={<Switch accessibilityLabel="Offer a second transcript after each recording" value={offerSecond} onValueChange={setOffer} />} />
 
       <Caption style={styles.section}>ABOUT</Caption>
       <Row title={versionLabel(Constants.expoConfig?.version ?? null, Constants.nativeBuildVersion)} />
