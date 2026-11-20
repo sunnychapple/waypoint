@@ -482,6 +482,13 @@ describe("applying changes", () => {
     expect(b.db.get("SELECT space_id, title FROM sessions WHERE id = ?", [priv.id])).toEqual({ space_id: ensureDefaultSpace(b.db, b.deps).id, title: "New recording" });
     expect(b.db.get<{ question: string }>("SELECT question FROM flags WHERE id = ?", [privFlag])?.question).toBe("");
   });
+  it("a delete of a space is refused and changes nothing", () => {
+    const b = device("b");
+    const change: SyncChange = { v: 1, id: "dsp_000000000000000", at: 10, op: "delete", table: "spaces", row_id: b.space.id };
+    expect(applyChange(b.db, G, change, "dev_a")).toBe("rejected");
+    expect(count(b, "spaces")).toBe(2);
+    expect(count(b, "row_versions")).toBe(0);
+  });
   it("a space's name lands on the mapped space, cut to 60 characters", () => {
     const b = device("b");
     const change: SyncChange = { v: 1, id: "spc_000000000000000", at: 10, op: "upsert", table: "spaces", row: { id: "someone_elses_space", name: "n".repeat(100), created_at: 1 } };

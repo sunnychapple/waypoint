@@ -69,10 +69,14 @@ export type KeyPlan =
   | { kind: "blocked"; untrusted: Target[] } // a first set must cover every target, and some are not trusted
   | { kind: "none" };
 
-export function planKeys(input: { targets: Target[]; me: { userId: string; role: "owner" | "editor" | "viewer" }; holdsCurrent: boolean; known: Record<string, string>; verify: CertCheck }): KeyPlan {
-  const { targets, me, holdsCurrent, known, verify } = input;
+// keyVersion: the group's current version. Version 1 is made only by the group's creator, who locked the group's name
+// with it: another device making its own version 1 (it saw the group before the creator's envelopes arrived) would
+// leave two different keys, and the name readable only with the creator's.
+export function planKeys(input: { targets: Target[]; me: { userId: string; role: "owner" | "editor" | "viewer" }; keyVersion: number; holdsCurrent: boolean; known: Record<string, string>; verify: CertCheck }): KeyPlan {
+  const { targets, me, keyVersion, holdsCurrent, known, verify } = input;
   const nobody = targets.every((t) => !t.has_current_key);
   if (nobody && !holdsCurrent) {
+    if (keyVersion === 1) return { kind: "none" };
     const untrusted = targets.filter((t) => !isTrusted(t, known, verify));
     return untrusted.length > 0 ? { kind: "blocked", untrusted } : { kind: "first", recipients: targets };
   }

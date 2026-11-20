@@ -12,7 +12,7 @@ beforeEach(() => {
   db.run("INSERT INTO spaces (id, name, is_default, created_at, last_used_at) VALUES ('space-1', 'My notes', 1, 0, 0)");
 });
 
-function addSession(id: string, state: "saved" | "recording", startedAt: number, segments: string[], page?: string): void {
+function addSession(id: string, state: "saved" | "recording" | "interrupted", startedAt: number, segments: string[], page?: string): void {
   db.run(
     "INSERT INTO sessions (id, space_id, kind, title, state, transcript, started_at, recorded_ms) VALUES (?, 'space-1', 'recording', ?, ?, 'done', ?, 0)",
     [id, `Session ${id}`, state, startedAt],
@@ -55,6 +55,28 @@ describe("indexer", () => {
     addSession("saved-one", "saved", 100, ["a"]);
     addSession("recording-one", "recording", 50, ["b"]);
     expect(sessionsToIndex(db, 3)).toEqual(["saved-one"]);
+  });
+
+  it("an interrupted session (a recording cut off by a crash) is indexed and counted like a saved one", () => {
+    addSession("saved-one", "saved", 100, ["a"]);
+    addSession("cut-off", "interrupted", 50, ["b"]);
+    expect(sessionsToIndex(db, 3)).toEqual(["cut-off", "saved-one"]);
+    expect(indexStatus(db, "test-1")).toMatchObject({ sessions: 2, indexed: 0 });
+  });
+
+  it("text written while the embedder runs (indexed_at still NULL) is not lost: nothing is written and the session stays to index", async () => {
+    addSession("s1", "saved", 100, ["supply and demand"]);
+    const embedder: Embedder = {
+      modelVersion: "test-1",
+      embed: async (texts) => {
+        db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('s1', 5000, 5900, 'photosynthesis', 'device')");
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    expect(await indexSession(db, embedder, "s1", 6000)).toBe(0);
+    expect(sessionsToIndex(db, 3)).toEqual(["s1"]);
+    expect(await indexSession(db, fakeEmbedder(vectors), "s1", 7000)).toBe(1);
+    expect(db.all("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'photosynthesis'")).toHaveLength(1);
   });
 
   it("markStale flags a session whose vectors came from another model version", async () => {

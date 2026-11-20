@@ -122,6 +122,39 @@ describe("PUT and GET /v1/recovery", () => {
     expect(rows?.n).toBe(0);
   });
 
+  test("an account key replaced between the read and the write (a device removal): 409 and no blob is stored", async () => {
+    const { db, phone } = await fixture();
+    const replaced: Db = {
+      prepare: (query) => {
+        const statement = db.prepare(query);
+        if (!query.includes("INSERT INTO recovery")) return statement;
+        return {
+          ...statement,
+          bind: (...values: unknown[]) => {
+            const bound = statement.bind(...values);
+            return {
+              ...bound,
+              run: async () => {
+                await db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'acct_1'").bind(NOW).run();
+                await insertDevice(db, await makeTestDevice("acct_2"), { userId: "u1", kind: "account" });
+                return bound.run();
+              },
+            };
+          },
+        };
+      },
+    };
+    const res = await appFor(userOf("u1")).request(
+      "/v1/recovery",
+      await putRequest(phone, { account_device_id: "acct_1", wrapped_account_key: await makeBlob("acct_1"), verified: true }),
+      { DB: replaced },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ code: "conflict", message: "not the current account key", retry_after: null });
+    const rows = await db.prepare("SELECT count(*) AS n FROM recovery WHERE user_id = ?").bind("u1").first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
   test("a blob with version byte 2, 92 bytes, or characters outside base64url gets 400", async () => {
     const { db, phone } = await fixture();
     const good = await makeBlob("acct_1");

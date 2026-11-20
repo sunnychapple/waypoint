@@ -152,7 +152,7 @@ describe("cleanup", () => {
     const counts = await cleanup({ DB: db, BUCKET: bucket }, NOW);
     const rows = await db.prepare("SELECT nonce FROM request_nonces").all<{ nonce: string }>();
     expect(rows.results).toEqual([{ nonce: "now" }]);
-    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1, pending_blobs: 0 });
+    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1, pending_blobs: 0, waiting_devices: 0 });
   });
 
   test("a blob reservation still uploading after 25 hours is deleted; one 23 hours old and a stored one 25 hours old are kept", async () => {
@@ -167,5 +167,24 @@ describe("cleanup", () => {
     expect(counts.pending_blobs).toBe(1);
     const rows = await db.prepare("SELECT id FROM blobs ORDER BY id").all<{ id: string }>();
     expect(rows.results).toEqual([{ id: "old_stored" }, { id: "young_pending" }]);
+  });
+
+  test("a device waiting for more than a day with no live pairing is marked removed; a younger one, one with a live pairing, an approved one and the account row are kept", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'u1')").run();
+    const insert =
+      "INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, can_approve, added_at, kind, approved_at) VALUES (?, 'u1', 'iPhone', ?, 'S', 'B', 0, ?, ?, ?)";
+    await db.prepare(insert).bind("old_waiting", "ios", NOW - 25 * HOUR, "device", null).run();
+    await db.prepare(insert).bind("old_expired_pairing", "ios", NOW - 25 * HOUR, "device", null).run();
+    await db.prepare(insert).bind("old_live_pairing", "ios", NOW - 25 * HOUR, "device", null).run();
+    await db.prepare(insert).bind("young_waiting", "ios", NOW - 23 * HOUR, "device", null).run();
+    await db.prepare(insert).bind("old_approved", "ios", NOW - 25 * HOUR, "device", NOW - 25 * HOUR).run();
+    await db.prepare(insert).bind("acct", "account", NOW - 25 * HOUR, "account", NOW - 25 * HOUR).run();
+    await db.prepare("INSERT INTO device_pairings (device_id, commitment, expires_at) VALUES ('old_expired_pairing', 'c', ?)").bind(NOW).run();
+    await db.prepare("INSERT INTO device_pairings (device_id, commitment, expires_at) VALUES ('old_live_pairing', 'c', ?)").bind(NOW + 1).run();
+    const counts = await cleanup({ DB: db, BUCKET: fakeBucket([]).bucket }, NOW);
+    expect(counts.waiting_devices).toBe(2);
+    const rows = await db.prepare("SELECT id FROM devices WHERE removed_at = ? ORDER BY id").bind(NOW).all<{ id: string }>();
+    expect(rows.results).toEqual([{ id: "old_expired_pairing" }, { id: "old_waiting" }]);
   });
 });
