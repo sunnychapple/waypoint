@@ -12,3 +12,4 @@ export * from "./keys.ts";
 export * from "./jobs.ts";
 export * from "./groups.ts";
 export * from "./sync.ts";
+export * from "./blobs.ts";
