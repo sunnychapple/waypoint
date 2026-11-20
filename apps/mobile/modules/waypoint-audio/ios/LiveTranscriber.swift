@@ -13,6 +13,8 @@ final class LiveTranscriber: AudioBufferSink {
   private var analyzer: SpeechAnalyzer?             // lock
   private var converter: AVAudioConverter?          // lock
   private var continuation: AsyncStream<AnalyzerInput>.Continuation? // lock
+  private var results: Task<Void, Never>?           // lock: the running run's results loop
+  private var finishing: Task<Void, Never>?         // lock: the last ended run, until its final words are sent
 
   /// Stores the locale and the analyzer format for it. A nil locale means no speech pack, so nothing runs live.
   func configure(locale: Locale?) async {
@@ -34,15 +36,10 @@ final class LiveTranscriber: AudioBufferSink {
     let analyzer = SpeechAnalyzer(modules: [module])
     let converter = AVAudioConverter(from: format, to: analyzerFormat)
     let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-    lock.withLock {
-      self.analyzer = analyzer
-      self.converter = converter
-      self.continuation = continuation
-    }
     Task {
       do { try await analyzer.start(inputSequence: stream) } catch { self.speechFailed(sessionId, error) }
     }
-    Task {
+    let results = Task {
       do {
         if let t = module as? SpeechTranscriber {
           for try await result in t.results {
@@ -56,6 +53,12 @@ final class LiveTranscriber: AudioBufferSink {
       } catch {
         self.speechFailed(sessionId, error)
       }
+    }
+    lock.withLock {
+      self.analyzer = analyzer
+      self.converter = converter
+      self.continuation = continuation
+      self.results = results
     }
   }
 
@@ -77,16 +80,35 @@ final class LiveTranscriber: AudioBufferSink {
   }
 
   func runEnded() {
-    let (analyzer, continuation) = lock.withLock { (self.analyzer, self.continuation) }
+    let (analyzer, continuation, results) = lock.withLock { (self.analyzer, self.continuation, self.results) }
     continuation?.finish()
-    if let analyzer {
-      Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+    // Done once the analyzer has finished the input and the results loop has sent the last final words.
+    let finishing = Task {
+      if let analyzer { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+      await results?.value
     }
     lock.withLock {
       self.analyzer = nil
       self.converter = nil
       self.continuation = nil
+      self.results = nil
+      self.finishing = finishing
     }
+  }
+
+  /// Waits until the last ended run's final words have been sent as onTranscript events, at most `seconds`.
+  /// stop() calls it before it resolves, so the app still listens when the last words arrive.
+  func waitForFinals(seconds: Double) async {
+    guard let finishing = lock.withLock({ self.finishing }) else { return }
+    // Not a task group: a group waits for every child, and `finishing.value` ignores cancellation, so a run that
+    // never ends would hold stop() for ever. Whichever comes first resumes; the other is ignored.
+    let once = ResumeOnce()
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      once.set(continuation)
+      Task { await finishing.value; once.resume() }
+      Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); once.resume() }
+    }
+    lock.withLock { if self.finishing == finishing { self.finishing = nil } }
   }
 
   private func emit(_ sessionId: String, _ runStartMs: Int64, _ text: AttributedString, _ range: CMTimeRange, _ isFinal: Bool) {
@@ -102,5 +124,28 @@ final class LiveTranscriber: AudioBufferSink {
 
   private func speechFailed(_ sessionId: String, _ error: Error) {
     onEvent?("onSpeechError", ["sessionId": sessionId, "message": String(describing: error)])
+  }
+}
+
+/// Resumes a continuation exactly once, from whichever caller gets there first.
+private final class ResumeOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var done = false
+
+  func set(_ continuation: CheckedContinuation<Void, Never>) {
+    lock.withLock {
+      if done { continuation.resume() } else { self.continuation = continuation }
+    }
+  }
+
+  func resume() {
+    let c: CheckedContinuation<Void, Never>? = lock.withLock {
+      if done { return nil }
+      done = true
+      defer { continuation = nil }
+      return continuation
+    }
+    c?.resume()
   }
 }

@@ -1183,13 +1183,43 @@ Branch `fix/h14-last-words`. From `main` at `ac25265`. No dependency. Files, and
   /// stop() calls it before it resolves, so the app still listens when the last words arrive.
   func waitForFinals(seconds: Double) async {
     guard let finishing = lock.withLock({ self.finishing }) else { return }
-    await withTaskGroup(of: Void.self) { group in
-      group.addTask { await finishing.value }
-      group.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
-      await group.next()
-      group.cancelAll()
+    // Not a task group: a group waits for every child, and `finishing.value` ignores cancellation, so a run that
+    // never ends would hold stop() for ever. Whichever comes first resumes; the other is ignored.
+    let once = ResumeOnce()
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      once.set(continuation)
+      Task { await finishing.value; once.resume() }
+      Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); once.resume() }
+    }
+    lock.withLock { if self.finishing == finishing { self.finishing = nil } }
+  }
+```
+
+At the end of the file, add, exactly (fix round on #134: a task group waits for every child, and `finishing.value` ignores cancellation, so the group version did not bound the wait):
+
+```swift
+/// Resumes a continuation exactly once, from whichever caller gets there first.
+private final class ResumeOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var done = false
+
+  func set(_ continuation: CheckedContinuation<Void, Never>) {
+    lock.withLock {
+      if done { continuation.resume() } else { self.continuation = continuation }
     }
   }
+
+  func resume() {
+    let c: CheckedContinuation<Void, Never>? = lock.withLock {
+      if done { return nil }
+      done = true
+      defer { continuation = nil }
+      return continuation
+    }
+    c?.resume()
+  }
+}
 ```
 
 `WaypointAudioModule.swift`: replace the `stop` function with, exactly:
