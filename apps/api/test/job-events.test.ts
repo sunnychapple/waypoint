@@ -136,6 +136,25 @@ describe("GET /v1/jobs/:id/events", () => {
     expect(calls.n).toBe(1);
   });
 
+  test("a client that cancels the stream stops the polling", async () => {
+    const w = await makeJobsWorld();
+    await insertJob(w, { id: "job_a", state: "running" });
+    let calls = 0;
+    const sleep = async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    };
+    const res = await run(w, U1, "job_a", sleep);
+    if (res.body === null) throw new Error("no stream body");
+    const reader = res.body.getReader();
+    await reader.read();
+    await reader.cancel();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const atCancel = calls;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(calls).toBe(atCancel);
+  });
+
   test("a job whose user is deleted mid-stream ends the stream after one state event", async () => {
     const w = await makeJobsWorld();
     await insertJob(w, { id: "job_a", state: "queued" });

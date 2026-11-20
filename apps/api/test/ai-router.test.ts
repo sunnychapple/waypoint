@@ -139,10 +139,13 @@ describe("askRouter", () => {
 
 describe("routeTask", () => {
   test("a good answer routes to the light tier with the light model", async () => {
-    const { ai } = fakeAi(async () => chatReply(JSON.stringify(GOOD)));
+    const { ai, calls } = fakeAi(async () => chatReply(JSON.stringify(GOOD)));
     const result = await routeTask({ ai, gatewayId: "gw", config: makeConfig(), zeroRetention: false, input: INPUT });
     expect(result.router).toBe("ok");
     expect(result.decision).toMatchObject({ ok: true, tier: "light", model: DEFAULT_ROUTES.tiers.light[0]?.model });
+    expect(calls[0]?.model).toBe("@cf/example/clef-flash");
+    expect(calls[0]?.options.gateway).toEqual(gatewayOptions("gw"));
+    expect(calls[0]?.options.signal).toBeInstanceOf(AbortSignal);
   });
 
   test("difficulty 3 routes to the standard tier", async () => {

@@ -97,6 +97,7 @@ describe("made job Workflows", () => {
       expect(await runWriteJob(writeDeps(f, ai), fakeSteps().steps, f.input)).toBe(false);
       expect(f.store.read().monthly).toBe(100);
       expect(f.objects.has("results/job_1")).toBe(false);
+      expect(await f.jobRow()).toMatchObject({ state: "failed" });
     });
   }
 });
