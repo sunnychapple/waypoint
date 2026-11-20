@@ -1,20 +1,26 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppState } from "react-native";
 import { useAuth } from "@clerk/expo";
 import { randomUUID } from "expo-crypto";
 import * as Device from "expo-device";
 import { router } from "expo-router";
 import { ApiCallError, NetworkError, type DeviceSigner } from "@waypoint/api-client";
+import type { DeviceView } from "@waypoint/contracts";
+import { accountStep, knownDevicesKey, newDeviceStep, pairingApproverKey, parseApprover, parseKnown, updateKnown } from "../core/device/devices.ts";
 import { deviceName, planRegistration, statusKey, userIdKey, type DeviceStatus } from "../core/device/registration.ts";
-import { getSetting, setSetting } from "../core/db/settings.ts";
+import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import {
+  adoptAccountKey,
   deleteAccountKey,
   deleteDeviceKeys,
   ensureAccountKey,
   ensureDeviceKeys,
+  getAccountKey,
   getDeviceKeys,
+  revealPairing,
   signRequest,
   startPairing,
+  verifyCertificate,
 } from "../../modules/waypoint-keys/index.ts";
 import { api, setDeviceSigner } from "./api.ts";
 import { isUpdateRequired } from "./config.ts";
@@ -23,7 +29,7 @@ import { getDb, writeDb } from "./db.ts";
 let status: DeviceStatus = "checking";
 let userId: string | null = null;
 let clerkId: string | null = null;
-let running: Promise<void> | null = null;
+let running: { clerkId: string; promise: Promise<void> } | null = null;
 const listeners = new Set<() => void>();
 
 function setStatus(next: DeviceStatus): void {
@@ -38,6 +44,10 @@ function signerFor(user: string, deviceId: string): DeviceSigner {
   };
 }
 
+// True when this approved iPhone could not open its account key (M27b-C): Settings › Devices says so.
+let accountKeyProblem = false;
+export const hasAccountKeyProblem = (): boolean => accountKeyProblem;
+
 function approve(user: string, deviceId: string): void {
   setDeviceSigner(signerFor(user, deviceId));
   writeDb((db) => setSetting(db, statusKey(user), "approved"));
@@ -50,26 +60,63 @@ function wait(user: string): void {
   setStatus("waiting");
 }
 
+// Takes a replaced account key, and grows the list of devices this iPhone vouches for (docs/security.md section 6).
+async function syncAccountKey(user: string, devices: DeviceView[], myId: string): Promise<void> {
+  const db = getDb();
+  const keys = getDeviceKeys(user);
+  const known = parseKnown(getSetting(db, knownDevicesKey(user)));
+  const step = accountStep(devices, myId, getAccountKey(user)?.accountId ?? null);
+  accountKeyProblem = step.kind === "missing";
+  if (step.kind === "adopt") {
+    const approver = parseApprover(getSetting(db, pairingApproverKey(user)));
+    const trusted = { ...known };
+    if (approver !== null) trusted[approver.id] = approver.signPub;
+    if (keys !== null) trusted[keys.deviceId] = keys.signPub; // a removal this iPhone made, whose reply was lost
+    try {
+      await adoptAccountKey(user, step.account, step.envelope, trusted);
+      writeDb((d) => deleteSetting(d, pairingApproverKey(user)));
+    } catch {
+      accountKeyProblem = true;
+    }
+  }
+  const held = getAccountKey(user);
+  if (held === null) return;
+  const next = updateKnown(known, devices, held.signPub, (c) => verifyCertificate({ ...c, userId: user }));
+  writeDb((d) => setSetting(d, knownDevicesKey(user), JSON.stringify(next)));
+}
+
 // One pass of M27a's flow. Safe to run again at any time; every step can be repeated.
 async function register(clerkUserId: string, firstTry = true): Promise<void> {
   const list = await api.devices();
+  if (clerkId !== clerkUserId) return; // signed out or switched person while the reply was on its way
   userId = list.user_id;
   const user = list.user_id;
   writeDb((db) => setSetting(db, userIdKey(clerkUserId), user));
   const plan = planRegistration(list.devices, getDeviceKeys(user));
-  if (plan.kind === "approved") return approve(user, plan.deviceId);
-  if (plan.kind === "waiting") return wait(user);
+  if (plan.kind === "approved") {
+    if (clerkId !== clerkUserId) return;
+    approve(user, plan.deviceId);
+    await syncAccountKey(user, list.devices, plan.deviceId);
+    return;
+  }
+  if (plan.kind === "waiting") {
+    if (clerkId !== clerkUserId) return;
+    return wait(user);
+  }
   if (plan.kind === "start_over") await deleteDeviceKeys(user);
+  if (clerkId !== clerkUserId) return;
   const keys = await ensureDeviceKeys(user, randomUUID());
   const registerSigner = signerFor(user, keys.deviceId);
   const base = { id: keys.deviceId, name: deviceName(Device.modelName), platform: "ios" as const, sign_pub: keys.signPub, box_pub: keys.boxPub };
   if (plan.kind === "register_first") {
     const account = await ensureAccountKey(user, randomUUID());
+    if (clerkId !== clerkUserId) return;
     try {
       await api.registerDevice(
         { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert } },
         registerSigner,
       );
+      if (clerkId !== clerkUserId) return;
       return approve(user, keys.deviceId);
     } catch (error) {
       // Another device became the first one meanwhile: drop our account key and register as waiting.
@@ -79,16 +126,19 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
     }
   }
   const commitment = await startPairing(user);
+  if (clerkId !== clerkUserId) return;
   await api.registerDevice({ ...base, commitment }, registerSigner);
+  if (clerkId !== clerkUserId) return;
   wait(user);
 }
 
 // Runs the flow unless it is already running. A failure leaves an approved or waiting status in place; while
 // still checking it shows offline (no reply) or failed (any other error), so the screen never stays on "Setting up".
 function refreshDevice(clerkUserId: string): Promise<void> {
-  if (running !== null) return running;
-  running = register(clerkUserId)
+  if (running !== null && running.clerkId === clerkUserId) return running.promise;
+  const promise: Promise<void> = register(clerkUserId)
     .catch((error: unknown) => {
+      if (clerkId !== clerkUserId) return; // signed out or switched person meanwhile: show nothing
       // A settled iPhone keeps its status; any other failure replaces the last one shown.
       if (status === "approved" || status === "waiting") return;
       if (error instanceof ApiCallError && error.status === 429) setStatus("too_many_waiting");
@@ -96,9 +146,10 @@ function refreshDevice(clerkUserId: string): Promise<void> {
       else setStatus("failed");
     })
     .finally(() => {
-      running = null;
+      if (running?.promise === promise) running = null;
     });
-  return running;
+  running = { clerkId: clerkUserId, promise };
+  return promise;
 }
 
 // Checks again now, for the signed-in person (the waiting screen's "Check again", the "approved" push in M20).
@@ -123,6 +174,7 @@ function restore(clerkUserId: string): void {
 export function useDeviceRegistration(): void {
   const { isSignedIn, userId: clerkUserId } = useAuth();
   useEffect(() => {
+    accountKeyProblem = false; // a sign-out or a switch to another person: nothing carries over
     if (isSignedIn !== true || clerkUserId === null || clerkUserId === undefined) {
       setDeviceSigner(null);
       userId = null;
@@ -167,4 +219,58 @@ export function requireApprovedDevice(): boolean {
   if (status === "approved") return true;
   router.push("/device-waiting");
   return false;
+}
+
+export type PairingState = { kind: "none" } | { kind: "wait_approver" } | { kind: "code"; code: string } | { kind: "expired" };
+
+// While the waiting screen is open: polls the pairing every 3 s, reveals once the approver's nonce is in, and shows
+// the code (docs/security.md section 8).
+export function usePairing(): PairingState {
+  const current = useDeviceStatus();
+  // The id of the device being approved: a new one after "Start again" restarts the polling.
+  const deviceId = current === "waiting" && userId !== null ? (getDeviceKeys(userId)?.deviceId ?? null) : null;
+  const [state, setState] = useState<PairingState>({ kind: "none" });
+  useEffect(() => {
+    setState({ kind: "none" });
+    const user = userId;
+    const keys = user === null ? null : getDeviceKeys(user);
+    if (current !== "waiting" || user === null || keys === null) return;
+    let stopped = false;
+    const tick = async (): Promise<void> => {
+      try {
+        const view = await api.pairing(keys.deviceId);
+        const step = newDeviceStep(view, Date.now() + api.clockOffset());
+        if (stopped) return;
+        if (step.kind === "expired" || step.kind === "wait_approver") return setState({ kind: step.kind });
+        const approver = view.approver;
+        if (approver === null || view.approver_nonce === null) return;
+        writeDb((db) => setSetting(db, pairingApproverKey(user), JSON.stringify({ id: approver.id, signPub: approver.sign_pub })));
+        const revealed = await revealPairing(user, approver.sign_pub, view.approver_nonce);
+        if (step.kind === "reveal") await api.revealPairing(keys.deviceId, revealed.nonce, signerFor(user, keys.deviceId));
+        if (!stopped) setState({ kind: "code", code: revealed.code });
+      } catch (error) {
+        // The pairing is gone (approved, or ended by a wrong reveal): check; still waiting means start again.
+        if (error instanceof ApiCallError && (error.status === 404 || error.status === 409)) {
+          await refreshDeviceNow();
+          if (!stopped && status === "waiting") setState({ kind: "expired" });
+        }
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 3_000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [current, deviceId]);
+  return state;
+}
+
+// An expired or failed pairing: forget this iPhone's keys and register again with a new id and commitment.
+export async function startPairingAgain(): Promise<void> {
+  const user = userId;
+  if (user === null) return;
+  await deleteDeviceKeys(user);
+  writeDb((db) => deleteSetting(db, pairingApproverKey(user)));
+  await refreshDeviceNow();
 }
