@@ -16,13 +16,20 @@ struct PageLine: Equatable {
     return PageLine(text: trimmed, x: r(x), y: r(1 - y - height), width: r(width), height: r(height))
   }
 
-  /// Reading order: top to bottom; lines whose tops are within half a line height count as one row, left to right.
+  /// Reading order: top to bottom, then into rows. A line joins the current row when its top is within half a
+  /// line height of the row's first line; each row is read left to right. Sorting first makes the result the same
+  /// for any input order (a pairwise "same row" test is not transitive on a slanted page).
   static func readingOrder(_ lines: [PageLine]) -> [PageLine] {
-    lines.sorted { a, b in
-      let tolerance = min(a.height, b.height) / 2
-      if abs(a.y - b.y) <= tolerance { return a.x < b.x }
-      return a.y < b.y
+    let byTop = lines.sorted { ($0.y, $0.x, $0.text) < ($1.y, $1.x, $1.text) }
+    var rows: [[PageLine]] = []
+    for line in byTop {
+      if let first = rows.last?.first, line.y - first.y <= min(first.height, line.height) / 2 {
+        rows[rows.count - 1].append(line)
+      } else {
+        rows.append([line])
+      }
     }
+    return rows.flatMap { row in row.sorted { ($0.x, $0.y, $0.text) < ($1.x, $1.y, $1.text) } }
   }
 
   var dictionary: [String: Any] { ["text": text, "x": x, "y": y, "width": width, "height": height] }

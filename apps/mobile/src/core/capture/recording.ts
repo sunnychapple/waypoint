@@ -73,7 +73,8 @@ export function finishRecording(db: SqlDb, sessionId: string, endedAt: number, r
 }
 
 // After a restart: sessions still marked recording or paused, except the one native is still recording,
-// become interrupted and wait for transcription. Returns their ids.
+// become interrupted and wait for transcription. Their length is what the saved audio parts add up to, and they
+// end where the last saved part ends. Returns their ids.
 export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }): string[] {
   const nativeActive = nativeStatus.state !== "idle";
   const ids = db
@@ -84,7 +85,10 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
     for (const id of ids) {
       db.run(
         `UPDATE sessions SET state = 'interrupted',
-           transcript = CASE WHEN transcript = 'done' THEN 'done' ELSE 'waiting' END
+           transcript = CASE WHEN transcript = 'done' THEN 'done' ELSE 'waiting' END,
+           recorded_ms = (SELECT COALESCE(SUM(duration_ms), 0) FROM captures WHERE session_id = sessions.id AND kind = 'audio'),
+           ended_at = COALESCE(ended_at, started_at + (
+             SELECT COALESCE(MAX(t + COALESCE(duration_ms, 0)), 0) FROM captures WHERE session_id = sessions.id AND kind = 'audio'))
          WHERE id = ?`,
         [id],
       );
