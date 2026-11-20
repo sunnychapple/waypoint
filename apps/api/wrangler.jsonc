@@ -42,7 +42,8 @@
     ]
   },
   "workflows": [
-    { "name": "waypoint-write", "binding": "WRITE_WORKFLOW", "class_name": "WriteWorkflow" }
+    { "name": "waypoint-write", "binding": "WRITE_WORKFLOW", "class_name": "WriteWorkflow" },
+    { "name": "waypoint-retranscribe", "binding": "RETRANSCRIBE_WORKFLOW", "class_name": "RetranscribeWorkflow" }
   ],
   "durable_objects": {
     "bindings": [
