@@ -52,6 +52,12 @@ export function memberRoutes(deps: { now: () => number }) {
     }
     try {
       await db.batch(endMembershipStatements(db, groupId, targetId, now));
+    // Close the member's open sockets. The membership has already ended, so a failure here changes nothing.
+    try {
+      await c.env.GROUP_ROOM.get(c.env.GROUP_ROOM.idFromName(groupId)).disconnect(targetId);
+    } catch {
+      // ignored
+    }
     } catch (err) {
       // The trigger memberships_keep_an_owner refuses ending the last owner when two owners leave at once.
       if (err instanceof Error && err.message.includes("last owner")) throw new ApiFailure("conflict", "a group needs an owner");
