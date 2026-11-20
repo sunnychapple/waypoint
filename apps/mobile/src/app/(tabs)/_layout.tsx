@@ -6,6 +6,7 @@ import { useDeviceRegistration } from "../../platform/device.ts";
 import { useIndexer } from "../../platform/indexer.ts";
 import { usePageReader } from "../../platform/pageReading.ts";
 import { useStoreSync } from "../../platform/store.ts";
+import { usePush } from "../../platform/push.ts";
 import { useTranscriptionQueue } from "../../platform/transcription.ts";
 import { useColors } from "../../ui/theme.ts";
 
@@ -20,6 +21,7 @@ export default function TabsLayout() {
   useDeviceRegistration();
   useStoreSync();
   usePageReader();
+  usePush();
   useTranscriptionQueue();
   return (
     <Tabs

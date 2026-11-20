@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import type { DeviceStatus } from "../core/device/registration.ts";
 import { refreshDeviceNow, useDeviceStatus } from "../platform/device.ts";
+import { askForPush } from "../platform/push.ts";
 import { Body, Caption, OnDeviceNote, PrimaryButton, Screen, SecondaryButton, Title } from "../ui/kit.tsx";
 import { useColors } from "../ui/theme.ts";
 
@@ -12,6 +13,7 @@ export default function DeviceWaitingScreen() {
   const colors = useColors();
   const status = useDeviceStatus();
   const [checking, setChecking] = useState(false);
+  const [notify, setNotify] = useState<"ask" | "on" | "off">("ask");
 
   async function checkAgain(): Promise<void> {
     setChecking(true);
@@ -35,6 +37,11 @@ export default function DeviceWaitingScreen() {
         ) : (
           <PrimaryButton label={checking ? "Checking…" : "Check again"} onPress={() => void checkAgain()} />
         )}
+        {status === "waiting" && notify === "ask" ? (
+          <SecondaryButton label="Notify me when it's approved" icon="bell" onPress={() => void askForPush().then((ok) => setNotify(ok ? "on" : "off"))} />
+        ) : null}
+        {status === "waiting" && notify === "on" ? <Caption>We'll let you know.</Caption> : null}
+        {status === "waiting" && notify === "off" ? <Caption>Notifications are off. Turn them on in Settings to hear when it's approved.</Caption> : null}
         {status === "approved" ? null : <SecondaryButton label="Close" onPress={() => router.back()} />}
       </View>
     </Screen>
