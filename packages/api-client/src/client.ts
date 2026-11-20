@@ -385,8 +385,12 @@ export function createApiClient(options: ApiClientOptions) {
         { method: "PUT", target: `/v1/jobs/${encodeURIComponent(id)}/audio/${n}`, raw: { bytes: audio, contentType: AUDIO_CHUNK_CONTENT_TYPE }, retry: true },
         AudioChunkResponseSchema,
       ),
-    audioDone: (id: string, chunks: number): Promise<AudioDoneResponse> =>
-      json({ method: "POST", target: `/v1/jobs/${encodeURIComponent(id)}/audio/done`, body: { chunks }, retry: true }, AudioDoneResponseSchema),
+    // key: pass the same one on a repeat, so a "done" the server already took is replayed, not refused (409).
+    audioDone: (id: string, chunks: number, key?: string): Promise<AudioDoneResponse> =>
+      json(
+        { method: "POST", target: `/v1/jobs/${encodeURIComponent(id)}/audio/done`, body: { chunks }, ...(key === undefined ? {} : { key }), retry: true },
+        AudioDoneResponseSchema,
+      ),
     // Groups and keys (PR 27, S2; M28).
     createGroup: (request: CreateGroupRequest): Promise<GroupView> =>
       json({ method: "POST", target: "/v1/groups", body: request, signing: "device", retry: true }, GroupViewSchema),

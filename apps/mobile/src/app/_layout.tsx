@@ -22,9 +22,13 @@ function RootStack() {
         <Stack.Screen name="plans" />
         <Stack.Screen name="jobs" />
         <Stack.Screen name="job/[id]" />
+        <Stack.Screen name="research/new" />
+        <Stack.Screen name="research/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="recovery-key" />
+        <Stack.Screen name="devices" />
+        <Stack.Screen name="devices/approve" />
         <Stack.Screen name="recovery-words" options={{ presentation: "modal", gestureEnabled: false }} />
         <Stack.Screen name="recover" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />
@@ -40,6 +44,7 @@ function RootStack() {
           name="explain"
           options={{ presentation: "formSheet", sheetAllowedDetents: [0.4, 0.75, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true }}
         />
+        <Stack.Screen name="second-transcript" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="study/make" />
         <Stack.Screen name="study/review" />
         <Stack.Screen name="study/quiz" />
