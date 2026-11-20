@@ -4,35 +4,38 @@ import type { BatchDb, Db } from "../storage.ts";
 import { checkEnvelope, isUniqueViolation } from "./envelopes.ts";
 
 // The devices that must hold a group's current key: approved, not removed devices and the active account key
-// row of every current member (docs/security.md, "Group keys").
+// row of every current member (docs/security.md, "Group keys"). A membership whose end date has passed no longer
+// counts, even before the hourly cron ends it. Binds: group id, now.
 export const TARGETS_SQL = `
   SELECT d.id, d.user_id, d.kind, d.sign_pub, d.box_pub, d.cert, m.role
   FROM memberships m
   JOIN devices d ON d.user_id = m.user_id
-  WHERE m.group_id = ? AND m.left_at IS NULL AND d.removed_at IS NULL AND d.approved_at IS NOT NULL
+  WHERE m.group_id = ? AND m.left_at IS NULL AND (m.ends_at IS NULL OR m.ends_at > ?) AND d.removed_at IS NULL AND d.approved_at IS NOT NULL
   ORDER BY d.user_id, d.kind, d.id`;
 
 export type TargetRow = { id: string; user_id: string; kind: "device" | "account"; sign_pub: string; box_pub: string; cert: string | null; role: string };
 
-export async function currentMember(db: Db, groupId: string, userId: string): Promise<{ key_version: number; role: string } | null> {
+export async function currentMember(db: Db, groupId: string, userId: string, now: number): Promise<{ key_version: number; role: string } | null> {
   return db
-    .prepare("SELECT g.key_version, m.role FROM groups g JOIN memberships m ON m.group_id = g.id WHERE g.id = ? AND m.user_id = ? AND m.left_at IS NULL")
-    .bind(groupId, userId)
+    .prepare(
+      "SELECT g.key_version, m.role FROM groups g JOIN memberships m ON m.group_id = g.id WHERE g.id = ? AND m.user_id = ? AND m.left_at IS NULL AND (m.ends_at IS NULL OR m.ends_at > ?)",
+    )
+    .bind(groupId, userId, now)
     .first<{ key_version: number; role: string }>();
 }
 
 export async function storeGroupKeys(
   db: BatchDb,
-  input: { groupId: string; userId: string; signerId: string; keyVersion: number; envelopes: { device_id: string; wrapped_key: string }[] },
+  input: { groupId: string; userId: string; signerId: string; keyVersion: number; envelopes: { device_id: string; wrapped_key: string }[]; now: number },
 ): Promise<{ first: boolean }> {
-  const group = await currentMember(db, input.groupId, input.userId);
+  const group = await currentMember(db, input.groupId, input.userId, input.now);
   if (group === null) throw new ApiFailure("not_found", "no such group");
   if (input.keyVersion > group.key_version) throw new ApiFailure("conflict", "unknown key version");
   const ids = input.envelopes.map((e) => e.device_id);
   if (new Set(ids).size !== ids.length) throw new ApiFailure("bad_request", "invalid request");
   for (const envelope of input.envelopes) checkEnvelope(envelope.wrapped_key, PURPOSE_GROUP_KEY, input.signerId);
 
-  const targets = (await db.prepare(TARGETS_SQL).bind(input.groupId).all<TargetRow>()).results;
+  const targets = (await db.prepare(TARGETS_SQL).bind(input.groupId, input.now).all<TargetRow>()).results;
   const targetIds = new Set(targets.map((t) => t.id));
   if (ids.some((id) => !targetIds.has(id))) throw new ApiFailure("conflict", "not a device of a current member");
 

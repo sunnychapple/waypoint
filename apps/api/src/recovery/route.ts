@@ -32,12 +32,17 @@ export function recoveryRoute(deps: { now: () => number }) {
         .first<{ id: string }>();
       if (account === null || account.id !== req.account_device_id) throw new ApiFailure("conflict", "not the current account key");
       const verifiedAt = req.verified ? deps.now() : null;
-      await db
+      // Stored only if that account row is still the active one when the write runs. A device removal that replaced
+      // the account key in between deleted the old blob; this one would wrap a key nobody holds any more.
+      const stored = await db
         .prepare(
-          "INSERT INTO recovery (user_id, wrapped_account_key, verified_at) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET wrapped_account_key = excluded.wrapped_account_key, verified_at = excluded.verified_at",
+          `INSERT INTO recovery (user_id, wrapped_account_key, verified_at)
+           SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM devices WHERE id = ? AND user_id = ? AND kind = 'account' AND removed_at IS NULL)
+           ON CONFLICT (user_id) DO UPDATE SET wrapped_account_key = excluded.wrapped_account_key, verified_at = excluded.verified_at`,
         )
-        .bind(user.id, req.wrapped_account_key, verifiedAt)
+        .bind(user.id, req.wrapped_account_key, verifiedAt, account.id, user.id)
         .run();
+      if (stored.meta.changes !== 1) throw new ApiFailure("conflict", "not the current account key");
       return c.json({ account_device_id: account.id, verified_at: verifiedAt });
     })
     .get("/v1/recovery", async (c) => {

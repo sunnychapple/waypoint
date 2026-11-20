@@ -12,9 +12,10 @@ export function groupKeyRoutes(deps: { now: () => number }) {
     .get("/v1/groups/:id/devices", async (c) => {
       const db = c.env.DB;
       const groupId = c.req.param("id");
-      const group = await currentMember(db, groupId, c.get("user").id);
+      const now = deps.now();
+      const group = await currentMember(db, groupId, c.get("user").id, now);
       if (group === null) throw new ApiFailure("not_found", "no such group");
-      const targets = (await db.prepare(TARGETS_SQL).bind(groupId).all<TargetRow>()).results;
+      const targets = (await db.prepare(TARGETS_SQL).bind(groupId, now).all<TargetRow>()).results;
       const holders = (
         await db.prepare("SELECT device_id FROM key_envelopes WHERE group_id = ? AND key_version = ?").bind(groupId, group.key_version).all<{ device_id: string }>()
       ).results;
@@ -31,7 +32,7 @@ export function groupKeyRoutes(deps: { now: () => number }) {
       const user = c.get("user");
       const groupId = c.req.param("id");
       const deviceId = c.req.query("device") ?? "";
-      const group = await currentMember(db, groupId, user.id);
+      const group = await currentMember(db, groupId, user.id, deps.now());
       if (group === null) throw new ApiFailure("not_found", "no such group");
       const device = await db
         .prepare("SELECT id FROM devices WHERE id = ? AND user_id = ? AND removed_at IS NULL AND approved_at IS NOT NULL")
@@ -67,6 +68,7 @@ export function groupKeyRoutes(deps: { now: () => number }) {
         signerId: c.get("device").id,
         keyVersion: parsed.data.key_version,
         envelopes: parsed.data.envelopes,
+        now: deps.now(),
       });
       return c.json({ key_version: parsed.data.key_version, first }, 201);
     });

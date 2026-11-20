@@ -238,6 +238,19 @@ describe("S2 group keys", () => {
     expect(await res.json()).toEqual({ key_version: 3, first: true });
   });
 
+  test("a member whose end date has passed (before the hourly cron ends it) is not a target and cannot read or post keys", async () => {
+    const w = await world();
+    await w.db.prepare("UPDATE memberships SET ends_at = ? WHERE group_id = 'g1' AND user_id = 'u2'").bind(NOW).run();
+    const devices = await (await appFor(userOf("u1")).request(DEVICES_PATH, {}, { DB: w.db })).json();
+    expect((devices as { devices: { id: string }[] }).devices.map((x) => x.id).sort()).toEqual(["acct_u1", "dev_u1"]);
+    const res = await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2, ["acct_u1", "dev_u1"]) });
+    expect(res.status).toBe(201);
+    expect((await appFor(userOf("u2")).request(DEVICES_PATH, {}, { DB: w.db })).status).toBe(404);
+    expect((await appFor(userOf("u2")).request(`${PATH}?device=dev_u2`, {}, { DB: w.db })).status).toBe(404);
+    const late = { key_version: 2, envelopes: [await envelope(w.d.dev_u2!, w.d.acct_u2!, 2)] };
+    expect((await post(w, "u2", w.d.dev_u2!, late)).status).toBe(404);
+  });
+
   test("after a first set, an editor's add for another member's new device → 409 and no row; the owner's add for another member's device → 201", async () => {
     const w = await world();
     expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2) })).status).toBe(201);
