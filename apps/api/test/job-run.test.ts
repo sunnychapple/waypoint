@@ -108,6 +108,14 @@ describe("job run steps", () => {
     expect((await f.jobRow())?.state).toBe("cancelled");
   });
 
+  test("finishJob with a failed made result clears a result_key the row already had", async () => {
+    const f = await makeJobFixture("overview_script");
+    await setState(f.db, "running");
+    await f.db.prepare("UPDATE jobs SET result_key = 'results/job_1' WHERE id = 'job_1'").run();
+    await finishJob(f.deps, f.input, { ok: false, reason: "model_failed", tokens_in: null, tokens_out: null });
+    expect((await f.jobRow())?.result_key).toBeNull();
+  });
+
   test("finishJob with a failure releases the hold and records the job as failed", async () => {
     const f = await makeJobFixture("overview_script");
     const finished = await finishJob(f.deps, f.input, { ok: false, reason: "model_failed", tokens_in: null, tokens_out: null });
@@ -187,6 +195,17 @@ describe("job run steps", () => {
     expect(recorded).not.toContain(RESULT_TEXT);
   });
 
+  test("runJob sends the bytes_sent of the made result in the usage event, not the input's", async () => {
+    const f = await makeJobFixture("overview_script");
+    const ok = await runJob(f.deps, fakeSteps().steps, f.input, {
+      config: BOOKKEEPING_STEP,
+      run: async () => ({ ...madeOk(40), bytes_sent: 99 }),
+    });
+    expect(ok).toBe(true);
+    expect(f.usage).toHaveLength(1);
+    expect(f.usage[0]).toMatchObject({ outcome: "ok", bytes_sent: 99 });
+  });
+
   test("runJob when the make step throws on every try releases the hold, fails the job, still deletes the input and returns false", async () => {
     const f = await makeJobFixture("overview_script");
     let ran = false;
@@ -242,6 +261,7 @@ describe("job run steps", () => {
     expect(ran).toBe(false);
     expect(f.store.read().monthly).toBe(before);
     expect(f.usage).toEqual([]);
+    expect(f.objects.has("tmp/input/job_1")).toBe(false);
   });
 
   test("runJob passes the given make config to the make step and BOOKKEEPING_STEP to the other four", async () => {

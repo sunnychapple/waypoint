@@ -39,12 +39,12 @@ async function fixture(): Promise<{ db: Db; account: TestDevice; phone: TestDevi
 }
 
 // A blob the way the iPhone makes it: 12 words' worth of entropy, wrapped for user u1 and account row acct_1.
-async function makeBlob(accountId: string): Promise<string> {
+async function makeBlob(accountId: string, userId = "u1"): Promise<string> {
   const entropy = crypto.getRandomValues(new Uint8Array(16));
-  const wrapKey = await recoveryWrapKey(entropy, "u1");
+  const wrapKey = await recoveryWrapKey(entropy, userId);
   const blob = await wrapAccountKey({
     wrapKey,
-    userId: "u1",
+    userId,
     accountDeviceId: accountId,
     accountKey: crypto.getRandomValues(new Uint8Array(64)),
     nonce: crypto.getRandomValues(new Uint8Array(12)),
@@ -205,5 +205,72 @@ describe("PUT and GET /v1/recovery", () => {
     expect(stored?.wrapped_account_key).toBe(blob);
     const get = await appFor(userOf("u1")).request("/v1/recovery", {}, { DB: db });
     expect(((await get.json()) as { wrapped_account_key: string }).wrapped_account_key).toBe(blob);
+  });
+
+  test("u1 reads only u1's recovery row and account keys, and cannot point a PUT at u0's account row", async () => {
+    const db = createTestDb();
+    // u0 is set up first: u0 sorts before u1, and the partial index on devices(user_id) and the recovery primary key both walk in user_id order, so a query that ignores user_id finds u0 first.
+    for (const id of ["u0", "u1"]) {
+      await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES (?, ?, ?, ?)").bind(id, `clerk_${id}`, NOW, `ba_${id}`).run();
+    }
+    const account2 = await makeTestDevice("acct_2");
+    await insertDevice(db, account2, { userId: "u0", kind: "account" });
+    await db
+      .prepare("INSERT INTO recovery (user_id, wrapped_account_key, verified_at) VALUES ('u0', ?, ?)")
+      .bind(await makeBlob("acct_2", "u0"), NOW)
+      .run();
+    const account = await makeTestDevice("acct_1");
+    const phone = await makeTestDevice("dev_1");
+    await insertDevice(db, account, { userId: "u1", kind: "account" });
+    await insertDevice(db, phone, { userId: "u1" });
+    const blob = await makeBlob("acct_1");
+    const put = await appFor(userOf("u1")).request(
+      "/v1/recovery",
+      await putRequest(phone, { account_device_id: "acct_1", wrapped_account_key: blob, verified: true }),
+      { DB: db },
+    );
+    expect(put.status).toBe(200);
+
+    const get = await appFor(userOf("u1")).request("/v1/recovery", {}, { DB: db });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual({
+      account_device_id: "acct_1",
+      sign_pub: account.signPub,
+      box_pub: account.boxPub,
+      wrapped_account_key: blob,
+      verified_at: NOW,
+    });
+
+    const steal = await appFor(userOf("u1")).request(
+      "/v1/recovery",
+      await putRequest(phone, { account_device_id: "acct_2", wrapped_account_key: await makeBlob("acct_2", "u0"), verified: false }),
+      { DB: db },
+    );
+    expect(steal.status).toBe(409);
+    const after = (await (await appFor(userOf("u1")).request("/v1/recovery", {}, { DB: db })).json()) as { wrapped_account_key: string };
+    expect(after.wrapped_account_key).toBe(blob);
+  });
+
+  test("GET returns the active account row's id and keys when a removed account row has a lower id", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', ?, 'ba_u1')").bind(NOW).run();
+    // The removed row is inserted first and has the lower id.
+    await insertDevice(db, await makeTestDevice("acct_0"), { userId: "u1", kind: "account", removedAt: NOW - 1 });
+    const account = await makeTestDevice("acct_1");
+    await insertDevice(db, account, { userId: "u1", kind: "account" });
+    const blob = await makeBlob("acct_1");
+    await db
+      .prepare("INSERT INTO recovery (user_id, wrapped_account_key, verified_at) VALUES ('u1', ?, ?)")
+      .bind(blob, NOW)
+      .run();
+    const get = await appFor(userOf("u1")).request("/v1/recovery", {}, { DB: db });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual({
+      account_device_id: "acct_1",
+      sign_pub: account.signPub,
+      box_pub: account.boxPub,
+      wrapped_account_key: blob,
+      verified_at: NOW,
+    });
   });
 });

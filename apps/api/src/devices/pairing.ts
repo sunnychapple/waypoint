@@ -172,17 +172,25 @@ export function pairingRoutes(deps: { now: () => number }) {
             "UPDATE devices SET approved_at = ?, approved_by = ?, can_approve = 1, cert = ?, account_envelope = ? WHERE id = ? AND approved_at IS NULL AND removed_at IS NULL",
           )
           .bind(now, signer.id, req.cert, req.account_envelope, target.id),
+        // Only if the update above was this request's: another approval, or a removal, that landed first leaves no
+        // envelopes behind.
         ...req.envelopes.map((e) =>
-          db.prepare("INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES (?, ?, ?, ?)").bind(e.group_id, e.key_version, target.id, e.wrapped_key),
+          db
+            .prepare(
+              "INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM devices WHERE id = ? AND approved_by = ? AND account_envelope = ? AND removed_at IS NULL)",
+            )
+            .bind(e.group_id, e.key_version, target.id, e.wrapped_key, target.id, signer.id, req.account_envelope),
         ),
         db.prepare("DELETE FROM device_pairings WHERE device_id = ?").bind(target.id),
       ];
+      let results: { meta: { changes: number } }[];
       try {
-        await db.batch(statements);
+        results = await db.batch(statements);
       } catch (error) {
         if (isUniqueViolation(error)) throw new ApiFailure("conflict", "device already has a key for this version");
         throw error;
       }
+      if (results[0]?.meta.changes !== 1) throw new ApiFailure("conflict", "device already approved");
       // Tell the new device it was approved, so it fetches its keys (S1F).
       await sendPush(c.env.PUSH_QUEUE, { user_id: user.id, kind: "device_approved", ref: target.id, device_id: target.id });
       const device = await db.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE id = ?`).bind(target.id).first<DeviceView>();
