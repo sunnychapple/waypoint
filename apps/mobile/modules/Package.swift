@@ -15,5 +15,7 @@ let package = Package(
     .testTarget(name: "KeysCoreTests", dependencies: ["KeysCore"], path: "waypoint-keys/ios/Tests"),
     .target(name: "VoicesCore", path: "waypoint-voices/ios/Core"),
     .testTarget(name: "VoicesCoreTests", dependencies: ["VoicesCore"], path: "waypoint-voices/ios/Tests"),
+    .target(name: "VideoCore", path: "waypoint-video/ios/Core"),
+    .testTarget(name: "VideoCoreTests", dependencies: ["VideoCore"], path: "waypoint-video/ios/Tests"),
   ]
 )
