@@ -186,6 +186,7 @@ export default function SessionScreen() {
         <SecondaryButton label="Quiz me" icon="checklist" onPress={() => router.push(`/study/quiz?sessionId=${id}`)} />
         <SecondaryButton label="Research the web" icon="globe" onPress={() => router.push(`/research/new?sessionId=${id}`)} />
         <SecondaryButton label="Audio overview" icon="waveform" onPress={() => router.push(`/overview/new?sessionId=${id}`)} />
+        <SecondaryButton label="Video overview" icon="play.rectangle" onPress={() => router.push(`/video/new?sessionId=${id}`)} />
         <SecondaryButton label="Practice set" icon="list.bullet.clipboard" onPress={() => router.push(`/made/new?sessionId=${id}&kind=practice`)} />
         {diagramsOn ? (
           <SecondaryButton label="Diagram" icon="point.3.connected.trianglepath.dotted" onPress={() => router.push(`/made/new?sessionId=${id}&kind=diagram`)} />
