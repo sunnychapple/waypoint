@@ -100,12 +100,15 @@ final class LiveTranscriber: AudioBufferSink {
   /// stop() calls it before it resolves, so the app still listens when the last words arrive.
   func waitForFinals(seconds: Double) async {
     guard let finishing = lock.withLock({ self.finishing }) else { return }
-    await withTaskGroup(of: Void.self) { group in
-      group.addTask { await finishing.value }
-      group.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
-      await group.next()
-      group.cancelAll()
+    // Not a task group: a group waits for every child, and `finishing.value` ignores cancellation, so a run that
+    // never ends would hold stop() for ever. Whichever comes first resumes; the other is ignored.
+    let once = ResumeOnce()
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      once.set(continuation)
+      Task { await finishing.value; once.resume() }
+      Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); once.resume() }
     }
+    lock.withLock { if self.finishing == finishing { self.finishing = nil } }
   }
 
   private func emit(_ sessionId: String, _ runStartMs: Int64, _ text: AttributedString, _ range: CMTimeRange, _ isFinal: Bool) {
@@ -121,5 +124,28 @@ final class LiveTranscriber: AudioBufferSink {
 
   private func speechFailed(_ sessionId: String, _ error: Error) {
     onEvent?("onSpeechError", ["sessionId": sessionId, "message": String(describing: error)])
+  }
+}
+
+/// Resumes a continuation exactly once, from whichever caller gets there first.
+private final class ResumeOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var done = false
+
+  func set(_ continuation: CheckedContinuation<Void, Never>) {
+    lock.withLock {
+      if done { continuation.resume() } else { self.continuation = continuation }
+    }
+  }
+
+  func resume() {
+    let c: CheckedContinuation<Void, Never>? = lock.withLock {
+      if done { return nil }
+      done = true
+      defer { continuation = nil }
+      return continuation
+    }
+    c?.resume()
   }
 }
