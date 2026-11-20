@@ -53,14 +53,17 @@ final class SlideVideoWriter {
 
     guard FileManager.default.fileExists(atPath: audioURL.path) else { throw VideoError.noAudio }
     let asset = AVURLAsset(url: audioURL)
-    let seconds = CMTimeGetSeconds(try await asset.load(.duration))
+    // A file AVFoundation cannot read (corrupt, or not audio) is "no audio" too.
+    let seconds: Double
+    do { seconds = CMTimeGetSeconds(try await asset.load(.duration)) } catch { throw VideoError.noAudio }
     guard seconds.isFinite, seconds > 0 else { throw VideoError.noAudio }
     let totalMs = Int((seconds * 1000).rounded())
-    guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else { throw VideoError.noAudio }
+    guard let audioTrack = (try? await asset.loadTracks(withMediaType: .audio))?.first else { throw VideoError.noAudio }
 
     let spans = SlideTimeline.spans(slideStartsMs: slideStartsMs, totalMs: totalMs)
     guard !spans.isEmpty else { throw VideoError.badInput }
-    var frames = spans.map { Frame(startMs: $0.startMs, slide: slides[$0.index], title: $0.index == 0 ? title : nil) }
+    // The title goes on the first frame drawn, even when slide 0 has no span (its narration starts at the same moment as slide 1's).
+    var frames = spans.enumerated().map { offset, span in Frame(startMs: span.startMs, slide: slides[span.index], title: offset == 0 ? title : nil) }
     // The last slide again at the very end, so it shows until the audio ends.
     if let last = frames.last, totalMs - 1 > last.startMs {
       frames.append(Frame(startMs: totalMs - 1, slide: last.slide, title: last.title))
@@ -70,7 +73,8 @@ final class SlideVideoWriter {
     let partURL = folder.appendingPathComponent("\(outURL.deletingPathExtension().lastPathComponent).partial.mp4")
     do {
       try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-      try await write(frames: frames, audioAsset: asset, audioTrack: audioTrack, to: partURL)
+      try? FileManager.default.removeItem(at: partURL) // a leftover from a killed render would make AVAssetWriter fail
+      try await write(frames: frames, audioAsset: asset, audioTrack: audioTrack, endMs: totalMs, to: partURL)
       if FileManager.default.fileExists(atPath: outURL.path) { try FileManager.default.removeItem(at: outURL) }
       try FileManager.default.moveItem(at: partURL, to: outURL)
     } catch {
@@ -82,7 +86,7 @@ final class SlideVideoWriter {
 
   // Appends the frames and the audio samples, alternately, as each input is ready. Both inputs are fed in one loop so
   // that neither waits on the other.
-  private func write(frames: [Frame], audioAsset: AVURLAsset, audioTrack: AVAssetTrack, to url: URL) async throws {
+  private func write(frames: [Frame], audioAsset: AVURLAsset, audioTrack: AVAssetTrack, endMs: Int, to url: URL) async throws {
     let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
     let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: Self.videoSettings)
     videoInput.expectsMediaDataInRealTime = false
@@ -149,6 +153,8 @@ final class SlideVideoWriter {
       if !progressed { try await Task.sleep(nanoseconds: 5_000_000) }
     }
     guard reader.status == .completed else { writer.cancelWriting(); throw VideoError.writeFailed }
+    // The video ends with the narration, not one frame after the last slide's start.
+    writer.endSession(atSourceTime: CMTime(value: CMTimeValue(endMs), timescale: 1000))
 
     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
       writer.finishWriting { continuation.resume() }
@@ -234,9 +240,11 @@ final class SlideVideoWriter {
     ])
   }
 
+  // The text's height plus the space after it: boundingRect leaves out paragraphSpacing.
   private static func textHeight(_ text: NSAttributedString, width: CGFloat) -> CGFloat {
     let rect = text.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
-    return ceil(rect.height)
+    let spacing = (text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?.paragraphSpacing ?? 0
+    return ceil(rect.height) + spacing
   }
 
   private static func color(_ hex: Int) -> UIColor {
