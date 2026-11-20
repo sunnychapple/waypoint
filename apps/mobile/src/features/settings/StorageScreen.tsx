@@ -44,9 +44,6 @@ export default function StorageScreen() {
       <BackButton />
       <Title>Storage & search</Title>
 
-      <View style={[styles.track, { backgroundColor: colors.surface3 }]}>
-        <View style={[styles.fill, { backgroundColor: colors.accent }]} />
-      </View>
       <Caption>Recordings and pages {bytesLabel(bytes)}</Caption>
 
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
@@ -67,8 +64,6 @@ export default function StorageScreen() {
 
 const styles = StyleSheet.create({
   circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
-  track: { height: 10, borderRadius: 5, overflow: "hidden" },
-  fill: { height: "100%", width: "100%" },
   card: { padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, gap: 6 },
   cardTitle: { fontSize: 17, fontWeight: "600" },
   percent: { fontSize: 34, fontWeight: "700" },

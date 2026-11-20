@@ -66,33 +66,45 @@ export function SecondaryButton({ label, onPress, icon, tone = "surface", style 
   );
 }
 
+// A row that does something when onPress is given (a button to VoiceOver), or shows information when it is not.
+// `selected` marks the chosen row in a list of choices, for VoiceOver.
 export function Row({
   title,
   subtitle,
   leading,
   right,
   onPress,
+  selected = false,
 }: {
   title: string;
   subtitle?: string;
   leading?: ReactNode;
   right?: ReactNode;
-  onPress: () => void;
+  onPress?: (() => void) | undefined;
+  selected?: boolean;
 }) {
   const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
-      onPress={onPress}
-      style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
+  const style = [styles.row, { backgroundColor: colors.surface, borderColor: colors.line }];
+  const content = (
+    <>
       {leading}
       <View style={styles.rowText}>
         <Text style={[styles.rowTitle, { color: colors.ink }]}>{title}</Text>
         {subtitle ? <Text style={[styles.rowSubtitle, { color: colors.ink3 }]}>{subtitle}</Text> : null}
       </View>
       {right}
+    </>
+  );
+  if (onPress === undefined) return <View style={style}>{content}</View>;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={style}
+    >
+      {content}
     </Pressable>
   );
 }
