@@ -38,6 +38,11 @@ describe("chunks", () => {
     expect(chunks.every((c) => c.source === "page" && c.captureId === "cap-1" && c.tStart === 4000 && c.tEnd === 4000)).toBe(true);
   });
 
+  it("two paragraphs that add up to exactly 120 words stay in one chunk", () => {
+    const chunks = chunkCapture({ id: "cap-3", kind: "page", t: 0, text: `${words(60)}\n\n${words(60)}` });
+    expect(chunks.map((c) => count(c.text))).toEqual([120]);
+  });
+
   it("empty text gives no chunks", () => {
     expect(chunkCapture({ id: "cap-2", kind: "photo", t: 0, text: "  \n\n " })).toEqual([]);
     expect(chunkTranscript([])).toEqual([]);
