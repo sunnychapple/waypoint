@@ -2,6 +2,7 @@ import type { ColorValue } from "react-native";
 import { Tabs, router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useConfigRefresh } from "../../platform/config.ts";
+import { useDeviceRegistration } from "../../platform/device.ts";
 import { useIndexer } from "../../platform/indexer.ts";
 import { usePageReader } from "../../platform/pageReading.ts";
 import { useTranscriptionQueue } from "../../platform/transcription.ts";
@@ -15,6 +16,7 @@ export default function TabsLayout() {
   const colors = useColors();
   useIndexer();
   useConfigRefresh();
+  useDeviceRegistration();
   usePageReader();
   useTranscriptionQueue();
   return (

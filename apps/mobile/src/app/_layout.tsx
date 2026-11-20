@@ -14,6 +14,7 @@ function RootStack() {
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
+        <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />
         <Stack.Screen name="settings-storage" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
