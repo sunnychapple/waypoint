@@ -4,7 +4,7 @@ Status: proposed, 19 Nov 2026. Written for an outside security review. **It must
 
 Decided by the product owner (19 Nov 2026): only well-known algorithms and the platform's own crypto (Apple CryptoKit on iOS, WebCrypto on Cloudflare Workers); no home-made primitives. Implementation cards: `docs/cards/security.md`. Spec context: `docs/architecture.md` (zones, flows 2, 3, 4, 7, section 5).
 
-Users are K-12 students studying at home, sometimes helped by a parent. There is one app, on iPhone and iPad. There is no web sign-in except the read-only shared-link viewer.
+Users are K-12 students studying at home, sometimes helped by a parent. There is one app, built for iPhone (`supportsTablet` is false, so an iPad runs it as an iPhone app, and shared family iPads are expected, R14). There is no web sign-in except the read-only shared-link viewer.
 
 ## 1. Summary
 
@@ -155,11 +155,11 @@ both screens show the code; the person taps "They match" on A
 GET /v1/devices, GET .../keys  -->   N verifies A's signature on every envelope, then syncs
 ```
 
-Why the server cannot fake it **[R4]**: N commits to its nonce before it sees A's nonce, and A picks its nonce before it sees N's. A server sitting in the middle must fix the key and commitment it shows A before it learns `nA`, and N's `nN` is unknown to it until N has committed; so on each side the code is decided by a value the server cannot choose, and it matches the other screen with probability 10⁻⁶. Each attempt is visible to the person and attempts are limited: at most 3 devices waiting per user, each pairing lives 10 minutes, a wrong reveal ends the pairing. This is the commit-then-reveal "short authenticated string" pattern (Vaudenay 2005; Bluetooth LE numeric comparison). The `u32 mod 10⁶` bias is below 0.03 %.
+Why the server cannot fake it **[R4]**: N commits to its nonce before it sees A's nonce, and A picks its nonce before it sees N's. A server sitting in the middle must fix the key and commitment it shows A before it learns `nA`, and N's `nN` is unknown to it until N has committed; so on each side the code is decided by a value the server cannot choose, and it matches the other screen with probability 10⁻⁶. Each attempt is visible to the person and attempts are limited: at most 3 devices waiting per user, each pairing lives 10 minutes, a wrong reveal ends the pairing. A device still waiting after a day with no live pairing is marked removed by the hourly cleanup (H10); its app then registers again. This is the commit-then-reveal "short authenticated string" pattern (Vaudenay 2005; Bluetooth LE numeric comparison). The `u32 mod 10⁶` bias is below 0.03 %.
 
 A must check the commitment itself (the server also checks it, to fail early). N must not reveal `nN` before it has `nA`.
 
-The approve call carries: N's certificate (signed by the account key), the account key wrapped for N (an envelope, purpose 2), and the group keys N should have (envelopes, purpose 1) for versions that already exist.
+The approve call carries: N's certificate (signed by the account key), the account key wrapped for N (an envelope, purpose 2), and the group keys N should have (envelopes, purpose 1) for versions that already exist. The approval applies only if, when its D1 batch runs, the approving device (or account row) is still live and the account key the certificate was checked against is still the current one; a removal that landed in between makes it 409 "devices changed, try again" (H11).
 
 ### Without another device: the recovery key
 
@@ -185,7 +185,7 @@ u8   signer id length   1..64
 
 ## 10. Group keys and rotation
 
-- **Making a group** (PR 27) creates `groups.key_version = 1`. The creator's device then makes a key and posts the first set of envelopes for version 1 (S2).
+- **Making a group** (PR 27) creates `groups.key_version = 1`. The creator's device then makes a key and posts the first set of envelopes for version 1 (S2). Only the creator makes version 1, because it has already locked the group's name with it: another device that sees the group before those envelopes arrive waits for them instead of making its own first set (H16).
 - **The first set of envelopes for a version decides the key.** `POST /v1/groups/:id/keys` for a version with no envelopes yet must be for the current version and must cover exactly every *target*: every approved, not removed device and the active account row of every current member. All rows go in one D1 batch of plain inserts. If two devices rotate at the same time, both sets cover the same targets, so the second batch hits the primary key and fails as a whole (409); its device fetches the winner's key.
 - **Adding later** (a new member, a newly approved device, older versions for history, envelopes for a new account key row) is the same endpoint with envelopes for devices that do not have one yet. Only devices of current members can receive envelopes. An add may name only the caller's own devices and account row, unless the caller is an owner of the group (owners invite, so they wrap for new members); otherwise it is refused with 409. A slot, once filled, cannot be replaced, so without this any member could take another member's new device's slot with a bad key (card H2).
 - **Removing a member** (PR 27, `DELETE /v1/groups/:id/members/:user`) or **removing a device** (S1D) increments `groups.key_version` in the same D1 batch as the removal. Until a new key exists nobody can write (devices do not have it, and sync refuses old versions, see section 15). The device that removed the member makes the new key right away; if it does not, any member's device that sees a current version with no envelope for it does, after a random 0 to 30 s delay.
@@ -219,6 +219,7 @@ The device id and kind in a change's AAD are also stored in clear by the room, s
 - A device still waiting for approval is just marked removed.
 - An approved device held the account key and the group keys, so in one D1 batch the server: marks it removed; increments `key_version` of every group the user is in; marks the old account row removed and inserts the new account row with its account certificate (the calling device made a new account key and sent `account: { id, sign_pub, box_pub, self_cert }`); stores a new certificate and account-key envelope for every remaining approved device (all must be present); and deletes the recovery blob, which wrapped the old account key. The app then asks the person to write down a new recovery key, and posts envelopes of the older group key versions for the new account row.
 - If no approved device would remain (the last device removing itself), nothing is rotated; the recovery key still works.
+- A device that removes itself while others remain makes the new account key itself, so the rotation protects nothing against that device: the removal relies on the app deleting its keys right after (`deleteDeviceKeys` deletes the whole Keychain item, account key included; a crash in between is cleaned up at the next launch). A device that may be hostile must be removed from another device.
 - The batch applies only if, when it runs, the removed device is still live and the user's other approved devices are exactly the ones the request covered; every statement carries that condition, and otherwise nothing changes and the reply is 409 "devices changed, try again". So two devices removing each other at the same time cannot both succeed, which would leave no approved device, an account key nobody holds and no recovery blob (card H2).
 
 ## 13. Recovery key
@@ -226,7 +227,7 @@ The device id and kind in a change's AAD are also stored in clear by the room, s
 - 16 bytes from the system random generator, shown as 12 words: BIP-39 English, 128-bit entropy plus a 4-bit checksum. The checksum catches most typos; the AES-GCM tag catches the rest.
 - `wrap key = HKDF-SHA256(ikm = the 16 bytes, salt = empty, info = context("recovery-key", user id), 32 bytes)`. No slow KDF: the input is 128 uniformly random bits, so stretching adds nothing an attacker would notice **[R6]**.
 - Blob (93 bytes, base64url in `recovery.wrapped_account_key`): `u8 version 1 ‖ 12-byte nonce ‖ AES-256-GCM(wrap key, the 64-byte account key, AAD = 0x01 ‖ context("recovery", user id, account row id))`.
-- `PUT /v1/recovery` (signed) stores it for the user's current account row; `GET /v1/recovery` returns it to any signed-in session of that user, including a device still waiting for approval **[R6]**. The server checks only the length and version byte.
+- `PUT /v1/recovery` (signed) stores it for the user's current account row, checked again in the statement that writes it, so a blob for an account key that a removal has just replaced is refused with 409 (H11); `GET /v1/recovery` returns it to any signed-in session of that user, including a device still waiting for approval **[R6]**. The server checks only the length and version byte.
 - The words are never sent anywhere and never stored on the device after setup; the app asks the person to type 3 of them back before it marks the key as verified.
 
 ## 14. Sealed task results (S4, flows 2 and 3)
@@ -242,7 +243,7 @@ The app fetches the result, opens it with its Secure Enclave key, saves it local
 
 ## 15. Rules other cards must follow
 
-- **Signed routes** (`requireDeviceSignature` from S1A, before the PR 11 idempotency store): every S1 to S3 write; PR 27 `POST /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`; PR 14 and 15 task calls; PR 17 `POST /v1/purchases/apple`; PR 20 `POST /v1/jobs`, `DELETE /v1/jobs/:id` and `GET /v1/jobs/:id/result` (the one signed `GET`: it answers only the device the result is sealed to); PR 30 `POST /v1/links` and `DELETE /v1/links/:id`. PR 14, 15 and 17 are merged before S1A; card S1E adds the middleware to their four routes in `createApp`. Because of this, a paid task or a purchase needs a registered, approved device.
+- **Signed routes** (`requireDeviceSignature` from S1A, before the PR 11 idempotency store): every S1 to S3 write; PR 27 `POST /v1/groups`, `POST /v1/groups/:id/invites`, `POST /v1/invites/:token/accept`, `DELETE /v1/groups/:id/members/:user`; PR 14 and 15 task calls; PR 17 `POST /v1/purchases/apple`; PR 20 `POST /v1/jobs`, `DELETE /v1/jobs/:id` and `GET /v1/jobs/:id/result` (the one signed `GET`: it answers only the device the result is sealed to); PR 30 `POST /v1/links` and `DELETE /v1/links/:id`; PR 32 `PUT /v1/settings/zero-retention` (H12: a session alone, such as one left on a removed device, must not turn zero retention off). PR 14, 15 and 17 are merged before S1A; card S1E adds the middleware to their four routes in `createApp`. Because of this, a paid task or a purchase needs a registered, approved device.
 - **Session only, not signed** (they change no keys, devices, membership or money): every other `GET` (including S1G's `GET /v1/devices` and PR 21's events stream); PR 23 `PUT /v1/jobs/:id/audio/:n` and `POST /v1/jobs/:id/audio/done` (only the caller's own `retranscribe` job while it is queued; the job was signed and held when it was made); PR 28 `POST /v1/groups/:id/changes` (the change's `device_id` must still be an approved, not removed device of the signed-in user) and the group socket; PR 29 `POST /v1/blobs` and `GET /v1/blobs/:id` (an active membership; uploading needs a paid plan). **No session at all:** `GET /v1/config` and PR 30's `GET /v1/links/:id/data` (rate limited; a passcode link also needs the passcode and a Turnstile token).
 - **PR 20** stores `c.get("device").id` in `jobs.device_id` and serves `GET /v1/jobs/:id/result` as `application/octet-stream`, only when the signing device is `jobs.device_id` (404 otherwise). It keeps the text a job sends only encrypted in R2 `tmp/input/{job}`, with the key only in the Workflow's params. **PR 22 to 25** call `sealJobResult` (S4) in the step that makes the result, with the R2 binding `BUCKET` (added by PR 33).
 - **PR 27** increments `groups.key_version` in the same D1 batch that ends a membership (removal or leaving), never creates envelopes, and stores `name_locked` as opaque base64url (at most 1,024 characters).
@@ -250,7 +251,7 @@ The app fetches the result, opens it with its Secure Enclave key, saves it local
 - **PR 30** stores `passcode_hash = base64url(HMAC-SHA256(LINK_PASSCODE_PEPPER, context("link-passcode", link id, passcode)))` (`linkPasscodeHash` in `packages/crypto`), compares in constant time, and rate-limits attempts with Turnstile. The link key never reaches the server: the viewer reads it from `#k=<base64url 32 bytes>`. The viewer page loads no third-party scripts except, for passcode links only, Cloudflare's Turnstile widget (V1; open question for the reviewer, `docs/build-plan.md`) **[R10]**.
 - **Everyone:** never log keys, plaintext, ciphertext bodies, envelopes, signatures, nonces or recovery blobs.
 
-### Endpoints added to the API (not yet in architecture section 4)
+### Endpoints added to the API by the security cards (now also in architecture section 4)
 
 `GET /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing`, `POST /v1/devices/:id/pairing/reveal` (S1C); `GET /v1/groups/:id/devices`, `GET /v1/groups/:id/keys` (S2); `GET /v1/recovery` (S3).
 
