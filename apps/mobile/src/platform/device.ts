@@ -89,8 +89,9 @@ function refreshDevice(clerkUserId: string): Promise<void> {
   if (running !== null) return running;
   running = register(clerkUserId)
     .catch((error: unknown) => {
+      // A settled iPhone keeps its status; any other failure replaces the last one shown.
+      if (status === "approved" || status === "waiting") return;
       if (error instanceof ApiCallError && error.status === 429) setStatus("too_many_waiting");
-      else if (status !== "checking") return;
       else if (error instanceof NetworkError) setStatus("offline");
       else setStatus("failed");
     })
