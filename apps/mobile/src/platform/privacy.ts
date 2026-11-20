@@ -5,7 +5,7 @@ import { ApiCallError, NetworkError } from "@waypoint/api-client";
 import { ZERO_RETENTION_KEY } from "../core/cloud/activity.ts";
 import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { api } from "./api.ts";
-import { useQuery, writeDb } from "./db.ts";
+import { dbGeneration, useQuery, writeDb, writeDbIf } from "./db.ts";
 import { requireApprovedDevice } from "./device.ts";
 
 export type SwitchResult = "ok" | "plan_required" | "offline" | "failed";
@@ -14,9 +14,10 @@ export type SwitchResult = "ok" | "plan_required" | "offline" | "failed";
 // iPhone (H12), so it needs an approved device; otherwise the screen that explains why opens.
 export async function setZeroRetention(enabled: boolean): Promise<SwitchResult> {
   if (!requireApprovedDevice()) return "failed";
+  const generation = dbGeneration();
   try {
     const reply = await api.setZeroRetention(enabled);
-    writeDb((db) => setSetting(db, ZERO_RETENTION_KEY, reply.zero_retention ? "1" : "0"));
+    writeDbIf(generation, (db) => setSetting(db, ZERO_RETENTION_KEY, reply.zero_retention ? "1" : "0"));
     return "ok";
   } catch (error) {
     if (error instanceof ApiCallError && error.code === "plan_required") return "plan_required";

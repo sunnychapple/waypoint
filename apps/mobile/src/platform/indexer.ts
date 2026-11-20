@@ -2,13 +2,14 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { markStale, sessionsToIndex, indexSession, type Embedder } from "../core/search/indexer.ts";
 import { embed, getModel } from "../../modules/waypoint-embed/index.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDb } from "./db.ts";
 
 const TICK_MS = 20_000;
 const SESSIONS_PER_TICK = 3;
 
 let ticking = false;
-let staleChecked = false;
+// The notes (dbGeneration) whose stale vectors were marked: once per launch and per person who signs in.
+let staleChecked = -1;
 
 // One pass: mark stale vectors once per launch, then index up to three sessions, one at a time.
 // Errors are swallowed; the next tick tries again.
@@ -20,11 +21,13 @@ async function tick(): Promise<void> {
     if (!model.available) return;
     const embedder: Embedder = { modelVersion: model.modelVersion, embed };
     const db = getDb();
-    if (!staleChecked) {
+    const generation = dbGeneration();
+    if (staleChecked !== generation) {
       writeDb((d) => markStale(d, model.modelVersion));
-      staleChecked = true;
+      staleChecked = generation;
     }
     for (const sessionId of sessionsToIndex(db, SESSIONS_PER_TICK)) {
+      if (dbGeneration() !== generation) return; // signed out or another person meanwhile: stop
       await indexSession(db, embedder, sessionId, Date.now());
       // indexSession writes straight to the database; writeDb tells the screens to re-read.
       writeDb(() => undefined);

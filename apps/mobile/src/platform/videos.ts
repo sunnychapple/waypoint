@@ -4,7 +4,7 @@ import { renderSlides } from "../../modules/waypoint-video/index.ts";
 import { renderScript } from "../../modules/waypoint-voices/index.ts";
 import type { CloudFailure } from "../core/cloud/failure.ts";
 import { saveOverview, scriptLines, setRendered, setRenderFailed, setRenderPending, setRendering, type Overview } from "../core/overviews/overviews.ts";
-import { writeDb } from "./db.ts";
+import { dbGeneration, writeDb, writeDbIf } from "./db.ts";
 import { deleteFile } from "./files.ts";
 import { RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 import { startJob } from "./jobs.ts";
@@ -21,6 +21,7 @@ export function startVideo(sessionId: string, text: string, key: string, prompt:
 export async function renderVideo(video: Overview): Promise<void> {
   // Never while a recording runs: it stays a script and is picked up again later.
   if (getRecorderStatus().state !== "idle") return;
+  const generation = dbGeneration();
   writeDb((db) => setRendering(db, video.id));
   const narration = `overviews/${video.id}-narration.m4a`;
   try {
@@ -28,10 +29,10 @@ export async function renderVideo(video: Overview): Promise<void> {
     const slides = VideoSlidesResultSchema.parse(JSON.parse(video.script)).slides.map((s) => ({ heading: s.heading, bullets: s.bullets }));
     const file = `overviews/${video.id}.mp4`;
     const done = await renderSlides(video.title, slides, voice.lineStartsMs, narration, file);
-    writeDb((db) => setRendered(db, video.id, { file, durationMs: done.durationMs, lineStarts: voice.lineStartsMs, voices: voice.voices }));
+    writeDbIf(generation, (db) => setRendered(db, video.id, { file, durationMs: done.durationMs, lineStarts: voice.lineStartsMs, voices: voice.voices }));
   } catch (error) {
     const code = errorCode(error);
-    writeDb((db) => {
+    writeDbIf(generation, (db) => {
       if (code === "busy" || code === "cancelled") setRenderPending(db, video.id);
       else setRenderFailed(db, video.id, code === "no_voices" ? "no_voices" : "failed");
     });

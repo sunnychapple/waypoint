@@ -44,7 +44,7 @@ import {
 import { isFallbackSpaceName } from "../core/share/spaces.ts";
 import { api } from "./api.ts";
 import { currentUserId, useDeviceStatus } from "./device.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 
 // The contract's cap on envelopes in one request (GroupKeysRequest, GroupEnvelope list of approve).
 const BATCH = 500;
@@ -84,8 +84,10 @@ function nameJoinedSpaces(db: SqlDb, views: GroupView[], names: (string | null)[
 export async function refreshGroups(): Promise<void> {
   const user = currentUserId();
   if (user === null) return;
+  const generation = dbGeneration();
   const views = await api.groups();
   const names = await Promise.all(views.map((v) => nameOf(user, v)));
+  if (!stillSame(generation)) return;
   const now = Date.now();
   writeDb((db) => {
     views.forEach((v, i) => upsertGroup(db, v, names[i] ?? null, now, user));
@@ -107,8 +109,10 @@ async function readGroup(user: string, groupId: string, recipientId: string): Pr
   const account = getAccountKey(user);
   if (account === null) throw new Error("no account key");
   const now = Date.now();
+  const generation = dbGeneration();
   const listing = await api.groupDevices(groupId);
   const mine = await api.groupKeys(groupId, recipientId);
+  if (!stillSame(generation)) throw new Error("the notes changed");
   writeDb((db) => noteAccounts(db, listing.devices, { userId: user, accountSignPub: account.signPub }, now));
   const known = knownAccounts(getDb());
   const listed = new Set(mine.signers.map((s) => s.id));
@@ -123,6 +127,7 @@ async function readGroup(user: string, groupId: string, recipientId: string): Pr
     .filter((e) => !held.includes(e.key_version))
     .map((e) => ({ keyVersion: e.key_version, wrappedKey: e.wrapped_key }));
   if (missing.length > 0) await openGroupKeys(user, groupId, recipientId, missing, signers, known);
+  if (!stillSame(generation)) throw new Error("the notes changed");
   writeDb((db) => {
     for (const v of heldGroupKeyVersions(user, groupId)) noteKeyVersion(db, groupId, v, now);
     for (const s of signers) if (listed.has(s.id)) rememberSigner(db, s);
@@ -146,6 +151,7 @@ async function postEnvelopes(groupId: string, keyVersion: number, wrapped: Wrapp
 
 // The first set of a version: make the key and wrap it for every target. A refused row (no valid certificate) stops it.
 async function makeFirstSet(user: string, groupId: string, keyVersion: number, targets: Target[], known: Record<string, string>): Promise<void> {
+  const generation = dbGeneration();
   await makeGroupKey(user, groupId, keyVersion);
   const wrapped = await wrapGroupKeys(user, groupId, [keyVersion], targets.map(toKeyTarget), known);
   if (wrapped.refused.length > 0) {
@@ -163,7 +169,7 @@ async function makeFirstSet(user: string, groupId: string, keyVersion: number, t
     await dropGroupKey(user, groupId, keyVersion);
     return ensureKeys(groupId, { now: true }); // the winner's key is on the server now: open it
   }
-  writeDb((db) => noteKeyVersion(db, groupId, keyVersion, Date.now()));
+  writeDbIf(generation, (db) => noteKeyVersion(db, groupId, keyVersion, Date.now()));
 }
 
 // The history start a member's row gives; a member this iPhone does not list gets only the current version.

@@ -5,7 +5,7 @@ import type { CloudFailure } from "../core/cloud/failure.ts";
 import { audioMinutes, saveCloudTranscript, uploadParts } from "../core/capture/second.ts";
 import { setDetail, type LocalJob } from "../core/jobs/jobs.ts";
 import { api } from "./api.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, stillSame, writeDbIf } from "./db.ts";
 import { cancelJob, startJob } from "./jobs.ts";
 import { BEFORE_FOLLOW, RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 
@@ -57,17 +57,19 @@ function progress(job: LocalJob): { uploaded: number; done: boolean } {
 async function uploadRest(job: LocalJob): Promise<void> {
   const { uploaded, done } = progress(job);
   if (done || job.state !== "queued" || job.sessionId === null) return;
+  const generation = dbGeneration();
   const parts = uploadParts(getDb(), job.sessionId);
   for (let n = uploaded; n < parts.length; n++) {
     const part = parts[n];
     if (part === undefined) break;
     const bytes = await new File(Paths.document, part.file).bytes();
+    if (!stillSame(generation)) return;
     if (bytes.length === 0 || bytes.length > MAX_AUDIO_CHUNK_BYTES) {
       await cancelJob(job.id); // nothing is charged; the local job is recorded as cancelled
       return;
     }
     await api.uploadAudio(job.id, n, bytes);
-    writeDb((db) => setDetail(db, job.id, { uploaded: n + 1 }, Date.now()));
+    writeDbIf(generation, (db) => setDetail(db, job.id, { uploaded: n + 1 }, Date.now()));
   }
   // The key is stored with the job, so a repeat after a cut-off reply is the same request to the server.
   try {
@@ -76,7 +78,7 @@ async function uploadRest(job: LocalJob): Promise<void> {
     // "upload closed" (409): an earlier "done" was already accepted, so there is nothing left to send.
     if (!(error instanceof ApiCallError && error.status === 409 && error.message === "upload closed")) throw error;
   }
-  writeDb((db) => setDetail(db, job.id, { done: true }, Date.now()));
+  writeDbIf(generation, (db) => setDetail(db, job.id, { done: true }, Date.now()));
 }
 
 BEFORE_FOLLOW.retranscribe = uploadRest;

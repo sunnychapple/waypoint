@@ -24,13 +24,28 @@ import {
 } from "../../modules/waypoint-keys/index.ts";
 import { api, setDeviceSigner } from "./api.ts";
 import { isUpdateRequired } from "./config.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbUser, getDb, onNotesClosed, writeDb } from "./db.ts";
 
 let status: DeviceStatus = "checking";
 let userId: string | null = null;
 let clerkId: string | null = null;
 let running: { clerkId: string; promise: Promise<void> } | null = null;
 const listeners = new Set<() => void>();
+
+// The notes of the person these belong to were closed (sign-out, or another person's notes opening): nothing carries over.
+onNotesClosed(() => {
+  setDeviceSigner(null);
+  userId = null;
+  clerkId = null;
+  running = null;
+  accountKeyProblem = false;
+  // Not setStatus: this can run while the sign-in gate renders, when other components may not be updated. Listeners are
+  // told right after the render.
+  status = "signed_out";
+  queueMicrotask(() => {
+    for (const listener of listeners) listener();
+  });
+});
 
 function setStatus(next: DeviceStatus): void {
   status = next;
@@ -182,7 +197,11 @@ export function refreshDeviceNow(): Promise<void> {
 function restore(clerkUserId: string): void {
   const db = getDb();
   const user = getSetting(db, userIdKey(clerkUserId));
-  if (user === null) return;
+  if (user === null) {
+    userId = null; // nothing stored for this person: not the last person's id
+    setDeviceSigner(null);
+    return;
+  }
   userId = user;
   const keys = getDeviceKeys(user);
   if (keys !== null && getSetting(db, statusKey(user)) === "approved") {
@@ -201,7 +220,8 @@ export function useDeviceRegistration(): void {
       setDeviceSigner(null);
       // A headless push does not sync a signed-out person, including one whose session ended while the app was closed.
       // Not while Clerk is still loading (isSignedIn undefined).
-      if (userId !== null || (isLoaded && isSignedIn === false)) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
+      // Only while that person's notes are still open (open question 52: sign-out closes them).
+      if (dbUser() !== null && (userId !== null || (isLoaded && isSignedIn === false))) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
       userId = null;
       clerkId = null;
       setStatus("signed_out");

@@ -35,7 +35,7 @@ import {
 import { getDeviceKeys, heldGroupKeyVersions, lockContent, lockFile, unlockContent, unlockFile } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, dbUser, getDb, writeDb } from "./db.ts";
 import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 
@@ -64,6 +64,12 @@ const waiting = new Map<string, number>();
 const pullQueued = new Map<string, Promise<void>>();
 const sealed = new Map<string, Sealed>();
 const sealings = new Map<string, number>();
+
+// Work that awaits and then writes reads dbGeneration() first and stops here if the notes changed meanwhile (sign-out, or
+// another person signed in): a write must never land in someone else's notes.
+function sameNotes(generation: number): void {
+  if (dbGeneration() !== generation) throw new Error("the notes changed");
+}
 
 const blobKey = (groupId: string, blobId: string): string => `groups/${groupId}/media/${blobId}`;
 
@@ -110,7 +116,7 @@ export async function turnOnSync(spaceId: string): Promise<void> {
 
 // The blob key of a capture's file: an existing blob, or a new one made now (the file is locked and uploaded first).
 // null: the capture has no file, or the plan does not allow media (the change then goes without its file).
-async function mediaKeyFor(captureId: string, user: string, groupId: string, keyVersion: number): Promise<string | null> {
+async function mediaKeyFor(captureId: string, user: string, groupId: string, keyVersion: number, generation: number): Promise<string | null> {
   const row = getDb().get<{ blob_id: string | null; file: string }>("SELECT blob_id, file FROM captures WHERE id = ?", [captureId]);
   if (row === null) return null;
   if (row.blob_id !== null) return blobKey(groupId, row.blob_id);
@@ -121,6 +127,7 @@ async function mediaKeyFor(captureId: string, user: string, groupId: string, key
     await lockFile(user, groupId, keyVersion, blobId, row.file, locked);
     await api.uploadBlob(groupId, blobId, await new File(Paths.document, locked).bytes());
   } catch (error) {
+    sameNotes(generation);
     if (error instanceof ApiCallError && error.code === "plan_required") {
       writeDb((db) => setSetting(db, SYNC_PLAN_KEY, "1"));
       return null;
@@ -129,6 +136,7 @@ async function mediaKeyFor(captureId: string, user: string, groupId: string, key
   } finally {
     deleteFile(locked);
   }
+  sameNotes(generation);
   writeDb((db) => {
     db.run("UPDATE captures SET blob_id = ? WHERE id = ?", [blobId, captureId]); // queues the capture again, with its blob
     deleteSetting(db, SYNC_PLAN_KEY);
@@ -154,8 +162,8 @@ async function sealEntry(user: string, group: StoredGroup, deviceId: string, ent
 // bytes is a bug signal: the cached bytes are dropped and the entry is locked again once, under a new key. A stale key
 // version throws: the caller takes the new key, and the next run locks under it. Throws on any failure, so the caller
 // stops at it (later entries may be its children).
-async function sendEntry(user: string, group: StoredGroup, deviceId: string, entry: Outgoing): Promise<void> {
-  const blob = entry.blobCaptureId === null ? null : await mediaKeyFor(entry.blobCaptureId, user, group.id, group.keyVersion);
+async function sendEntry(user: string, group: StoredGroup, deviceId: string, entry: Outgoing, generation: number): Promise<void> {
+  const blob = entry.blobCaptureId === null ? null : await mediaKeyFor(entry.blobCaptureId, user, group.id, group.keyVersion, generation);
   let relock = false;
   for (;;) {
     const current = await sealEntry(user, group, deviceId, entry, relock);
@@ -168,6 +176,7 @@ async function sendEntry(user: string, group: StoredGroup, deviceId: string, ent
       }
       throw error;
     }
+    sameNotes(generation);
     sent(getDb(), entry.id);
     sealed.delete(entry.id);
     sealings.delete(entry.id);
@@ -175,11 +184,12 @@ async function sendEntry(user: string, group: StoredGroup, deviceId: string, ent
   }
 }
 
-async function sendPending(user: string, group: StoredGroup, deviceId: string): Promise<void> {
+async function sendPending(user: string, group: StoredGroup, deviceId: string, generation: number): Promise<void> {
   for (;;) {
+    sameNotes(generation);
     const batch = nextOutgoing(getDb(), 50, group.id);
     if (batch.length === 0) return;
-    for (const entry of batch) await sendEntry(user, group, deviceId, entry);
+    for (const entry of batch) await sendEntry(user, group, deviceId, entry, generation);
   }
 }
 
@@ -195,9 +205,11 @@ async function openChange(user: string, groupId: string, change: ChangesPage["ch
 
 // GET /v1/groups/:id/changes after the last seq, page by page, until a page is empty. Each page is unlocked first
 // (the awaits), then applied and its last seq kept in one synchronous run. Own changes are not skipped.
-async function pullAll(user: string, groupId: string, deviceId: string): Promise<void> {
+async function pullAll(user: string, groupId: string, deviceId: string, generation: number): Promise<void> {
   for (;;) {
+    sameNotes(generation);
     const page = await api.changes(groupId, lastSeq(getDb(), groupId));
+    sameNotes(generation);
     const last = page.changes[page.changes.length - 1];
     if (last === undefined) return;
     // A change sealed under a key this iPhone does not hold yet (a removal, a new device, an invite) is not skipped:
@@ -215,6 +227,7 @@ async function pullAll(user: string, groupId: string, deviceId: string): Promise
       const unlocked = await openChange(user, groupId, change);
       if (unlocked !== null) opened.push({ change: unlocked, deviceId: change.device_id });
     }
+    sameNotes(generation);
     writeDb((db) => {
       applyPulled(db, groupId, opened, { now: Date.now, newId: randomUUID, deviceId });
       setLastSeq(db, groupId, last.seq, Date.now());
@@ -224,7 +237,7 @@ async function pullAll(user: string, groupId: string, deviceId: string): Promise
 
 // Captures whose file is still on the server: download, unlock into their session's synced folder, then set the file.
 // The folder is apart from this iPhone's recordings, so a remote id can never overwrite one (rules.ts).
-async function downloadMedia(user: string, groupId: string, c: { id: string; blob_id: string; session_id: string; kind: string }): Promise<void> {
+async function downloadMedia(user: string, groupId: string, c: { id: string; blob_id: string; session_id: string; kind: string }, generation: number): Promise<void> {
   const relative = syncedMediaPath(c.session_id, c.id, c.kind);
   if (relative === null) return;
   const locked = blobTempPath(`${c.blob_id}-in`);
@@ -232,6 +245,7 @@ async function downloadMedia(user: string, groupId: string, c: { id: string; blo
     await new File(Paths.document, locked).write(await api.blob(c.blob_id));
     new Directory(Paths.document, "sessions", c.session_id, "synced").create({ idempotent: true, intermediates: true });
     await unlockFile(user, groupId, c.blob_id, locked, relative);
+    sameNotes(generation);
     writeDb((db) => db.run("UPDATE captures SET file = ? WHERE id = ?", [relative, c.id]));
   } catch {
     // Not here yet: the next pull tries again.
@@ -240,7 +254,7 @@ async function downloadMedia(user: string, groupId: string, c: { id: string; blo
   }
 }
 
-async function fetchMedia(user: string, groupId: string): Promise<void> {
+async function fetchMedia(user: string, groupId: string, generation: number): Promise<void> {
   const waitingFiles = getDb().all<{ id: string; blob_id: string; session_id: string; kind: string }>(
     `SELECT c.id, c.blob_id, c.session_id, c.kind FROM captures c
      JOIN sessions s ON s.id = c.session_id JOIN space_groups g ON g.space_id = s.space_id
@@ -248,15 +262,24 @@ async function fetchMedia(user: string, groupId: string): Promise<void> {
     [groupId],
   );
   for (let i = 0; i < waitingFiles.length; i += MEDIA_AT_ONCE) {
-    await Promise.all(waitingFiles.slice(i, i + MEDIA_AT_ONCE).map((c) => downloadMedia(user, groupId, c)));
+    await Promise.all(waitingFiles.slice(i, i + MEDIA_AT_ONCE).map((c) => downloadMedia(user, groupId, c, generation)));
   }
 }
 
 // One send (and, when asked, a pull and the media down). Never throws: a failure waits for the next run. The send and
 // the pull fail apart, so a failed send does not hold back the group's incoming changes in the same run.
 async function runOnce(groupId: string, pull: boolean): Promise<void> {
+  try {
+    await runNow(groupId, pull);
+  } catch {
+    // Nobody is signed in (the notes are closed) or the notes changed: nothing to do, and the queue must go on.
+  }
+}
+
+async function runNow(groupId: string, pull: boolean): Promise<void> {
   // This run starts now, so a request made from here on queues a run of its own (it may carry newer changes).
   if (pull) pullQueued.delete(groupId);
+  const generation = dbGeneration();
   const user = currentUserId();
   const keys = user === null ? null : getDeviceKeys(user);
   const group = getGroup(getDb(), groupId);
@@ -264,14 +287,14 @@ async function runOnce(groupId: string, pull: boolean): Promise<void> {
   if (user === null || keys === null || group === null || group.leftAt !== null || !syncedGroupIds(getDb()).includes(groupId)) return;
   try {
     collectChanges(getDb(), { now: Date.now, newId: randomUUID, deviceId: keys.deviceId });
-    await sendPending(user, group, keys.deviceId);
+    await sendPending(user, group, keys.deviceId, generation);
   } catch (error) {
     await afterFailure(groupId, error);
   }
   if (!pull) return;
   try {
-    await pullAll(user, groupId, keys.deviceId);
-    await fetchMedia(user, groupId);
+    await pullAll(user, groupId, keys.deviceId, generation);
+    await fetchMedia(user, groupId, generation);
   } catch (error) {
     await afterFailure(groupId, error);
   }
@@ -287,7 +310,7 @@ async function afterFailure(groupId: string, error: unknown): Promise<void> {
 
 function enqueue(groupId: string, pull: boolean): Promise<void> {
   waiting.set(groupId, (waiting.get(groupId) ?? 0) + 1);
-  const run = (queues.get(groupId) ?? Promise.resolve()).then(() => runOnce(groupId, pull));
+  const run = (queues.get(groupId) ?? Promise.resolve()).catch(() => undefined).then(() => runOnce(groupId, pull));
   const done = run.finally(() => waiting.set(groupId, (waiting.get(groupId) ?? 1) - 1));
   queues.set(groupId, done);
   return done;
@@ -309,7 +332,11 @@ function pullSoon(groupId: string): Promise<void> {
 
 // Acknowledges what was pulled, as the socket asks (PR 28).
 function acknowledge(ws: WebSocket, groupId: string): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ack", seq: lastSeq(getDb(), groupId) }));
+  try {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ack", seq: lastSeq(getDb(), groupId) }));
+  } catch {
+    // Signed out meanwhile (no notes open): nothing to acknowledge.
+  }
 }
 
 function linkFor(groupId: string): Link {
@@ -358,8 +385,12 @@ async function connect(groupId: string): Promise<void> {
     } catch {
       return;
     }
-    if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
-      void pullSoon(groupId).then(() => acknowledge(ws, groupId));
+    try {
+      if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
+        void pullSoon(groupId).then(() => acknowledge(ws, groupId));
+      }
+    } catch {
+      // Signed out meanwhile (no notes open).
     }
   };
   ws.onclose = (event) => {
@@ -386,13 +417,19 @@ function disconnect(): void {
 function startForeground(): void {
   if (foreground) return;
   foreground = true;
-  const db = getDb();
-  for (const groupId of syncedGroupIds(db)) {
+  const groupIds = (): string[] => {
+    try {
+      return syncedGroupIds(getDb());
+    } catch {
+      return []; // nobody is signed in
+    }
+  };
+  for (const groupId of groupIds()) {
     void connect(groupId);
     void syncNow(groupId);
   }
   sendTimer = setInterval(() => {
-    for (const groupId of syncedGroupIds(getDb())) if ((waiting.get(groupId) ?? 0) === 0) void enqueue(groupId, false);
+    for (const groupId of groupIds()) if ((waiting.get(groupId) ?? 0) === 0) void enqueue(groupId, false);
   }, SEND_EVERY_MS);
 }
 
@@ -425,12 +462,13 @@ function groupFromPush(data: unknown): string | null {
   return null;
 }
 
-// Defined at module scope and imported by the root layout, so it exists when iOS wakes the app with no screen up.
-// The person comes from the stored identity (device.ts); when that is not known, nothing is done.
+// The person comes from the stored identity (device.ts); when that is not known, or nobody is signed in on this iPhone
+// (open question 52: no notes are open), nothing is done. A push for a group only someone else on this iPhone is in
+// finds no such group in these notes and does nothing either (runOnce).
 TaskManager.defineTask(SYNC_TASK, async ({ data, error }) => {
   if (error !== null) return;
   const groupId = groupFromPush(data);
-  if (groupId !== null && restoreApprovedUser() !== null) await syncNow(groupId);
+  if (groupId !== null && dbUser() !== null && restoreApprovedUser() !== null) await syncNow(groupId);
 });
 
 // Called once in (tabs)/_layout.tsx: runs the sync while the app is active, and registers the silent push task.

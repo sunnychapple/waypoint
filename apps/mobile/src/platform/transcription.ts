@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { getRecorderStatus, getSpeechStatus, transcribeFile } from "../../modules/waypoint-audio/index.ts";
 import { pendingTranscriptions, recoverSessions, saveSegment } from "../core/capture/recording.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDb, writeDbIf } from "./db.ts";
 
 const TICK_MS = 20_000;
 
@@ -24,15 +24,16 @@ async function tick(): Promise<void> {
       recovered = true;
     }
     if (packMissing || (await getSpeechStatus()).pack !== "installed") return;
+    const generation = dbGeneration();
     for (const session of pendingTranscriptions(getDb())) {
       try {
-        await transcribeSession(session.sessionId, session.parts);
+        await transcribeSession(session.sessionId, session.parts, generation);
       } catch (error) {
         if (codeOf(error) === "speech_pack_missing") {
           packMissing = true;
           return;
         }
-        writeDb((db) => db.run("UPDATE sessions SET transcript = 'failed' WHERE id = ?", [session.sessionId]));
+        writeDbIf(generation, (db) => db.run("UPDATE sessions SET transcript = 'failed' WHERE id = ?", [session.sessionId]));
       }
     }
   } catch {
@@ -46,15 +47,16 @@ async function tick(): Promise<void> {
 async function transcribeSession(
   sessionId: string,
   parts: { file: string; startMs: number; durationMs: number }[],
+  generation: number,
 ): Promise<boolean> {
   for (const part of parts) {
     if (getRecorderStatus().state !== "idle") return false;
     const pieces = await transcribeFile(part.file, part.startMs);
-    writeDb((db) => {
+    writeDbIf(generation, (db) => {
       for (const piece of pieces) saveSegment(db, sessionId, piece);
     });
   }
-  writeDb((db) => db.run("UPDATE sessions SET transcript = 'done', indexed_at = NULL WHERE id = ?", [sessionId]));
+  writeDbIf(generation, (db) => db.run("UPDATE sessions SET transcript = 'done', indexed_at = NULL WHERE id = ?", [sessionId]));
   return true;
 }
 
