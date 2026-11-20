@@ -6,6 +6,8 @@ import { applePurchaseRoute } from "./apple/route.ts";
 import { appleWebhookRoute } from "./apple/webhook.ts";
 import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
+import { memberRoutes } from "./groups/members.ts";
+import { groupRoutes } from "./groups/routes.ts";
 import { groupKeyRoutes } from "./keys/routes.ts";
 import { jobsRoutes } from "./jobs/routes.ts";
 import { jobWorkflow } from "./jobs/start.ts";
@@ -55,5 +57,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
   app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));
+  app.route("/", groupRoutes({ now: deps.now }));
+  app.route("/", memberRoutes({ now: deps.now }));
   return app;
 }
