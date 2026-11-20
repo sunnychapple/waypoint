@@ -10,7 +10,7 @@ describe("sandbox pages", () => {
   it("the CSP comes before the model's HTML", () => {
     const page = miniAppPage("<script>fetch('x')</script>");
     expect(page.startsWith("<!doctype html>")).toBe(true);
-    expect(page.indexOf(SANDBOX_CSP)).toBeLessThan(page.indexOf("<script>fetch"));
+    expect(page.indexOf(SANDBOX_CSP)).toBeLessThan(page.indexOf("fetch("));
   });
   it("scriptJson never contains <", () => {
     const s = scriptJson("</script><script>alert(1) ");
