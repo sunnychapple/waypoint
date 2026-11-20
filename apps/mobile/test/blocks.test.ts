@@ -45,6 +45,21 @@ describe("groupBlocks", () => {
     expect(block?.height).toBeCloseTo(0.07);
   });
 
+  it("a line indented more than 0.15 from the block's first line starts a new block", () => {
+    const blocks = groupBlocks([line("Solve:", 0.1, 0.1), line("x + 1 = 2", 0.4, 0.15)]);
+    expect(blocks.map((b) => b.text)).toEqual(["Solve:", "x + 1 = 2"]);
+  });
+
+  it("a line on the same row at another x stays in the block", () => {
+    const blocks = groupBlocks([line("Name:", 0.1, 0.1, 0.2), line("Date:", 0.5, 0.105, 0.2)]);
+    expect(blocks.map((b) => b.text)).toEqual(["Name: Date:"]);
+  });
+
+  it("the gap limit uses the median line height, not the tallest line", () => {
+    const blocks = groupBlocks([line("one", 0.1, 0.1), line("two", 0.1, 0.18), line("TITLE", 0.1, 0.5, 0.4, 0.1)]);
+    expect(blocks.map((b) => b.text)).toEqual(["one", "two", "TITLE"]);
+  });
+
   it("empty input gives no blocks", () => {
     expect(groupBlocks([])).toEqual([]);
   });
