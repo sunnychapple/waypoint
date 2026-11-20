@@ -19,8 +19,27 @@ const U1: SessionUser = { id: "u1", clerk_id: "clerk_u1", plan: "free", billing_
 
 // u1 with an approved phone and a wallet holding `purchased` credits; every wallet command is recorded. failSettles:
 // how many settles throw before they reach the wallet (a Durable Object call that fails).
-async function world(purchased: number, failSettles = 0) {
-  const db = createTestDb();
+// failSql: D1 statements containing this text throw. releaseBeforeSettle: how many settles find their hold already
+// released (its alarm ran), so the wallet answers not ok. clock.now is the time the route sees.
+async function world(purchased: number, failSettles = 0, options: { failSql?: string; releaseBeforeSettle?: number } = {}) {
+  const realDb = createTestDb();
+  const db = realDb;
+  const flaky = new Proxy(realDb, {
+    get: (target, prop) =>
+      prop === "prepare"
+        ? (sql: string) => {
+            if (options.failSql !== undefined && sql.includes(options.failSql)) {
+              const fail = async () => {
+                throw new Error("d1 unavailable");
+              };
+              return { bind: () => ({ run: fail, first: fail, all: fail }) };
+            }
+            return target.prepare(sql);
+          }
+        : Reflect.get(target, prop),
+  });
+  const clock = { now: NOW };
+  let releases = options.releaseBeforeSettle ?? 0;
   await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba_u1')").run();
   const phone: TestDevice = await makeTestDevice("dev_phone");
   await insertDevice(db, phone, { userId: "u1" });
@@ -29,7 +48,7 @@ async function world(purchased: number, failSettles = 0) {
   const commands: Command[] = [];
   let settlesToFail = failSettles;
   const env = {
-    DB: db,
+    DB: flaky,
     WALLET: {
       idFromName: (name: string) => name,
       get: (_name: string) => ({
@@ -38,6 +57,10 @@ async function world(purchased: number, failSettles = 0) {
           if (command.type === "settle" && settlesToFail > 0) {
             settlesToFail -= 1;
             throw new Error("wallet unavailable");
+          }
+          if (command.type === "settle" && releases > 0) {
+            releases -= 1;
+            store.apply({ type: "release", id: `alarm:${releases}`, hold_id: command.hold_id }, NOW);
           }
           return store.apply(command, NOW);
         },
@@ -50,10 +73,10 @@ async function world(purchased: number, failSettles = 0) {
     c.set("user", U1);
     await next();
   });
-  app.route("/", syncExtraRoute({ now: () => NOW }));
+  app.route("/", syncExtraRoute({ now: () => clock.now }));
   const buy = async (body: unknown, key = "key-extra-0123456789") =>
-    app.request(PATH, await signedInit(phone, { method: "POST", path: PATH, body, now: NOW, idempotencyKey: key }), env);
-  return { db, store, commands, app, env, buy };
+    app.request(PATH, await signedInit(phone, { method: "POST", path: PATH, body, now: clock.now, idempotencyKey: key }), env);
+  return { db, store, commands, app, env, buy, clock };
 }
 
 describe("POST /v1/sync/extra", () => {
@@ -95,7 +118,9 @@ describe("POST /v1/sync/extra", () => {
     const res = await w.buy({ credits: SYNC_EXTRA_CREDITS });
     expect(res.status).toBe(402);
     expect(await res.json()).toMatchObject({ code: "insufficient_credits", shortfall: 60 });
-    expect(await w.db.prepare("SELECT COUNT(*) AS n FROM sync_days").first<{ n: number }>()).toEqual({ n: 0 });
+    expect(w.commands.map((c) => c.type)).toEqual(["hold"]);
+    expect(await w.db.prepare("SELECT COUNT(*) AS n FROM sync_extras").first<{ n: number }>()).toEqual({ n: 0 });
+    expect(w.store.read()).toMatchObject({ purchased: 40, holds: [] });
   });
 
   test("a price the server does not charge gets 409 'price changed' and no wallet command", async () => {
@@ -113,5 +138,93 @@ describe("POST /v1/sync/extra", () => {
     const res = await w.app.request(PATH, init, w.env);
     expect(res.status).toBe(401);
     expect(w.commands).toHaveLength(0);
+  });
+
+  const rows = async (w: Awaited<ReturnType<typeof world>>) =>
+    (await w.db.prepare("SELECT COUNT(*) AS n FROM sync_extras").first<{ n: number }>())?.n;
+
+  test("the D1 write fails: hold released, nothing charged, no row; the same key never pays, a new key does", async () => {
+    const w = await world(250, 0, { failSql: "INSERT INTO sync_extras" });
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold", "release"]);
+    expect(w.store.read()).toMatchObject({ purchased: 250, holds: [] });
+    // The same key again: the hold is closed and nothing was added. 500 (never stored), not a stored 409.
+    const again = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(again.status).toBe(500);
+    expect(await again.json()).toMatchObject({ code: "internal", message: expect.stringContaining("new Idempotency-Key") });
+    expect(await rows(w)).toBe(0);
+    expect(w.store.read()).toMatchObject({ purchased: 250 });
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-fresh-00000")).status).toBe(500);
+  });
+
+  test("the sum read fails after the row was written and the settle ran: still charged once and granted once", async () => {
+    const w = await world(250, 0, { failSql: "SELECT SUM" });
+    const res = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(res.status).toBe(200);
+    expect(SyncExtraResponseSchema.parse(await res.json()).extra_bytes).toBe(SYNC_EXTRA_BYTES);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold", "settle"]);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
+    expect(await rows(w)).toBe(1);
+  });
+
+  test("the reply was lost after a settle, the stored reply is gone: the same key answers 200 and charges once", async () => {
+    const w = await world(250);
+    await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    await w.db.prepare("DELETE FROM idempotency").run();
+    const again = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(again.status).toBe(200);
+    expect(SyncExtraResponseSchema.parse(await again.json()).extra_bytes).toBe(SYNC_EXTRA_BYTES);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
+    expect(await rows(w)).toBe(1);
+  });
+
+  test("a hold is open and no row exists (the first run is still going): 409 request in progress, retry_after 1, nothing added", async () => {
+    const w = await world(250);
+    w.store.apply({ type: "hold", id: "sync_extra:u1:key-extra-0123456789", hold_id: "sync_extra:u1:key-extra-0123456789", user_id: "u1", task: "sync_extra", credits: SYNC_EXTRA_CREDITS, expires_at: NOW + 60_000 }, NOW);
+    const res = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ code: "conflict", message: "request in progress", retry_after: 1 });
+    expect(await rows(w)).toBe(0);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold"]);
+  });
+
+  test("a settle that finds its hold already released: row removed, nothing charged, 500; the same key stays free; a new key pays once", async () => {
+    const w = await world(250, 0, { releaseBeforeSettle: 1 });
+    const res = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(res.status).toBe(500);
+    expect(await rows(w)).toBe(0);
+    expect(w.store.read()).toMatchObject({ purchased: 250, holds: [] });
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(await rows(w)).toBe(0);
+    const fresh = await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-fresh-00000");
+    expect(fresh.status).toBe(200);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
+    expect(await rows(w)).toBe(1);
+  });
+
+  test("a settle fails, the hold's alarm releases it, the same key again: the free row is removed, no free gigabyte", async () => {
+    const w = await world(250, 1);
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(await rows(w)).toBe(1);
+    w.store.apply({ type: "release", id: "alarm", hold_id: "sync_extra:u1:key-extra-0123456789" }, NOW);
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(await rows(w)).toBe(0);
+    expect(w.store.read()).toMatchObject({ purchased: 250, holds: [] });
+  });
+
+  test("a retry after midnight settles the purchase of the day it was made on, and reports that day's total", async () => {
+    const w = await world(250, 1);
+    const midnight = (DAY + 1) * 86_400_000;
+    w.clock.now = midnight - 5_000;
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-bbbbbbbbbb")).status).toBe(500);
+    w.clock.now = midnight - 4_000;
+    await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-aaaaaaaaaa");
+    w.clock.now = midnight + 5_000;
+    const retry = await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-bbbbbbbbbb");
+    expect(retry.status).toBe(200);
+    expect(SyncExtraResponseSchema.parse(await retry.json()).extra_bytes).toBe(2 * SYNC_EXTRA_BYTES);
+    const days = await w.db.prepare("SELECT day FROM sync_extras ORDER BY key").all<{ day: number }>();
+    expect(days.results.map((r) => r.day)).toEqual([DAY, DAY]);
+    expect(w.store.read()).toMatchObject({ purchased: 50, holds: [] });
   });
 });
