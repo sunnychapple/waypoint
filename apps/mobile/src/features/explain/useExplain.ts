@@ -37,6 +37,8 @@ export function useExplain(sessionId: string, t: number, word: string) {
   // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.
   const [unsavedItem, setUnsavedItem] = useState<ThreadItem | null>(null);
   const [askedLater, setAskedLater] = useState(false);
+  // The explain answer said research would help (offer_research). Reset when a new explain runs.
+  const [offerResearch, setOfferResearch] = useState(false);
   const keys = useRef<Partial<Record<InstantSentTask, string>>>({});
   const idRef = useRef<string | null>(null);
   const cancelled = useRef(false);
@@ -69,6 +71,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
     let text = "";
     let credits: number;
     let retention: "standard" | "zero";
+    if (task === "explain") setOfferResearch(false);
     setPhase({ kind: "running", task, text });
     const onDelta = (piece: string): void => {
       text += piece;
@@ -85,6 +88,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
             ? await streamExplain(explainBody, key, onDelta, abort.signal)
             : await streamMoreDetail(followUp, key, onDelta, abort.signal);
         ({ credits, retention } = done);
+        if (task === "explain") setOfferResearch(done.offer_research);
       }
     } catch (error) {
       if (cancelled.current) return; // closed mid-stream: nothing more is written here
@@ -133,5 +137,5 @@ export function useExplain(sessionId: string, t: number, word: string) {
     setAskedLater(true);
   }
 
-  return { excerpt, phase, explanation, unsavedItem, askedLater, run, toggleSave, saveForLater };
+  return { excerpt, phase, explanation, unsavedItem, askedLater, offerResearch, run, toggleSave, saveForLater };
 }

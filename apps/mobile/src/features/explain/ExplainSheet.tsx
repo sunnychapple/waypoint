@@ -9,7 +9,7 @@ import { formatOffset } from "../../core/format.ts";
 import { useConfig } from "../../platform/config.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors, type Colors } from "../../ui/theme.ts";
-import { CloudLine } from "./CloudLine.tsx";
+import { CloudLine } from "../../ui/CloudLine.tsx";
 import { useExplain } from "./useExplain.ts";
 
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
@@ -30,7 +30,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
   const config = useConfig();
   const model = useExplain(sessionId, t, word);
   const [showSent, setShowSent] = useState(false);
-  const { phase, explanation, unsavedItem } = model;
+  const { phase, explanation, unsavedItem, offerResearch } = model;
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
@@ -111,6 +111,13 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
 
       {phase.kind === "idle" && explained ? (
         <View style={styles.block}>
+          {offerResearch ? (
+            <SecondaryButton
+              label="Research the web"
+              icon="globe"
+              onPress={() => router.push(`/research/new?sessionId=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(`What is ${word}?`)}`)}
+            />
+          ) : null}
           {hasAnswer ? (
             <>
               <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />

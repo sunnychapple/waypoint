@@ -174,6 +174,21 @@ CREATE INDEX jobs_session ON jobs (session_id, created_at);
 `,
   },
   {
+    version: 4,
+    sql: `
+CREATE TABLE research (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  question TEXT NOT NULL,
+  depth TEXT NOT NULL CHECK (depth IN ('quick', 'standard', 'deep')),
+  answer TEXT NOT NULL,
+  sources TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX research_session ON research (session_id, created_at);
+`,
+  },
+  {
     version: 5,
     sql: `
 CREATE TABLE made (
