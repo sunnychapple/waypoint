@@ -88,6 +88,7 @@ async function syncAccountKey(user: string, devices: DeviceView[], myId: string)
 // One pass of M27a's flow. Safe to run again at any time; every step can be repeated.
 async function register(clerkUserId: string, firstTry = true): Promise<void> {
   const list = await api.devices();
+  if (clerkId !== clerkUserId) return; // signed out or switched person while the reply was on its way
   userId = list.user_id;
   const user = list.user_id;
   writeDb((db) => setSetting(db, userIdKey(clerkUserId), user));
@@ -103,11 +104,13 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
     return wait(user);
   }
   if (plan.kind === "start_over") await deleteDeviceKeys(user);
+  if (clerkId !== clerkUserId) return;
   const keys = await ensureDeviceKeys(user, randomUUID());
   const registerSigner = signerFor(user, keys.deviceId);
   const base = { id: keys.deviceId, name: deviceName(Device.modelName), platform: "ios" as const, sign_pub: keys.signPub, box_pub: keys.boxPub };
   if (plan.kind === "register_first") {
     const account = await ensureAccountKey(user, randomUUID());
+    if (clerkId !== clerkUserId) return;
     try {
       await api.registerDevice(
         { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert } },
@@ -123,6 +126,7 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
     }
   }
   const commitment = await startPairing(user);
+  if (clerkId !== clerkUserId) return;
   await api.registerDevice({ ...base, commitment }, registerSigner);
   if (clerkId !== clerkUserId) return;
   wait(user);
@@ -170,6 +174,7 @@ function restore(clerkUserId: string): void {
 export function useDeviceRegistration(): void {
   const { isSignedIn, userId: clerkUserId } = useAuth();
   useEffect(() => {
+    accountKeyProblem = false; // a sign-out or a switch to another person: nothing carries over
     if (isSignedIn !== true || clerkUserId === null || clerkUserId === undefined) {
       setDeviceSigner(null);
       userId = null;
@@ -222,8 +227,11 @@ export type PairingState = { kind: "none" } | { kind: "wait_approver" } | { kind
 // the code (docs/security.md section 8).
 export function usePairing(): PairingState {
   const current = useDeviceStatus();
+  // The id of the device being approved: a new one after "Start again" restarts the polling.
+  const deviceId = current === "waiting" && userId !== null ? (getDeviceKeys(userId)?.deviceId ?? null) : null;
   const [state, setState] = useState<PairingState>({ kind: "none" });
   useEffect(() => {
+    setState({ kind: "none" });
     const user = userId;
     const keys = user === null ? null : getDeviceKeys(user);
     if (current !== "waiting" || user === null || keys === null) return;
@@ -254,7 +262,7 @@ export function usePairing(): PairingState {
       stopped = true;
       clearInterval(timer);
     };
-  }, [current]);
+  }, [current, deviceId]);
   return state;
 }
 

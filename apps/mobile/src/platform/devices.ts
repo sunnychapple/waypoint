@@ -111,7 +111,7 @@ export async function removeDevice(targetId: string): Promise<RemoveResult> {
     } catch (error) {
       if (error instanceof ApiCallError) {
         await finishAccountRotation(user, accountId, false);
-        if (error.status === 409 && error.message === "devices changed, try again") return "changed";
+        if (error.status === 409) return "changed"; // the list changed (in this request, or the server's own read)
       }
       // A lost reply keeps the pending key; the next refresh adopts our own envelope if the removal went through.
       throw error;

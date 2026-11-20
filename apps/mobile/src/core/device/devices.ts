@@ -93,8 +93,8 @@ export type NewDeviceStep =
   | { kind: "expired" };
 
 export function newDeviceStep(view: PairingView, now: number): NewDeviceStep {
-  if (view.device_nonce !== null) return { kind: "wait_approval" };
   if (view.expires_at <= now) return { kind: "expired" };
+  if (view.device_nonce !== null) return { kind: "wait_approval" };
   if (view.approver === null || view.approver_nonce === null) return { kind: "wait_approver" };
   return { kind: "reveal", approver: { id: view.approver.id, signPub: view.approver.sign_pub }, approverNonce: view.approver_nonce };
 }

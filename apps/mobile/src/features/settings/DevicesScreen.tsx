@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -16,6 +16,20 @@ function subtitle(row: DeviceRow): string {
   if (row.mine) return "This iPhone";
   if (row.waiting) return "Waiting for approval";
   return `Added ${dateLine(row.addedAt, -new Date().getTimezoneOffset())}`;
+}
+
+function BackButton() {
+  const colors = useColors();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+      onPress={() => router.back()}
+      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
+    >
+      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
+    </Pressable>
+  );
 }
 
 // Settings › Devices (docs/security.md sections 8 and 12).
@@ -95,6 +109,7 @@ export default function DevicesScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load()} />}
       >
+        <BackButton />
         <Title>Devices</Title>
         {needsKey ? (
           <View style={styles.notice}>
@@ -122,4 +137,5 @@ export default function DevicesScreen() {
 const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 40, gap: 16 },
   notice: { gap: 12 },
+  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
 });

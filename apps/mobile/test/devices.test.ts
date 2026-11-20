@@ -71,6 +71,9 @@ describe("pairing steps", () => {
     expect(newDeviceStep({ ...VIEW, device_nonce: N("D") }, 0)).toEqual({ kind: "wait_approval" });
     expect(newDeviceStep(VIEW, 1000)).toEqual({ kind: "expired" });
   });
+  it("a revealed pairing past its expiry is expired, so the screen offers Start again", () => {
+    expect(newDeviceStep({ ...VIEW, device_nonce: N("D") }, 1000)).toEqual({ kind: "expired" });
+  });
   it("the approver starts, waits, then compares; another approver means taken", () => {
     expect(approverStep(VIEW, "dev_a", 0)).toEqual({ kind: "start" });
     const mine = { ...VIEW, approver: { id: "dev_a", sign_pub: K("A") }, approver_nonce: N("A") };
