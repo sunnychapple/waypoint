@@ -35,7 +35,7 @@ import {
 import { getDeviceKeys, heldGroupKeyVersions, lockContent, lockFile, unlockContent, unlockFile } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbUser, getDb, writeDb } from "./db.ts";
 import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 
@@ -425,12 +425,13 @@ function groupFromPush(data: unknown): string | null {
   return null;
 }
 
-// Defined at module scope and imported by the root layout, so it exists when iOS wakes the app with no screen up.
-// The person comes from the stored identity (device.ts); when that is not known, nothing is done.
+// The person comes from the stored identity (device.ts); when that is not known, or nobody is signed in on this iPhone
+// (open question 52: no notes are open), nothing is done. A push for a group only someone else on this iPhone is in
+// finds no such group in these notes and does nothing either (runOnce).
 TaskManager.defineTask(SYNC_TASK, async ({ data, error }) => {
   if (error !== null) return;
   const groupId = groupFromPush(data);
-  if (groupId !== null && restoreApprovedUser() !== null) await syncNow(groupId);
+  if (groupId !== null && dbUser() !== null && restoreApprovedUser() !== null) await syncNow(groupId);
 });
 
 // Called once in (tabs)/_layout.tsx: runs the sync while the app is active, and registers the silent push task.

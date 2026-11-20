@@ -3,11 +3,11 @@ import { ClerkProvider, useAuth, useSignIn, useSignUp, useUser, type TokenCache 
 import { tokenCache } from "@clerk/expo/token-cache";
 import { resourceCache } from "@clerk/expo/resource-cache";
 import { useSignInWithApple } from "@clerk/expo/apple";
-import * as SecureStore from "expo-secure-store";
 import { REQUIRE_SIGN_IN, decideGate, type Gate } from "../core/auth/gate.ts";
+import { notesStep } from "../core/db/users.ts";
+import { closeUserDb, dbUser, openUserDb } from "./db.ts";
 
 const publishableKey: string = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
-const SIGNED_IN_BEFORE = "waypoint.signed_in_before";
 
 function secureTokenCache(): TokenCache {
   if (!tokenCache) throw new Error("secure token cache unavailable");
@@ -76,24 +76,27 @@ export function useAppleSignIn(): () => Promise<AppleResult> {
   };
 }
 
+// Also decides whose notes are open (open question 52): the person Clerk says is signed in, opened here, before any
+// screen reads them. Before Clerk has loaded (offline), the person signed in last time ("signed in before"). When Clerk
+// says nobody is signed in, their notes are closed; nothing is deleted.
 export function useGate(): Gate {
-  const { isLoaded, isSignedIn } = useAuth();
-  const [signedInBefore, setSignedInBefore] = useState(false);
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const notes = notesStep({ clerkLoaded: isLoaded, clerkSignedIn: isSignedIn, clerkUserId: userId });
+  if (notes.kind === "open") openUserDb(notes.user);
+  const signedInBefore = dbUser() !== null;
   const [waitedMs, setWaitedMs] = useState(0);
   const started = useRef(Date.now());
   const gate = decideGate({ requireSignIn: REQUIRE_SIGN_IN, clerkLoaded: isLoaded, clerkSignedIn: isSignedIn === true, signedInBefore, waitedMs });
   const waiting = gate === "wait";
   useEffect(() => {
-    SecureStore.getItemAsync(SIGNED_IN_BEFORE).then((v) => setSignedInBefore(v === "1"), () => setSignedInBefore(false));
-  }, []);
-  useEffect(() => {
     if (!waiting) return;
     const timer = setInterval(() => setWaitedMs(Date.now() - started.current), 500);
     return () => clearInterval(timer);
   }, [waiting]);
+  // A backstop for a session that ended without useSignOut (it expired, or was ended elsewhere).
   useEffect(() => {
-    if (isLoaded && isSignedIn === true) SecureStore.setItemAsync(SIGNED_IN_BEFORE, "1").catch(() => undefined);
-  }, [isLoaded, isSignedIn]);
+    if (notes.kind === "close") void closeUserDb();
+  }, [notes.kind]);
   return gate;
 }
 
@@ -107,11 +110,12 @@ export function useProfile(): Profile | null {
   return { firstName, email, initial: (firstName[0] ?? "?").toUpperCase(), viaApple: user.externalAccounts.some((a) => a.provider === "apple") };
 }
 
-// Signing out never deletes notes (K1: "Signing out doesn't delete your notes.").
+// Signing out never deletes notes (K1: "Signing out doesn't delete your notes."). They are closed right after Clerk's
+// sign-out, and the Keychain stops naming this person before this resolves; they open again when this person signs in.
 export function useSignOut(): () => Promise<void> {
   const { signOut } = useAuth();
   return async () => {
-    await SecureStore.deleteItemAsync(SIGNED_IN_BEFORE);
     await signOut();
+    await closeUserDb();
   };
 }

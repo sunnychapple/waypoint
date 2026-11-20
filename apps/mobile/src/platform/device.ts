@@ -24,7 +24,7 @@ import {
 } from "../../modules/waypoint-keys/index.ts";
 import { api, setDeviceSigner } from "./api.ts";
 import { isUpdateRequired } from "./config.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbUser, getDb, writeDb } from "./db.ts";
 
 let status: DeviceStatus = "checking";
 let userId: string | null = null;
@@ -201,7 +201,8 @@ export function useDeviceRegistration(): void {
       setDeviceSigner(null);
       // A headless push does not sync a signed-out person, including one whose session ended while the app was closed.
       // Not while Clerk is still loading (isSignedIn undefined).
-      if (userId !== null || (isLoaded && isSignedIn === false)) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
+      // Only while that person's notes are still open (open question 52: sign-out closes them).
+      if (dbUser() !== null && (userId !== null || (isLoaded && isSignedIn === false))) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
       userId = null;
       clerkId = null;
       setStatus("signed_out");
