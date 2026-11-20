@@ -54,7 +54,7 @@ D8 is the app. When a send gets the limit, the app stops sending until the time 
 | D5 | `feat/d5-sync-extra` | API, contracts and API client: `POST /v1/sync/extra` | D3 (`sync_extras`; both edit `packages/contracts/src/sync.ts`) |
 | D6 | `feat/d6-notes-per-person` | App: one notes database per person (question 52) | `main` at `3c90a85` or later |
 | D7 | `feat/d7-storage-per-person` | App: the storage screen counts only your recordings | `main` at `3c90a85` or later |
-| D8 | `feat/d8-sync-limit-sheet` | App: the sync limit sheet (question 55) | D5 (the API client method), D6 (`dbGeneration`; both edit `apps/mobile/src/platform/sync.ts`) |
+| D8 | `feat/d8-sync-limit-sheet` | App: the sync limit sheet (question 55) | `main` at `33b6a9c` or later (D5 and D6 are merged there; the card's blocks are written against it) |
 | D9 | `feat/d9-play-recording` | App: play a recording from the session screen (question 54) | `main` at `3c90a85` or later |
 | D10 | `fix/d10-history-from-now` | App: "from now" members drop changes to older notes (question 56) | `main` at `3c90a85` or later |
 
@@ -1851,7 +1851,7 @@ Make a recording and a page set, open Settings › Storage & search: "Recordings
 
 ## D8 · App: the sync limit sheet
 
-Branch `feat/d8-sync-limit-sheet`. From `main` at `3c90a85`, **after D5 and D6 are merged** (D5 adds `api.buySyncExtra` and the contract constants; D6 adds `dbGeneration` and also edits `apps/mobile/src/platform/sync.ts`, other lines). No new package. Files, and no others:
+Branch `feat/d8-sync-limit-sheet`. From `main` at `33b6a9c` (D5 and D6 are merged there: D5 added `api.buySyncExtra` and the contract constants, D6 added `dbGeneration`, `stillSame` and `writeDbIf`). No new package. Files, and no others:
 
 - `apps/mobile/src/core/sync/limit.ts` (new), `apps/mobile/test/sync-limit.test.ts` (new)
 - `apps/mobile/src/platform/sync.ts`
@@ -1863,11 +1863,18 @@ Branch `feat/d8-sync-limit-sheet`. From `main` at `3c90a85`, **after D5 and D6 a
 
 What the app does:
 
-- A send that gets the limit stores the time sync may start again (the reply's `retry_after`: the next 00:00 UTC) in the setting `sync_limit_until`. Until then `runOnce` does not send; it still pulls, so other people's changes keep arriving. Changes made meanwhile wait in the outbox, as they do offline.
+- A send that gets the limit stores the time sync may start again (the reply's `retry_after`: the next 00:00 UTC) in the setting `sync_limit_until`. Until then `runNow` does not send; it still pulls, so other people's changes keep arriving. Changes made meanwhile wait in the outbox, as they do offline.
 - The space screen of a synced space shows "Today's sync is used up. Changes wait on this iPhone." and an "Add more for today" button that opens the sheet. The sheet does not open by itself from a background send: it could appear over a recording.
 - Making a shared link that gets the limit opens the sheet at once.
-- The sheet's "Add 1 GB · 100 credits" calls `POST /v1/sync/extra` with the price it showed. On success it clears the pause and sends what waited. Out of credits shows the shortfall and "Get credits" (the Plans screen); the same Idempotency-Key is kept for the retry, so one purchase is never paid twice. "Wait" closes the sheet. The title always says "You've synced 200 MB today".
-- Each of these reads `dbGeneration()` (D6) before its request and writes the setting only if no one signed out or in meanwhile.
+- The sheet's title always says "You've synced 200 MB today". "Add 1 GB · 100 credits" calls `POST /v1/sync/extra` with the price it showed; on success it clears the pause and sends what waited. "Wait" closes the sheet.
+- The answers of `POST /v1/sync/extra` (D5), and what the sheet does with each. One Idempotency-Key is kept in memory for the purchase the sheet is trying (no setting stores it):
+  - 200: bought. The key is dropped, the pause cleared, and every synced group sends now.
+  - 409 "request already finished": an earlier tap with this key bought it and its reply was lost. The same as 200: never charged again. If today's budget is somehow still used up, the next send finds the limit again.
+  - 402: "Out of credits. You need N more credits…" and "Get credits", which opens the Plans screen with `need` (as the other Out of credits screens do). The key is kept, so the tap after buying credits makes the same purchase, once.
+  - 409 "request in progress" (with `retry_after`): the API client already waits `retry_after` and sends again with the same key (`retry: true` in `buySyncExtra`). If it is still running after the client's last try, the sheet says "Still working on it" and the key is kept.
+  - 500 whose message asks for a new Idempotency-Key ("purchase not completed, nothing was charged…"): "Something went wrong. Try again in a moment.", and the key is dropped, so trying again (the same "Add 1 GB" button) sends a new one. Any other 500, and offline, keep the key: the first try may have been charged.
+  - 409 "price changed": the app's price is the contract constant `SYNC_EXTRA_CREDITS`, and no route returns the server's price, so the new price comes with an app update. The sheet hides the buy button and says "The price of more sync has changed, and nothing was charged. Update Waypoint to see the new price."; the key is dropped.
+- Work that awaits and then writes the setting reads `dbGeneration()` (D6) before the request and writes through `writeDbIf` or after `stillSame`, so nothing lands in someone else's notes after a sign-out.
 
 ### 1. The rules and the words
 
@@ -1897,13 +1904,30 @@ export function sendingPaused(stored: string | null, now: number): boolean {
   return stored !== null && Number(stored) > now;
 }
 
+// What an error reply from POST /v1/sync/extra means for the next tap (D5):
+// - "bought": an earlier tap with this key bought it and its reply was lost (409 "request already finished"). Done:
+//   never pay again.
+// - "price_changed": the server charges another price (409 "price changed"). Nothing was charged; this key can never buy.
+// - "new_key": nothing was charged and this key can never buy (a 500 whose message asks for a new Idempotency-Key).
+// - "same_key": anything else (out of credits, still in progress, any other server error). The next tap sends the same
+//   key, so one purchase is never paid twice.
+export type ExtraOutcome = "bought" | "price_changed" | "new_key" | "same_key";
+
+export function extraOutcome(status: number, message: string): ExtraOutcome {
+  if (status === 409 && message === "request already finished") return "bought";
+  if (status === 409 && message === "price changed") return "price_changed";
+  if (status === 500 && message.endsWith("new Idempotency-Key")) return "new_key";
+  return "same_key";
+}
+
 // The sheet's words. `againAt` is when sync starts again, as the screen shows a time.
-export function syncLimitCopy(againAt: string): { title: string; body: string; buy: string } {
+export function syncLimitCopy(againAt: string): { title: string; body: string; buy: string; priceChanged: string } {
   const extra = `${SYNC_EXTRA_BYTES / 1_000_000_000} GB`;
   return {
     title: `You've synced ${bytesLabel(SYNC_DAILY_BYTES)} today`,
     body: `Add ${extra} more for today for ${SYNC_EXTRA_CREDITS} credits, or wait until ${againAt}, when sync starts again. Your notes stay on this iPhone meanwhile.`,
     buy: `Add ${extra} · ${SYNC_EXTRA_CREDITS} credits`,
+    priceChanged: "The price of more sync has changed, and nothing was charged. Update Waypoint to see the new price.",
   };
 }
 ```
@@ -1912,7 +1936,7 @@ export function syncLimitCopy(againAt: string): { title: string; body: string; b
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { isSyncLimit, limitUntil, sendingPaused, syncLimitCopy } from "../src/core/sync/limit.ts";
+import { extraOutcome, isSyncLimit, limitUntil, sendingPaused, syncLimitCopy } from "../src/core/sync/limit.ts";
 
 const DAY = 86_400_000;
 const NOW = 20_400 * DAY + 18 * 3_600_000;
@@ -1940,14 +1964,32 @@ describe("the daily sync limit", () => {
       title: "You've synced 200 MB today",
       body: "Add 1 GB more for today for 100 credits, or wait until 7:00 PM, when sync starts again. Your notes stay on this iPhone meanwhile.",
       buy: "Add 1 GB · 100 credits",
+      priceChanged: "The price of more sync has changed, and nothing was charged. Update Waypoint to see the new price.",
     });
+  });
+});
+
+describe("buying more sync for today", () => {
+  it("counts a request that already finished as bought, so it is never paid again", () => {
+    expect(extraOutcome(409, "request already finished")).toBe("bought");
+  });
+
+  it("drops the key when the server says it can never buy", () => {
+    expect(extraOutcome(409, "price changed")).toBe("price_changed");
+    expect(extraOutcome(500, "purchase not completed, nothing was charged: try again with a new Idempotency-Key")).toBe("new_key");
+  });
+
+  it("keeps the key for out of credits, a request still in progress, and any other server error", () => {
+    expect(extraOutcome(402, "not enough credits")).toBe("same_key");
+    expect(extraOutcome(409, "request in progress")).toBe("same_key");
+    expect(extraOutcome(500, "something went wrong")).toBe("same_key");
   });
 });
 ```
 
 ### 2. Pausing, and buying more
 
-`apps/mobile/src/platform/sync.ts` (as D6 left it):
+`apps/mobile/src/platform/sync.ts`:
 
 - Replace these two lines:
 
@@ -1960,20 +2002,20 @@ import { deleteSetting, setSetting } from "../core/db/settings.ts";
 
 ```ts
 import { SYNC_EXTRA_CREDITS, SyncServerMessageSchema } from "@waypoint/contracts";
-import { keepsKey, type CloudFailure } from "../core/cloud/failure.ts";
+import type { CloudFailure } from "../core/cloud/failure.ts";
 import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 ```
 
 - After the line `} from "../core/sync/rules.ts";`, add exactly:
 
 ```ts
-import { SYNC_LIMIT_KEY, isSyncLimit, limitUntil, sendingPaused } from "../core/sync/limit.ts";
+import { SYNC_LIMIT_KEY, extraOutcome, isSyncLimit, limitUntil, sendingPaused } from "../core/sync/limit.ts";
 ```
 
-- Replace these three lines (the first is D6's):
+- Replace these three lines:
 
 ```ts
-import { dbUser, getDb, writeDb } from "./db.ts";
+import { dbGeneration, dbUser, getDb, writeDb } from "./db.ts";
 import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 ```
@@ -1981,32 +2023,26 @@ import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
   with exactly:
 
 ```ts
-import { dbGeneration, dbUser, getDb, writeDb } from "./db.ts";
+import { dbGeneration, dbUser, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId, requireApprovedDevice, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 import { toFailure } from "./tasks.ts";
 ```
 
-- In `runOnce`, after the line `if (pull) pullQueued.delete(groupId);`, add exactly:
-
-```ts
-  const generation = dbGeneration();
-```
-
-- In `runOnce`, replace the line `await sendPending(user, group, keys.deviceId);` with exactly:
+- In `runNow`, replace the line `    await sendPending(user, group, keys.deviceId, generation);` with exactly:
 
 ```ts
     // Today's sync is used up (open question 55): changes wait in the outbox; pulls go on.
-    if (!sendingPaused(getSetting(getDb(), SYNC_LIMIT_KEY), Date.now())) await sendPending(user, group, keys.deviceId);
+    if (!sendingPaused(getSetting(getDb(), SYNC_LIMIT_KEY), Date.now())) await sendPending(user, group, keys.deviceId, generation);
 ```
 
-- In `runOnce`, replace both lines `await afterFailure(groupId, error);` with exactly:
+- In `runNow`, replace both lines `    await afterFailure(groupId, error);` with exactly:
 
 ```ts
     await afterFailure(groupId, error, generation);
 ```
 
-- Before the comment `// The group's key moved on (a member was removed): take the new key now; the outbox waits for it.` (above `afterFailure`), add exactly:
+- Before the comment `// The group's key moved on (a member was removed): take the new key now; the outbox waits for it.` (above `afterFailure`), add exactly (the block ends with an empty line):
 
 ```ts
 // True when `error` says today's sync is used up (open question 55). Sending then waits until the time the server gave,
@@ -2014,32 +2050,39 @@ import { toFailure } from "./tasks.ts";
 // dbGeneration() from before the request: if someone else's notes are open by now, nothing is written.
 export function syncLimitHit(error: unknown, generation: number): boolean {
   if (!(error instanceof ApiCallError && isSyncLimit(error.status, error.message))) return false;
-  if (dbGeneration() === generation) writeDb((db) => setSetting(db, SYNC_LIMIT_KEY, String(limitUntil(Date.now(), error.retryAfter))));
+  const until = limitUntil(Date.now(), error.retryAfter);
+  writeDbIf(generation, (db) => setSetting(db, SYNC_LIMIT_KEY, String(until)));
   return true;
 }
 
+// The Idempotency-Key of the purchase the sheet is trying. Kept until the purchase is done or the server says this key
+// can never buy (extraOutcome), so a tap after buying credits, after a lost reply or while the last one is still running
+// never pays twice.
 let extraKey: string | null = null;
 
-// The sheet's "Add 1 GB": spends SYNC_EXTRA_CREDITS for more sync today (POST /v1/sync/extra), then sends what waited.
-// The Idempotency-Key is kept while a retry may still buy the same thing (after a purchase of credits, offline), so one
-// tap never pays twice. null when it worked. An iPhone that is not approved yet gets the screen that says why, and
-// "device" back.
-export async function buyMoreSync(): Promise<CloudFailure | null> {
+// The sheet's "Add 1 GB": spends SYNC_EXTRA_CREDITS for more sync today (POST /v1/sync/extra, D5), then sends what
+// waited. null when it is bought, by this tap or by an earlier one whose reply was lost. "price_changed" when the server
+// charges another price. Otherwise why not: an iPhone that is not approved yet gets the screen that says why, and
+// "device" back. The API client already waits and retries "request in progress" and server errors with the same key.
+export async function buyMoreSync(): Promise<CloudFailure | "price_changed" | null> {
   if (!requireApprovedDevice()) return { kind: "device" };
   extraKey ??= randomUUID();
   const generation = dbGeneration();
   try {
     await api.buySyncExtra(SYNC_EXTRA_CREDITS, extraKey);
-    extraKey = null;
-    if (dbGeneration() !== generation) return null; // signed out meanwhile: the next sign-in finds the limit again
-    writeDb((db) => deleteSetting(db, SYNC_LIMIT_KEY));
-    for (const groupId of syncedGroupIds(getDb())) void syncNow(groupId);
-    return null;
   } catch (error) {
-    const failure = toFailure(error);
-    if (!keepsKey(failure)) extraKey = null;
-    return failure;
+    const outcome = error instanceof ApiCallError ? extraOutcome(error.status, error.message) : "same_key";
+    if (outcome !== "bought") {
+      if (outcome !== "same_key") extraKey = null;
+      return outcome === "price_changed" ? "price_changed" : toFailure(error);
+    }
   }
+  extraKey = null;
+  if (!stillSame(generation)) return null; // signed out meanwhile: the next sign-in finds the limit again
+  // Sending starts again now. If today's budget is still used up, the next send finds the limit again.
+  writeDb((db) => deleteSetting(db, SYNC_LIMIT_KEY));
+  for (const groupId of syncedGroupIds(getDb())) void syncNow(groupId);
+  return null;
 }
 
 ```
@@ -2083,7 +2126,7 @@ export default function SyncLimitScreen() {
   const againAt = until === null ? "tomorrow" : new Date(Number(until)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   const copy = syncLimitCopy(againAt);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<CloudFailure | null>(null);
+  const [failure, setFailure] = useState<CloudFailure | "price_changed" | null>(null);
 
   async function buy(): Promise<void> {
     if (busy) return;
@@ -2095,14 +2138,20 @@ export default function SyncLimitScreen() {
     else setFailure(result);
   }
 
-  const problem = failure === null ? null : failureCopy(failure);
+  const problem = failure === null || failure === "price_changed" ? null : failureCopy(failure);
   return (
     <Screen>
       <Title>{copy.title}</Title>
       <Body>{copy.body}</Body>
-      <PrimaryButton label={busy ? "Adding…" : copy.buy} icon="arrow.up.circle" onPress={() => void buy()} />
+      {failure === "price_changed" ? (
+        <Body>{copy.priceChanged}</Body>
+      ) : (
+        <PrimaryButton label={busy ? "Adding…" : copy.buy} icon="arrow.up.circle" onPress={() => void buy()} />
+      )}
       {problem !== null ? <Body>{`${problem.title}. ${problem.body}`}</Body> : null}
-      {failure?.kind === "out_of_credits" ? <SecondaryButton label="Get credits" icon="creditcard" onPress={() => router.push("/plans")} /> : null}
+      {failure !== null && failure !== "price_changed" && failure.kind === "out_of_credits" ? (
+        <SecondaryButton label="Get credits" icon="creditcard" onPress={() => router.push(`/plans?need=${failure.shortfall}`)} />
+      ) : null}
       <SecondaryButton label="Wait" onPress={() => router.back()} />
     </Screen>
   );
@@ -2130,7 +2179,21 @@ import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts
 import { Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 ```
 
-- Replace the `const data = useQuery(…);` statement with, exactly:
+- Replace this statement:
+
+```ts
+  const data = useQuery(
+    (db) => ({
+      space: getSpace(db, id),
+      sessions: sessionsInSpace(db, id),
+      synced: isSpaceSynced(db, id),
+      planRequired: getSetting(db, SYNC_PLAN_KEY) === "1",
+    }),
+    id,
+  );
+```
+
+  with exactly:
 
 ```ts
   const now = useMinuteNow();
@@ -2177,13 +2240,13 @@ import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { syncLimitHit } from "../../platform/sync.ts";
 ```
 
-- In the function that makes the link, after the line `setBusy(true);` (the one just above `try { setMade(await createLink(…`), add exactly:
+- In `makeLink`, after the line `    setBusy(true);` (the only one in the file, just above `try {`), add exactly:
 
 ```ts
     const generation = dbGeneration();
 ```
 
-- In the same function, replace the line `setError(linkFailureText(failure, "make"));` with exactly:
+- In `makeLink`, replace the line `      setError(linkFailureText(failure, "make"));` with exactly:
 
 ```ts
       // Today's sync is used up (open question 55): the sheet offers more for today.
@@ -2193,7 +2256,9 @@ import { syncLimitHit } from "../../platform/sync.ts";
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (mobile + 4), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each. `test/boundaries.test.ts` passes: `SyncLimitScreen` is in `features/capture` and `ShareSessionScreen` opens it by its route, not by an import.
+Root `npm install`, `npm run typecheck`, `npm test` (mobile 470 + 7 = 477; the other packages unchanged), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each. `test/boundaries.test.ts` passes: `core/sync/limit.ts` imports only `@waypoint/contracts` and `src/core`, `SyncLimitScreen` is in `features/capture`, and `ShareSessionScreen` opens it by its route, not by an import.
+
+Without the source changes every new test fails (`src/core/sync/limit.ts` is missing). With an `extraOutcome` that always answers "same_key", the "already finished" and "can never buy" tests fail; the "keeps the key" test is a guard and passes either way.
 
 ### Device check
 
@@ -2201,13 +2266,14 @@ Against a staging API with D3 and D5 deployed (set a test user's `sync_days.byte
 
 1. Edit a note in a synced space. The space screen shows "Today's sync is used up…" within a few seconds, and the other device does not get the edit. Changes from the other device still arrive.
 2. "Add more for today": the sheet says "You've synced 200 MB today" and "Add 1 GB more for today for 100 credits, or wait until <the local time of 00:00 UTC>…". Tap "Add 1 GB · 100 credits": the sheet closes, the edit arrives on the other device, and Plans shows 100 credits fewer.
-3. With fewer than 100 credits: the sheet says "Out of credits. You need N more credits…" and shows "Get credits".
+3. With fewer than 100 credits: the sheet says "Out of credits. You need N more credits…" and shows "Get credits". Buy credits, come back, and tap "Add 1 GB" again: one purchase, charged once.
 4. Share a link while the limit is reached: the sheet opens instead of an error.
 
 ### Not in this PR
 
 - Opening the sheet by itself when a background send hits the limit.
 - Showing how much of today's budget is used, or what was bought today (no read route; not asked for).
+- Learning a changed price from the server: no route returns it (the app sends the contract constant).
 
 ---
 
