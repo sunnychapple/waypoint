@@ -14,6 +14,17 @@ export type RotatedAccountKey = {
   devices: { id: string; cert: string; accountEnvelope: string }[];
 };
 
+// M28a. Group keys stay in the Keychain; these return ids, public keys, envelopes, locked bytes and file paths only.
+export type GroupSigner = { id: string; userId: string; signPub: string; boxPub: string; cert: string };
+export type GroupEnvelope = { keyVersion: number; wrappedKey: string };
+export type OpenGroupKeysResult = { opened: number[]; refused: number[] };
+export type LockLabel = "change" | "group-name" | "snapshot";
+export type WrapGroupKeysResult = { envelopes: WrappedFor[]; refused: string[] };
+export type KeyTarget = { id: string; userId: string; kind: "device" | "account"; signPub: string; boxPub: string; cert: string | null };
+export type WrappedFor = { deviceId: string; keyVersion: number; wrappedKey: string };
+export const wrapGroupKeys = (userId: string, groupId: string, keyVersions: number[], recipients: KeyTarget[], knownAccounts: Record<string, string>): Promise<{ envelopes: WrappedFor[]; refused: string[] }> =>
+  native.wrapGroupKeys(userId, groupId, keyVersions, recipients.map((r) => ({ ...r, cert: r.cert ?? "" })), knownAccounts);
+
 type NativeKeys = {
   getDeviceKeys(userId: string): DeviceKeys | null;
   ensureDeviceKeys(userId: string, deviceId: string): Promise<DeviceKeys>;
@@ -35,6 +46,16 @@ type NativeKeys = {
   adoptAccountKey(userId: string, accountId: string, signPub: string, boxPub: string, envelope: string, trusted: Record<string, string>): Promise<void>;
   rotateAccountKey(userId: string, accountId: string, devices: { id: string; signPub: string; boxPub: string }[]): Promise<RotatedAccountKey>;
   finishAccountRotation(userId: string, accountId: string, keep: boolean): Promise<void>;
+  makeGroupKey(userId: string, groupId: string, keyVersion: number): Promise<void>;
+  dropGroupKey(userId: string, groupId: string, keyVersion: number): Promise<void>;
+  heldGroupKeyVersions(userId: string, groupId: string): number[];
+  wrapGroupKeys(userId: string, groupId: string, keyVersions: number[], recipients: Record<string, string>[], knownAccounts: Record<string, string>): Promise<WrapGroupKeysResult>;
+  openGroupKeys(userId: string, groupId: string, recipientId: string, envelopes: GroupEnvelope[], signers: GroupSigner[], knownAccounts: Record<string, string>): Promise<OpenGroupKeysResult>;
+  lockContent(userId: string, groupId: string, keyVersion: number, label: LockLabel, fields: string[], plaintext: string): Promise<string>;
+  unlockContent(userId: string, groupId: string, label: LockLabel, fields: string[], locked: string): Promise<string>;
+  lockFile(userId: string, groupId: string, keyVersion: number, blobId: string, inPath: string, outPath: string): Promise<number>;
+  unlockFile(userId: string, groupId: string, blobId: string, inPath: string, outPath: string): Promise<void>;
+  lockLink(linkId: string, plaintext: string): Promise<{ key: string; data: string }>;
 };
 
 const native = requireNativeModule<NativeKeys>("WaypointKeys");
@@ -71,3 +92,19 @@ export const adoptAccountKey = (userId: string, account: { id: string; signPub: 
 export const rotateAccountKey = (userId: string, accountId: string, devices: { id: string; signPub: string; boxPub: string }[]): Promise<RotatedAccountKey> =>
   native.rotateAccountKey(userId, accountId, devices);
 export const finishAccountRotation = (userId: string, accountId: string, keep: boolean): Promise<void> => native.finishAccountRotation(userId, accountId, keep);
+
+export const makeGroupKey = (userId: string, groupId: string, keyVersion: number): Promise<void> => native.makeGroupKey(userId, groupId, keyVersion);
+export const dropGroupKey = (userId: string, groupId: string, keyVersion: number): Promise<void> => native.dropGroupKey(userId, groupId, keyVersion);
+export const heldGroupKeyVersions = (userId: string, groupId: string): number[] => native.heldGroupKeyVersions(userId, groupId);
+export const openGroupKeys = (
+  userId: string, groupId: string, recipientId: string, envelopes: GroupEnvelope[], signers: GroupSigner[], knownAccounts: Record<string, string>
+): Promise<OpenGroupKeysResult> => native.openGroupKeys(userId, groupId, recipientId, envelopes, signers, knownAccounts);
+export const lockContent = (userId: string, groupId: string, keyVersion: number, label: LockLabel, fields: string[], plaintext: string): Promise<string> =>
+  native.lockContent(userId, groupId, keyVersion, label, fields, plaintext);
+export const unlockContent = (userId: string, groupId: string, label: LockLabel, fields: string[], locked: string): Promise<string> =>
+  native.unlockContent(userId, groupId, label, fields, locked);
+export const lockFile = (userId: string, groupId: string, keyVersion: number, blobId: string, inPath: string, outPath: string): Promise<number> =>
+  native.lockFile(userId, groupId, keyVersion, blobId, inPath, outPath);
+export const unlockFile = (userId: string, groupId: string, blobId: string, inPath: string, outPath: string): Promise<void> =>
+  native.unlockFile(userId, groupId, blobId, inPath, outPath);
+export const lockLink = (linkId: string, plaintext: string): Promise<{ key: string; data: string }> => native.lockLink(linkId, plaintext);
