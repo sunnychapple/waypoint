@@ -342,6 +342,57 @@ describe("S1C pairing and approval", () => {
     expect(row).toEqual({ approved_by: "phone_1", account_envelope: "FIRST" });
   });
 
+  test("an approval whose account key is replaced between the reads and the batch (a removal landed): 409 'devices changed, try again', still waiting, no envelope", async () => {
+    const w = await world();
+    await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });
+    await w.db
+      .prepare("INSERT INTO device_pairings (device_id, commitment, approver_id, approver_nonce, device_nonce, expires_at) VALUES ('ipad_1', 'c', 'phone_1', ?, ?, ?)")
+      .bind(w.phoneNonce, w.ipadNonce, NOW + TTL)
+      .run();
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.phone, "phone_1", 64);
+    const groupEnvelope = await wrap(w, PURPOSE_GROUP_KEY, groupKeyInfo("g1", 1, "ipad_1"), w.phone, "phone_1", 32);
+    const rotated: BatchDb = {
+      prepare: (query) => w.db.prepare(query),
+      batch: async (statements) => {
+        await w.db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'acct_1'").bind(NOW).run();
+        await insertDevice(w.db, await makeTestDevice("acct_2"), { userId: "u1", kind: "account" });
+        return w.db.batch(statements);
+      },
+    };
+    const body = { cert, account_envelope: accountEnvelope, envelopes: [{ group_id: "g1", key_version: 1, wrapped_key: groupEnvelope }] };
+    const res = await send(w, w.phone, APPROVE, body, { db: rotated });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toEqual({ code: "conflict", message: "devices changed, try again", retry_after: null });
+    const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
+    expect(row?.approved_at).toBeNull();
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM key_envelopes WHERE device_id = ?", "ipad_1")).toBe(0);
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM device_pairings WHERE device_id = ?", "ipad_1")).toBe(1);
+  });
+
+  test("an approval whose approving phone is removed between the reads and the batch: 409 'devices changed, try again', still waiting", async () => {
+    const w = await world();
+    await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });
+    await w.db
+      .prepare("INSERT INTO device_pairings (device_id, commitment, approver_id, approver_nonce, device_nonce, expires_at) VALUES ('ipad_1', 'c', 'phone_1', ?, ?, ?)")
+      .bind(w.phoneNonce, w.ipadNonce, NOW + TTL)
+      .run();
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.phone, "phone_1", 64);
+    const removed: BatchDb = {
+      prepare: (query) => w.db.prepare(query),
+      batch: async (statements) => {
+        await w.db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'phone_1'").bind(NOW).run();
+        return w.db.batch(statements);
+      },
+    };
+    const res = await send(w, w.phone, APPROVE, { cert, account_envelope: accountEnvelope, envelopes: [] }, { db: removed });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toEqual({ code: "conflict", message: "devices changed, try again", retry_after: null });
+    const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
+    expect(row?.approved_at).toBeNull();
+  });
+
   test("approve with an envelope for a group the user has left: 409 'unknown group or key version', the device still waiting", async () => {
     const w = await world();
     await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });

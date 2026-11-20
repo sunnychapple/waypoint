@@ -197,10 +197,18 @@ describe("POST /v1/jobs", () => {
     expect(JobResponseSchema.parse(await res.json()).job.quoted).toBe(15);
   });
 
-  test("video_slides with fallback_voice quotes 52", async () => {
+  test("fallback_voice true gives 400 with no hold, no row and no Workflow; false quotes 50 as without it", async () => {
     const w = await makeJobsWorld();
-    const res = await postJob(w, { type: "video_slides", text: "Slides text", fallback_voice: true });
-    expect(JobResponseSchema.parse(await res.json()).job.quoted).toBe(52);
+    for (const type of ["overview_script", "video_slides"] as const) {
+      const res = await postJob(w, { type, text: "Slides text", fallback_voice: true }, `key-voice-${type}-0123`);
+      expect(res.status).toBe(400);
+      expect(await errorOf(res)).toEqual({ code: "bad_request", message: "fallback voice not available", retry_after: null });
+    }
+    expect(holdCommands(w)).toHaveLength(0);
+    expect(w.workflow.created).toHaveLength(0);
+    expect(await w.db.prepare("SELECT count(*) AS n FROM jobs").first<{ n: number }>()).toEqual({ n: 0 });
+    const res = await postJob(w, { type: "video_slides", text: "Slides text", fallback_voice: false });
+    expect(JobResponseSchema.parse(await res.json()).job.quoted).toBe(50);
   });
 
   test("diagram quotes 18", async () => {

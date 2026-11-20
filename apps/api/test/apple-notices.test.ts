@@ -267,6 +267,32 @@ describe("refunds, revokes and lapses", () => {
     expect((await one<{ zero_retention: number }>("SELECT zero_retention FROM users WHERE id = ?", A)).zero_retention).toBe(0);
   });
 
+  test("a refund of an earlier Plus period after a renewal marks only that row refunded: monthly, entitlement and plan stay", async () => {
+    const first = transaction("t1", "waypoint.plus.monthly", { purchaseDate: NOW - 40 * DAY, expiresDate: NOW - 10 * DAY });
+    const second = transaction("t2", "waypoint.plus.monthly", { originalTransactionId: "t1", purchaseDate: NOW - 10 * DAY, expiresDate: NOW + 20 * DAY });
+    await record(accountA, first);
+    await record(accountA, second);
+    expect(read(accountA).monthly).toBe(2000);
+    commands.splice(0);
+    await apply(accountA, notice("REFUND", uuid(2)), first);
+    expect(commands).toHaveLength(0);
+    expect(read(accountA).monthly).toBe(2000);
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t1")).status).toBe("refunded");
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t2")).status).toBe("active");
+    expect((await one<{ ended_at: number | null }>("SELECT ended_at FROM entitlements WHERE user_id = ? AND product = 'plus'", A)).ended_at).toBeNull();
+    expect(await planOf(A)).toBe("plus");
+  });
+
+  test("a refund of the current Plus period after a renewal still resets monthly to 0 and ends Plus", async () => {
+    const first = transaction("t1", "waypoint.plus.monthly", { purchaseDate: NOW - 40 * DAY, expiresDate: NOW - 10 * DAY });
+    const second = transaction("t2", "waypoint.plus.monthly", { originalTransactionId: "t1", purchaseDate: NOW - 10 * DAY, expiresDate: NOW + 20 * DAY });
+    await record(accountA, first);
+    await record(accountA, second);
+    await apply(accountA, notice("REFUND", uuid(3)), second);
+    expect(read(accountA).monthly).toBe(0);
+    expect(await planOf(A)).toBe("free");
+  });
+
   test("the same refund notice applied twice makes one wallet command", async () => {
     const txn = transaction("t1", "waypoint.credits.1000");
     await apply(accountA, notice("ONE_TIME_CHARGE", uuid(1)), txn);

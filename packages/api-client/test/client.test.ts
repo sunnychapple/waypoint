@@ -82,13 +82,15 @@ describe("errors and retries", () => {
   });
 
   it("409 without retry_after (another request with this key) is thrown at once", async () => {
-    const { client, sent } = fakeApi([jsonReply(409, { code: "conflict", message: "Idempotency-Key reused with a different request", retry_after: null })]);
+    const signer = softwareSigner("dev_phone");
+    const { client, sent } = fakeApi([jsonReply(409, { code: "conflict", message: "Idempotency-Key reused with a different request", retry_after: null })], { device: () => signer });
     await expect(client.setZeroRetention(true)).rejects.toMatchObject({ status: 409 });
     expect(sent).toHaveLength(1);
   });
 
   it("network errors and 5xx retry up to 3 attempts with backoff, same key", async () => {
-    const { client, sent, slept } = fakeApi([new TypeError("offline"), new Response("bad gateway", { status: 502 }), jsonReply(200, { zero_retention: true })]);
+    const signer = softwareSigner("dev_phone");
+    const { client, sent, slept } = fakeApi([new TypeError("offline"), new Response("bad gateway", { status: 502 }), jsonReply(200, { zero_retention: true })], { device: () => signer });
     expect(await client.setZeroRetention(true)).toEqual({ zero_retention: true });
     expect(slept).toEqual([500, 2000]);
     expect(new Set(sent.map((s) => header(s, "Idempotency-Key"))).size).toBe(1);
@@ -118,6 +120,14 @@ describe("device signatures", () => {
     const { client, sent } = fakeApi([]);
     await expect(client.applePurchase("jws")).rejects.toBeInstanceOf(NotRegisteredError);
     expect(sent).toHaveLength(0);
+  });
+
+  it("the zero-retention switch is signed by the device", async () => {
+    const signer = softwareSigner("dev_phone");
+    const { client, sent } = fakeApi([jsonReply(200, { zero_retention: false })], { device: () => signer });
+    await client.setZeroRetention(false);
+    expect(header(sent[0]!, "Waypoint-Device")).toBe("dev_phone");
+    expect(await verifySent(sent[0]!, signer.publicKey)).toBe(true);
   });
 
   it("signs method, path, device, timestamp, nonce and body hash", async () => {

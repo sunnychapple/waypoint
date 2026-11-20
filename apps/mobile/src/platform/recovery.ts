@@ -84,7 +84,8 @@ export async function recoverWithWords(words: string): Promise<RecoverResult> {
       if (!(error instanceof ApiCallError && error.status === 409)) throw error;
     }
     await refreshDeviceNow();
-    // The group keys come back through the account row. A failure here is not a failed recovery, but nothing retries it.
+    // The group keys come back through the account row. A failure here is not a failed recovery: syncGroups reads the
+    // account row's envelopes again for any group this iPhone still has no key for.
     await recoverGroupKeys(user, found.account_device_id).catch(() => undefined);
     return "approved";
   } catch (error) {

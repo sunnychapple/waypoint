@@ -22,7 +22,11 @@ public class WaypointAudioModule: Module {
     AsyncFunction("start") { (sessionId: String) throws in try self.recorder.start(sessionId: sessionId) }
     AsyncFunction("pause") { () throws in try self.recorder.pause(reason: "user") }
     AsyncFunction("resume") { () throws in try self.recorder.resume() }
-    AsyncFunction("stop") { () throws -> Double in try self.recorder.stop() }
+    AsyncFunction("stop") { () async throws -> Double in
+      let recordedMs = try self.recorder.stop()
+      await self.transcriber.waitForFinals(seconds: 5) // the last words reach the app before the recording screen closes
+      return recordedMs
+    }
     Function("getStatus") { () -> [String: Any] in self.recorder.status() }
 
     AsyncFunction("getSpeechStatus") { () async -> [String: Any] in await self.speechStatus() }
