@@ -40,17 +40,21 @@ describe("planKeys", () => {
   const known = { usr_a: K("S"), usr_me: K("M") };
   const mine = t({ id: "dev_me", user_id: "usr_me" });
   it("nobody holds the current version: a first set for every target, unless one is untrusted", () => {
-    expect(planKeys({ targets: [mine, t({})], me: { userId: "usr_me", role: "editor" }, holdsCurrent: false, known, verify })).toEqual({ kind: "first", recipients: [mine, t({})] });
+    expect(planKeys({ targets: [mine, t({})], me: { userId: "usr_me", role: "editor" }, keyVersion: 2, holdsCurrent: false, known, verify })).toEqual({ kind: "first", recipients: [mine, t({})] });
     const stranger = t({ id: "dev_x", user_id: "usr_x" });
-    expect(planKeys({ targets: [mine, stranger], me: { userId: "usr_me", role: "editor" }, holdsCurrent: false, known, verify })).toEqual({ kind: "blocked", untrusted: [stranger] });
+    expect(planKeys({ targets: [mine, stranger], me: { userId: "usr_me", role: "editor" }, keyVersion: 2, holdsCurrent: false, known, verify })).toEqual({ kind: "blocked", untrusted: [stranger] });
   });
   it("adds: an owner serves everyone, others only their own rows", () => {
     const other = t({ id: "dev_new", user_id: "usr_a" });
     const ownNew = t({ id: "dev_me2", user_id: "usr_me" });
     const held = [t({ id: "dev_me", user_id: "usr_me", has_current_key: true }), other, ownNew];
-    expect(planKeys({ targets: held, me: { userId: "usr_me", role: "owner" }, holdsCurrent: true, known, verify })).toEqual({ kind: "add", recipients: [other, ownNew] });
-    expect(planKeys({ targets: held, me: { userId: "usr_me", role: "editor" }, holdsCurrent: true, known, verify })).toEqual({ kind: "add", recipients: [ownNew] });
-    expect(planKeys({ targets: [t({ has_current_key: true })], me: { userId: "usr_me", role: "editor" }, holdsCurrent: false, known, verify })).toEqual({ kind: "none" });
+    expect(planKeys({ targets: held, me: { userId: "usr_me", role: "owner" }, keyVersion: 2, holdsCurrent: true, known, verify })).toEqual({ kind: "add", recipients: [other, ownNew] });
+    expect(planKeys({ targets: held, me: { userId: "usr_me", role: "editor" }, keyVersion: 2, holdsCurrent: true, known, verify })).toEqual({ kind: "add", recipients: [ownNew] });
+    expect(planKeys({ targets: [t({ has_current_key: true })], me: { userId: "usr_me", role: "editor" }, keyVersion: 2, holdsCurrent: false, known, verify })).toEqual({ kind: "none" });
+  });
+  it("version 1 is never made by anyone but the creator, even when nobody holds it yet", () => {
+    expect(planKeys({ targets: [mine, t({})], me: { userId: "usr_me", role: "owner" }, keyVersion: 1, holdsCurrent: false, known, verify })).toEqual({ kind: "none" });
+    expect(planKeys({ targets: [mine, t({})], me: { userId: "usr_me", role: "owner" }, keyVersion: 1, holdsCurrent: true, known, verify })).toEqual({ kind: "add", recipients: [mine, t({})] });
   });
   it("versionsFor and the delay", () => {
     const held = [{ keyVersion: 1, learnedAt: 10 }, { keyVersion: 2, learnedAt: 50 }, { keyVersion: 3, learnedAt: 90 }];

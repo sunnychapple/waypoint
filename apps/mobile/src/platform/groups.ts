@@ -198,6 +198,7 @@ export async function ensureKeys(groupId: string, options: { now: boolean }): Pr
   const plan = planKeys({
     targets: devices,
     me: { userId: user, role: group.role },
+    keyVersion,
     holdsCurrent: heldGroupKeyVersions(user, groupId).includes(keyVersion),
     known,
     verify: verifyCertificate,
@@ -289,7 +290,7 @@ export async function rewrapForNewAccount(user: string, account: { id: string; s
 }
 
 // After a recovery with the words: open the group keys the account row holds, then wrap them for this iPhone.
-// A group whose keys fail is skipped, and nothing retries it: its envelopes are read only here, from the account row.
+// A group whose keys fail is skipped here; syncGroups reads the account row's envelopes again for it.
 export async function recoverGroupKeys(user: string, accountId: string): Promise<void> {
   await refreshGroups();
   for (const g of listGroups(getDb())) {
@@ -304,13 +305,27 @@ export async function recoverGroupKeys(user: string, accountId: string): Promise
 
 let syncing = false;
 
-// Refreshes the groups and brings their keys up to date. One run at a time; a failed run is retried on the next one.
+// Refreshes the groups and brings their keys up to date. One run at a time; a failed run is retried on the next one,
+// and a failed group does not stop the others.
 async function syncGroups(): Promise<void> {
   if (syncing) return;
   syncing = true;
   try {
     await refreshGroups();
-    for (const g of listGroups(getDb())) await ensureKeys(g.id, { now: false });
+    const user = currentUserId();
+    const account = user === null ? null : getAccountKey(user);
+    for (const g of listGroups(getDb())) {
+      try {
+        // A group with no key on this iPhone, which holds the account key: its keys may be waiting in the account row's
+        // envelopes (a recovery whose first read failed). Read those first; ensureKeys then wraps them for this iPhone.
+        if (user !== null && account !== null && g.leftAt === null && heldGroupKeyVersions(user, g.id).length === 0) {
+          await readGroup(user, g.id, account.accountId);
+        }
+        await ensureKeys(g.id, { now: false });
+      } catch {
+        // This group is tried again next time.
+      }
+    }
   } catch {
     // Offline or a failed call: the next launch, or the next time the app comes to the front, tries again.
   } finally {
