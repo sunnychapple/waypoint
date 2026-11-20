@@ -977,6 +977,7 @@ Status: batches 0 to 4 are merged. S1D, S2, M11b and M12 are in review.
 | 9 | PR 23, PR 24, PR 25 (22B) | PR 23, PR 24, PR 25 |
 | 10 and on | PR 26 (price decided; reuses PR 24's `BROWSER`); V1 (30); E1 any time | |
 | Hardening 1 (`docs/cards/hardening-1.md`) | H1, H2, H3a, H3b; H4a, H4b, H5c, H6 (none: from `main` at `856b81d`); H5a, H5b (H4b) | H1, H2, H3a, H3b; H4a, H4b, H5a, H5b, H5c, H6 |
+| Hardening 2 (`docs/cards/hardening-2-account-cert.md`) | H7a (none: from `main` at `5473183`); H7b (H7a) | H7a, then H7b right after. **Both must merge before M28b**: they close the M28a gap where a server could pair a co-member's known account key with its own `box_pub` and receive group keys (account certificate, `docs/security.md` section 6) |
 
 Why this order: S1G is three lines and blocks every mobile stage 2 card, so it goes first. PR 20 merges before PR 27 so the migrations land in number order (`0006_jobs` before `0007_groups`). PR 22A needs PR 20's `start.ts`, `input.ts` and `job.ts`; PR 22B creates the `workflows` block, the `WorkflowEntrypoint` mock and the `env.ts` import that PR 23 to 25 add to, so those three wait for it and then run side by side. PR 30 merges after PR 29 for the migration order. PR 28 Part B merges after S2 so devices can get group keys.
 
@@ -1000,7 +1001,7 @@ Why this order: S1G is three lines and blocks every mobile stage 2 card, so it g
 | M-n | M22a spike (Xcode; not merged); M22b (M22a) | M22b |
 | M-o | M23 (M22b, M25a), M24a (M23), M24b (M24a), M25b (M25a) | M23, M24a, M24b, M25b |
 | M-p | M3c (M3b), M28a (M27b-A), V1 (PR 30) | M3c, M28a, V1 |
-| M-q | M28b (M28a, M3c, M27b-C, M23), M29a (M28b), M29b (M29a) | M28b, M29a, M29b |
+| M-q | M28b (M28a, M3c, M27b-C, M23, H7b), M29a (M28b), M29b (M29a) | M28b, M29a, M29b |
 | M-r | M30a (M29b), M30b (M30a, V1); M2a spike (Xcode, from 2026-11-25; not merged) | M30a, M30b |
 
 Merge order for the whole stage: M3, M13, M26a, M26b, M27a, M14, M17, M15, M16, M20, M21 (M20 can be built as soon as M27a is merged, but merges in this order). M17 merges before M15 because Explain's "Get credits" opens the Plans route. After stage 2: M18 (PR 20, 23) and M19 (PR 20, 24) are written in full once those are merged; stage 3 (M22 to M25) after PR 22B and 25; stage 4 after S1C, S1D, S2, S3, S1F and PR 27 to 30. If the owner pulls M27b's recovery key forward (open question 46), it goes right after M27a.
