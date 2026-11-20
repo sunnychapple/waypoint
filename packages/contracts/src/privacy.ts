@@ -4,7 +4,7 @@ import { INSTANT_TASKS, JOB_TYPES } from "./tasks.ts";
 export const ZeroRetentionRequestSchema = z.strictObject({ enabled: z.boolean() });
 export const ZeroRetentionResponseSchema = z.strictObject({ zero_retention: z.boolean() });
 
-export const ACTIVITY_TASKS = [...INSTANT_TASKS, ...JOB_TYPES] as const;
+export const ACTIVITY_TASKS = [...INSTANT_TASKS, ...JOB_TYPES, "sync_extra"] as const;
 
 // One cloud task as GET /v1/activity shows it. No text: the text sent is kept only on the device.
 export const ActivityItemSchema = z.strictObject({

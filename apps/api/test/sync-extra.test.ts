@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { describe, expect, test } from "vitest";
 import type { SessionUser } from "../src/auth/users.ts";
 import type { AppEnv } from "../src/env.ts";
+import type { UsageEvent } from "../src/usage.ts";
 import { handleError } from "../src/errors.ts";
 import { spendSyncBytes } from "../src/sync/budget.ts";
 import { syncExtraRoute } from "../src/sync/extra.ts";
@@ -60,9 +61,11 @@ async function world(purchased: number, failSettles = 0, options: { failSql?: st
   const store = createWalletStore(createTestStore());
   if (purchased > 0) store.apply({ type: "grant", id: "seed", bucket: "purchased", credits: purchased, ref: "test" }, NOW);
   const commands: Command[] = [];
+  const usage: UsageEvent[] = [];
   let settlesToFail = failSettles;
   const env = {
     DB: flaky,
+    USAGE_QUEUE: { send: async (event: UsageEvent) => void usage.push(event) },
     WALLET: {
       idFromName: (name: string) => name,
       get: (_name: string) => ({
@@ -90,7 +93,7 @@ async function world(purchased: number, failSettles = 0, options: { failSql?: st
   app.route("/", syncExtraRoute({ now: () => clock.now }));
   const buy = async (body: unknown, key = "key-extra-0123456789") =>
     app.request(PATH, await signedInit(phone, { method: "POST", path: PATH, body, now: clock.now, idempotencyKey: key }), env);
-  return { db, store, commands, app, env, buy, clock };
+  return { db, store, commands, usage, app, env, buy, clock };
 }
 
 describe("POST /v1/sync/extra", () => {
@@ -125,6 +128,24 @@ describe("POST /v1/sync/extra", () => {
     expect(retry.status).toBe(200);
     expect(SyncExtraResponseSchema.parse(await retry.json()).extra_bytes).toBe(SYNC_EXTRA_BYTES);
     expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
+  });
+
+  test("a purchase sends one usage event with the credits spent and the hold id; the same key again sends none", async () => {
+    const w = await world(250);
+    await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(w.usage).toHaveLength(1);
+    expect(w.usage[0]).toMatchObject({ id: "sync_extra:u1:key-extra-0123456789", user_id: "u1", task: "sync_extra", outcome: "ok", credits: SYNC_EXTRA_CREDITS, at: NOW });
+    await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(w.usage).toHaveLength(1);
+  });
+
+  test("no usage event when the purchase fails: 402, or a settle that fails (500)", async () => {
+    const poor = await world(40);
+    expect((await poor.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(402);
+    expect(poor.usage).toHaveLength(0);
+    const flaky = await world(250, 1);
+    expect((await flaky.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(flaky.usage).toHaveLength(0);
   });
 
   test("not enough credits: 402 with the shortfall, nothing added", async () => {
