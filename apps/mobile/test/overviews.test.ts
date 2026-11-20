@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { migrate } from "../src/core/db/migrate.ts";
-import { getOverview, lineAt, overviewsToRender, saveOverview, scriptLines, setRenderFailed, setRendered, setRendering, spokenLines } from "../src/core/overviews/overviews.ts";
+import { getOverview, lineAt, overviewsToRender, saveOverview, scriptLines, setRenderFailed, setRenderPending, setRendered, setRendering, spokenLines } from "../src/core/overviews/overviews.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 const AUDIO = { v: 1, title: "Cells", lines: [{ host: "A", text: "Hi" }, { host: "B", text: "Hello" }, { host: "A", text: "Cells" }, { host: "B", text: "Yes" }] };
@@ -52,6 +52,15 @@ describe("overviews", () => {
     expect(overviewsToRender(db)).toHaveLength(0);
     setRenderFailed(db, "job_5", "no_voices");
     expect(getOverview(db, "job_5")).toMatchObject({ state: "no_voices", script });
+  });
+  it("a video held back by a recording stays a script and is listed again to retry", () => {
+    const db = createMemoryDb();
+    migrate(db);
+    saveOverview(db, "video", { id: "job_8", sessionId: null }, JSON.stringify(VIDEO), 5);
+    setRendering(db, "job_8");
+    setRenderPending(db, "job_8");
+    expect(getOverview(db, "job_8")?.state).toBe("script");
+    expect(overviewsToRender(db).map((o) => o.id)).toEqual(["job_8"]);
   });
   it("line starts that are not numbers are dropped when read", () => {
     const db = createMemoryDb();

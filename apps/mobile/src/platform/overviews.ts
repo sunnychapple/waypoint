@@ -8,6 +8,7 @@ import { notesForResearch } from "../core/research/research.ts";
 import { getDb, writeDb } from "./db.ts";
 import { RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 import { startJob } from "./jobs.ts";
+import { renderVideo } from "./videos.ts";
 
 export function overviewText(sessionId: string): string {
   return notesForResearch(getDb(), sessionId, JOB_TEXT_MAX_CHARS.overview_script);
@@ -24,7 +25,7 @@ export function startOverview(sessionId: string, text: string, key: string, prom
 let chain: Promise<void> = Promise.resolve();
 const queued = new Set<string>();
 
-// Speaks the saved script into overviews/<id>.m4a. A failure can be retried.
+// Speaks the saved script into overviews/<id>.m4a (an audio overview), or makes the video overviews/<id>.mp4. A failure can be retried.
 export function renderOverview(id: string): Promise<void> {
   if (!queued.has(id)) {
     queued.add(id);
@@ -38,7 +39,8 @@ export function renderOverview(id: string): Promise<void> {
 
 async function renderNext(id: string): Promise<void> {
   const overview = getOverview(getDb(), id);
-  if (overview === null || overview.kind !== "audio" || overview.state === "ready") return;
+  if (overview === null || overview.state === "ready") return;
+  if (overview.kind === "video") return renderVideo(overview);
   writeDb((db) => setRendering(db, id));
   try {
     const file = `overviews/${id}.m4a`;
@@ -58,17 +60,26 @@ function errorCode(error: unknown): string | null {
   return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : null;
 }
 
-// Renders audio overviews whose voices are not made yet, at launch and when the app comes back.
+const RETRY_MS = 20_000;
+
+// Renders overviews whose voices or video are not made yet, at launch, every 20 seconds while the app is active,
+// and when the app comes back. A video held back by a recording is tried again on these ticks.
 export function useOverviewRenders(): void {
   useEffect(() => {
     const run = (): void => {
-      for (const o of overviewsToRender(getDb())) if (o.kind === "audio") void renderOverview(o.id);
+      for (const o of overviewsToRender(getDb())) void renderOverview(o.id);
     };
     run();
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") run();
+    }, RETRY_MS);
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") run();
     });
-    return () => sub.remove();
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
   }, []);
 }
 

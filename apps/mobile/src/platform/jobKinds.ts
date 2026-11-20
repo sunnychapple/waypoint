@@ -6,4 +6,6 @@ import "./research.ts";
 import "./made.ts";
 
 import "./overviews.ts";
+
+import "./videos.ts";
 export {};
