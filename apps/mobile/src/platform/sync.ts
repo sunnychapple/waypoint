@@ -324,13 +324,16 @@ export function clearSyncPause(): void {
 }
 
 // The sync-limit sheet opened: forget the pause and send now, so the sheet offers to buy only if the server says 429
-// again. Resolves when the sends are done; never rejects.
-export async function recheckSyncLimit(): Promise<void> {
+// again. Resolves when the sends are done, with whether notes still wait to be sent (offline, or another failure);
+// never rejects.
+export async function recheckSyncLimit(): Promise<boolean> {
   clearSyncPause();
   try {
-    await Promise.all(syncedGroupIds(getDb()).map((groupId) => syncNow(groupId)));
+    const groupIds = syncedGroupIds(getDb());
+    await Promise.all(groupIds.map((groupId) => syncNow(groupId)));
+    return groupIds.some((groupId) => nextOutgoing(getDb(), 1, groupId).length > 0);
   } catch {
-    // nobody is signed in
+    return false; // nobody is signed in
   }
 }
 

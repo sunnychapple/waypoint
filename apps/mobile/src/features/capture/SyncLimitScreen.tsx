@@ -15,8 +15,12 @@ export default function SyncLimitScreen() {
   const [busy, setBusy] = useState(false);
   // Opening the sheet clears the pause and sends once: the buy option shows only if the server answered 429 again.
   const [checked, setChecked] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   useEffect(() => {
-    void recheckSyncLimit().then(() => setChecked(true));
+    void recheckSyncLimit().then((stillWaiting) => {
+      setWaiting(stillWaiting);
+      setChecked(true);
+    });
   }, []);
   const [failure, setFailure] = useState<CloudFailure | "price_changed" | null>(null);
 
@@ -40,8 +44,8 @@ export default function SyncLimitScreen() {
   if (checked && until === null) {
     return (
       <Screen>
-        <Title>Sync is working again</Title>
-        <Body>Your notes are sending.</Body>
+        <Title>{waiting ? "Couldn't send yet" : "Sync is working again"}</Title>
+        <Body>{waiting ? "Your notes stay on this iPhone and send when you're back online." : "Your notes are sending."}</Body>
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>
     );

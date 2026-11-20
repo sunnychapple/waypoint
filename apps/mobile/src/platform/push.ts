@@ -31,7 +31,7 @@ export async function registerPushToken(): Promise<void> {
     const request = pushTokenRequest(keys.deviceId, String(token.data), environment);
     if (request === null || sentValue === `${userId}:${pushSentValue(request)}`) return;
     await api.pushToken(request);
-    sentValue = `${userId}:${pushSentValue(request)}`;
+    if (currentUserId() === userId) sentValue = `${userId}:${pushSentValue(request)}`; // not if someone else signed in meanwhile
   } catch {
     // Tried again on the next launch.
   }
