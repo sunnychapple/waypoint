@@ -120,4 +120,38 @@ describe("cards", () => {
     expect(sessionCardCount(db, sessionId)).toBe(2);
     expect(sessionCardCount(db, "no-such-session")).toBe(0);
   });
+
+  it("saveCards skips a front the session already has, ignoring case and spacing", () => {
+    saveCards(db, deps(), sessionId, [card("Elasticity")], "device_model");
+    const second = saveCards(db, deps(), sessionId, [card("elasticity "), card("Supply")], "device_model");
+    expect(second.map((c) => c.front)).toEqual(["Supply"]);
+    expect(sessionCardCount(db, sessionId)).toBe(2);
+  });
+
+  it("saveCards keeps where each card came from, and a missed quiz question is saved as quiz_miss", () => {
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file) VALUES ('cap-1', ?, 'page', 0, 0, 'p.jpg')", [sessionId]);
+    const rows = saveCards(db, deps(), sessionId, [{ ...card("Ohm's law"), captureId: "cap-1", t: 4000 }], "quiz_miss");
+    expect(dueCards(db, NOW, { limit: 10 })).toEqual(rows);
+    expect(rows[0]).toMatchObject({ captureId: "cap-1", t: 4000 });
+    expect(db.get<{ made_by: string }>("SELECT made_by FROM cards WHERE id = ?", [rows[0]?.id ?? ""])).toEqual({ made_by: "quiz_miss" });
+  });
+
+  it("a late review records the time the card was due, not the time it was reviewed", () => {
+    saveCards(db, deps(), sessionId, [card("A")], "device_model");
+    reviewCard(db, "card-1", Rating.Good, NOW + 5 * MIN);
+    expect(db.get<{ due_before: number }>("SELECT due_before FROM reviews")?.due_before).toBe(NOW);
+  });
+
+  it("several reviews over days match ts-fsrs without fuzz, including a late one", () => {
+    saveCards(db, deps(), sessionId, [card("A")], "device_model");
+    const f = fsrs(generatorParameters({ enable_fuzz: false }));
+    let expected = createEmptyCard(new Date(NOW));
+    let at = NOW;
+    for (const step of [0, 10 * MIN, 0, 0, 3 * 86_400_000]) {
+      at = Math.max(at, expected.due.getTime()) + step;
+      expected = f.next(expected, new Date(at), Rating.Good).card;
+      expect(reviewCard(db, "card-1", Rating.Good, at).dueAt).toBe(expected.due.getTime());
+    }
+    expect(expected.scheduled_days).toBeGreaterThanOrEqual(3);
+  });
 });

@@ -5,6 +5,7 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import { listPages, removePage, wordCount } from "../../core/capture/pages.ts";
 import { deleteSessionRow, getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
+import { countLabel } from "../../core/format.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
@@ -23,7 +24,7 @@ export default function YourPagesScreen() {
     const session = getSession(db, id);
     if (!session) return null;
     return { spaceName: getSpace(db, session.spaceId)?.name ?? "", pages: listPages(db, id) };
-  });
+  }, id);
   const [openId, setOpenId] = useState<string | null>(null);
   const cell = (width - 40 - GAP * (COLUMNS - 1)) / COLUMNS;
 
@@ -74,7 +75,7 @@ export default function YourPagesScreen() {
       </View>
       <Title>Your pages</Title>
       <Caption>
-        {reading ? `${pages.length} pages · reading on this iPhone…` : `${pages.length} pages · ${words} words read on this iPhone`}
+        {reading ? `${countLabel(pages.length, "page", "pages")} · reading on this iPhone…` : `${countLabel(pages.length, "page", "pages")} · ${words} words read on this iPhone`}
       </Caption>
       <Pressable
         accessibilityRole="button"

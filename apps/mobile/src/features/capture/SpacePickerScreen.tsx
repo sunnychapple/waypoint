@@ -13,7 +13,7 @@ export default function SpacePickerScreen() {
   const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const spaces = useQuery(listSpaces);
-  const currentId = useQuery((db) => (sessionId ? (getSession(db, sessionId)?.spaceId ?? null) : getSavingTo(db).id));
+  const currentId = useQuery((db) => (sessionId ? (getSession(db, sessionId)?.spaceId ?? null) : getSavingTo(db).id), sessionId ?? "");
   const offset = -new Date().getTimezoneOffset();
 
   function choose(spaceId: string) {

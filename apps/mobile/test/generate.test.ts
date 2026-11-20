@@ -121,4 +121,17 @@ describe("makeQuizFromUnits", () => {
     expect(calls.map((c) => c.n)).toEqual([2, 2]);
     expect(quiz).toHaveLength(3);
   });
+
+  it("finds the source page when the front spans a line break on the page", async () => {
+    const { port } = fakePort(() => [term("Solve 3x + 7 = 22")]);
+    const units = [unit("Page one intro.", "p1", null), unit("Worksheet\nSolve 3x + 7\n= 22\nmore", "p2", null)];
+    const cards = await makeCardsFromUnits(port, units, 5);
+    expect(cards.map((c) => c.captureId)).toEqual(["p2"]);
+  });
+
+  it("asks the model nothing when every unit is blank", async () => {
+    const { port, calls } = fakePort(() => [term("x")]);
+    expect(await makeCardsFromUnits(port, [unit("", "p1"), unit("  \n ", "p2")], 5)).toEqual([]);
+    expect(calls).toEqual([]);
+  });
 });

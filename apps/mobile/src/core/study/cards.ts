@@ -71,12 +71,22 @@ function storedOf(db: SqlDb, cardId: string): { fsrs: string; due_at: number } {
   return row;
 }
 
-// Writes the cards for one session, each new and due now. Returns the saved rows.
+// Same front: case and spacing ignored.
+function frontKey(front: string): string {
+  return front.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// Writes the cards for one session, each new and due now. A card whose front the session already has is skipped,
+// so making flashcards twice does not double the deck. Returns the saved rows.
 export function saveCards(db: SqlDb, deps: Deps, sessionId: string, cards: NewCard[], madeBy: "device_model" | "quiz_miss"): CardRow[] {
   const now = deps.now();
   const rows: CardRow[] = [];
   db.transaction(() => {
+    const seen = new Set(db.all<{ front: string }>("SELECT front FROM cards WHERE session_id = ?", [sessionId]).map((row) => frontKey(row.front)));
     for (const card of cards) {
+      const key = frontKey(card.front);
+      if (seen.has(key)) continue;
+      seen.add(key);
       const id = deps.newId();
       db.run(
         "INSERT INTO cards (id, session_id, kind, front, back, capture_id, t, made_by, created_at, due_at, fsrs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

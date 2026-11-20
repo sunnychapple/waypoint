@@ -16,3 +16,8 @@ export function formatOffset(ms: number): string {
   if (hours === 0) return `${minutes}:${seconds}`;
   return `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`;
 }
+
+// "1 page", "3 pages", "0 pages".
+export function countLabel(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}

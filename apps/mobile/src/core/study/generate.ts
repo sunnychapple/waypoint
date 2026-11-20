@@ -109,9 +109,14 @@ async function askGroup<T>(units: Unit[], want: number, call: (text: string, n: 
   }
 }
 
-// Each group gets its share of the total, by its estimated size.
+// Lower case with every run of whitespace as one space, so a front matches page text across its line breaks.
+function looseText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// Each group gets its share of the total, by its estimated size. Blank units (a page with no text) are left out.
 function plan(port: ModelPort, units: Unit[], total: number): { group: Unit[]; want: number }[] {
-  const groups = packUnits(units, inputBudget(port.contextSize()));
+  const groups = packUnits(units.filter((unit) => unit.text.trim() !== ""), inputBudget(port.contextSize()));
   const all = groups.reduce((sum, group) => sum + tokensOf(group), 0);
   return groups.map((group) => ({ group, want: Math.max(1, Math.ceil((total * tokensOf(group)) / all)) }));
 }
@@ -126,8 +131,8 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
       const key = sameKey(card.front);
       if (seen.has(key) || out.length >= maxTotal) continue;
       seen.add(key);
-      const front = card.front.toLowerCase();
-      const source = group.find((unit) => unit.text.toLowerCase().includes(front)) ?? group[0];
+      const front = looseText(card.front);
+      const source = group.find((unit) => looseText(unit.text).includes(front)) ?? group[0];
       if (source === undefined) continue;
       out.push({ ...card, captureId: source.captureId, t: source.t });
     }
