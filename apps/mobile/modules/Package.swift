@@ -13,5 +13,7 @@ let package = Package(
     .testTarget(name: "PagesCoreTests", dependencies: ["PagesCore"], path: "waypoint-pages/ios/Tests"),
     .target(name: "KeysCore", path: "waypoint-keys/ios/Core"),
     .testTarget(name: "KeysCoreTests", dependencies: ["KeysCore"], path: "waypoint-keys/ios/Tests"),
+    .target(name: "VoicesCore", path: "waypoint-voices/ios/Core"),
+    .testTarget(name: "VoicesCoreTests", dependencies: ["VoicesCore"], path: "waypoint-voices/ios/Tests"),
   ]
 )

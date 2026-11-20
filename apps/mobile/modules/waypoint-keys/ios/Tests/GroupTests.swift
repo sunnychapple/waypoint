@@ -41,6 +41,30 @@ private struct Member {
   }
 }
 
+@Test func anAccountRowIsTrustedOnlyWithItsOwnCertificate() throws {
+  let userId = "usr_sam"
+  let account = AccountKey()
+  let known = [userId: account.signPub]
+  let cert = try account.selfCertificate(userId: userId, accountId: "acct_sam")
+  #expect(GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: account.boxPub, cert: cert, knownAccounts: known))
+  // The attack (review of #104): the known sign_pub and its real certificate, with a box_pub the server chose.
+  let attacker = boxKeyText(P256.KeyAgreement.PrivateKey().publicKey)
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: attacker, cert: cert, knownAccounts: known))
+  // The same, with a certificate signed by a key the server holds.
+  let forged = try AccountCertificate.sign(P256.Signing.PrivateKey(), userId: userId, accountId: "acct_sam", boxPub: attacker)
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: attacker, cert: forged, knownAccounts: known))
+  // No certificate (a row made before this check, served as ""), another row id, an unknown or changed account key.
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: account.boxPub, cert: "", knownAccounts: known))
+  #expect(!GroupKeys.trustedAccount(id: "acct_other", userId: userId, signPub: account.signPub, boxPub: account.boxPub, cert: cert, knownAccounts: known))
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: account.boxPub, cert: cert, knownAccounts: [:]))
+  let changed = AccountKey()
+  let changedCert = try changed.selfCertificate(userId: userId, accountId: "acct_sam")
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: changed.signPub, boxPub: changed.boxPub, cert: changedCert, knownAccounts: known))
+  // A device certificate is not an account certificate, even from the same key.
+  let deviceCert = try DeviceCertificate.sign(account.sign, userId: userId, deviceId: "acct_sam", signPub: account.signPub, boxPub: account.boxPub)
+  #expect(!GroupKeys.trustedAccount(id: "acct_sam", userId: userId, signPub: account.signPub, boxPub: account.boxPub, cert: deviceCert, knownAccounts: known))
+}
+
 @Test func lockedContentWithAGroupKeyRoundTrips() throws {
   let key = SymmetricKey(data: GroupKeys.newKey())
   let ctx = try context("change", ["grp_0123456789abcdef", "dev_sam", "session"])
