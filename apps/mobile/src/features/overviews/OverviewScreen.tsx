@@ -5,7 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { formatClock } from "../../core/format.ts";
-import { getOverview, lineAt, scriptLines, type Overview } from "../../core/overviews/overviews.ts";
+import { getOverview, lineAt, spokenLines, type Overview } from "../../core/overviews/overviews.ts";
 import { useQuery } from "../../platform/db.ts";
 import { fileUri } from "../../platform/files.ts";
 import { renderOverview } from "../../platform/overviews.ts";
@@ -34,10 +34,18 @@ export default function OverviewScreen() {
 
       {overview.state === "ready" && overview.file !== null ? (
         <Player overview={overview} file={overview.file} />
-      ) : overview.state === "failed" ? (
+      ) : overview.state === "failed" || overview.state === "no_voices" ? (
         <>
-          <Text style={[styles.note, { color: colors.ink }]}>Couldn't make the voices.</Text>
+          <Text style={[styles.note, { color: colors.ink }]}>
+            {overview.state === "no_voices"
+              ? "This iPhone needs two voices for this language. Add one in Settings › Accessibility › Spoken Content, then try again."
+              : "Couldn't make the voices."}
+          </Text>
           <PrimaryButton label="Try again" icon="arrow.clockwise" onPress={() => void renderOverview(id)} />
+          <Caption>The script is kept, so you can read it.</Caption>
+          {spokenLines(overview).map((line, index) => (
+            <Text key={index} style={[styles.lineText, { color: colors.ink }]}>{`${line.voice}  ${line.text}`}</Text>
+          ))}
         </>
       ) : (
         <>
@@ -55,7 +63,7 @@ function Player({ overview, file }: { overview: Overview; file: string }) {
   const status = useAudioPlayerStatus(player);
   const [rate, setRate] = useState<(typeof RATES)[number]>(1);
   const recording = getRecorderStatus().state !== "idle";
-  const lines = scriptLines(overview);
+  const lines = spokenLines(overview);
   const current = lineAt(overview.lineStarts, status.currentTime * 1000);
 
   async function togglePlay(): Promise<void> {

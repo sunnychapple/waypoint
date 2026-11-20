@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
@@ -34,17 +34,18 @@ export default function NewOverviewScreen() {
   const [failure, setFailure] = useState<CloudFailure | null>(null);
   const quote = useQuote({ task: "overview_script" });
   const price = quote.quote?.credits ?? null;
-  const text = sessionId !== null ? overviewText(sessionId) : "";
+  // Read once per session: the text shown under "Show what's sent" is the text that is sent.
+  const text = useMemo(() => (sessionId !== null ? overviewText(sessionId) : ""), [sessionId]);
   const hasText = text !== "";
+  const prompt = focus.trim() === "" ? null : focus.trim();
 
   async function start(): Promise<void> {
     if (sessionId === null || !hasText || price === null || starting) return;
     setStarting(true);
     setFailure(null);
-    const prompt = focus.trim() === "" ? null : focus.trim();
     const body = JSON.stringify({ sessionId, text, prompt });
     const key = keyForRequest(attempt.current, body, () => randomUUID());
-    const result = await startOverview(sessionId, key, prompt);
+    const result = await startOverview(sessionId, text, key, prompt);
     setStarting(false);
     if (result.ok) {
       router.replace(`/job/${encodeURIComponent(result.jobId)}`);
@@ -93,6 +94,7 @@ export default function NewOverviewScreen() {
       <QuoteBox state={quote} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
       {showSent && hasText ? (
         <ScrollView style={[styles.sent, { backgroundColor: colors.surface2 }]} nestedScrollEnabled>
+          {prompt !== null ? <Text style={[styles.sentText, { color: colors.ink3 }]}>{`Focus: ${prompt}`}</Text> : null}
           <Text style={[styles.sentText, { color: colors.ink3 }]}>{text}</Text>
         </ScrollView>
       ) : null}

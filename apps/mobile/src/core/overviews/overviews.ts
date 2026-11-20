@@ -2,7 +2,7 @@ import { OverviewScriptResultSchema, VideoSlidesResultSchema } from "@waypoint/c
 import type { SqlDb } from "../db/sql.ts";
 
 export type OverviewKind = "audio" | "video";
-export type OverviewState = "script" | "rendering" | "ready" | "failed";
+export type OverviewState = "script" | "rendering" | "ready" | "failed" | "no_voices";
 export type Overview = {
   id: string; // the job id
   sessionId: string | null;
@@ -73,8 +73,14 @@ export function setRendered(db: SqlDb, id: string, r: { file: string; durationMs
   db.run("UPDATE overviews SET state = 'ready', file = ?, duration_ms = ?, line_starts = ?, voices = ? WHERE id = ?", [r.file, r.durationMs, JSON.stringify(r.lineStarts), r.voices, id]);
 }
 
-export function setRenderFailed(db: SqlDb, id: string): void {
-  db.run("UPDATE overviews SET state = 'failed' WHERE id = ?", [id]);
+// A render that could not finish. The script is kept, so the student can read it and try again.
+export function setRenderFailed(db: SqlDb, id: string, state: "failed" | "no_voices"): void {
+  db.run("UPDATE overviews SET state = ? WHERE id = ?", [state, id]);
+}
+
+// A render stopped on purpose or by a busy renderer: the overview waits as a script.
+export function setRenderPending(db: SqlDb, id: string): void {
+  db.run("UPDATE overviews SET state = 'script' WHERE id = ?", [id]);
 }
 
 export type ScriptLine = { voice: "A" | "B"; text: string };
@@ -84,6 +90,11 @@ export function scriptLines(overview: Overview): ScriptLine[] {
   const value: unknown = JSON.parse(overview.script);
   if (overview.kind === "audio") return OverviewScriptResultSchema.parse(value).lines.map((l) => ({ voice: l.host, text: l.text }));
   return VideoSlidesResultSchema.parse(value).slides.map((s) => ({ voice: "A", text: s.narration }));
+}
+
+// The lines the voices speak. Blank lines are left out (the renderer refuses them), so line indexes match lineStarts.
+export function spokenLines(overview: Overview): ScriptLine[] {
+  return scriptLines(overview).filter((l) => l.text.trim() !== "");
 }
 
 // The line playing at a moment, for highlighting it in the player.

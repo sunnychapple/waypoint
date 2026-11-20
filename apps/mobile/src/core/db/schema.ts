@@ -211,7 +211,7 @@ CREATE TABLE overviews (
   kind TEXT NOT NULL CHECK (kind IN ('audio', 'video')),
   title TEXT NOT NULL,
   script TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'script' CHECK (state IN ('script', 'rendering', 'ready', 'failed')),
+  state TEXT NOT NULL DEFAULT 'script' CHECK (state IN ('script', 'rendering', 'ready', 'failed', 'no_voices')),
   file TEXT,
   duration_ms INTEGER CHECK (duration_ms >= 0),
   line_starts TEXT NOT NULL DEFAULT '[]',

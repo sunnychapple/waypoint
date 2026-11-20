@@ -245,6 +245,7 @@ const OVERVIEW_STATE: Record<OverviewState, string> = {
   rendering: "Making the voices…",
   ready: "Ready",
   failed: "Couldn't make the voices",
+  no_voices: "Needs a second voice",
 };
 
 // Where a made item opens: practice sets, diagrams and mini apps each have their own screen.
