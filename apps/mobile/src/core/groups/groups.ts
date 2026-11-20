@@ -73,6 +73,15 @@ export function upsertGroup(db: SqlDb, view: GroupView, name: string | null, now
   );
 }
 
+// Each synced space's group, with its kind and this person's role, by space id (M30b's move picker and menu).
+export type SpaceGroup = { groupId: string; kind: "personal" | "shared"; role: Role };
+export function spaceGroups(db: SqlDb): Map<string, SpaceGroup> {
+  const rows = db.all<{ space_id: string; group_id: string; kind: "personal" | "shared"; role: Role }>(
+    "SELECT sg.space_id, sg.group_id, g.kind, g.role FROM space_groups sg JOIN groups g ON g.id = sg.group_id WHERE g.left_at IS NULL",
+  );
+  return new Map(rows.map((r) => [r.space_id, { groupId: r.group_id, kind: r.kind, role: r.role }]));
+}
+
 // Groups this person is still in, by name.
 export function listGroups(db: SqlDb): StoredGroup[] {
   return db.all<GroupRow>(`${SELECT_GROUP} WHERE left_at IS NULL ORDER BY name, id`).map(toStored);

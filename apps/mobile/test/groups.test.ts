@@ -9,6 +9,7 @@ import {
   noteKeyVersion,
   parseMembers,
   rememberSigner,
+  spaceGroups,
   trustedSigners,
   upsertGroup,
 } from "../src/core/groups/groups.ts";
@@ -127,5 +128,21 @@ describe("rememberSigner and trustedSigners", () => {
 
   it("gives nothing before any signer is remembered", () => {
     expect(trustedSigners(fresh())).toEqual([]);
+  });
+});
+
+describe("spaceGroups (M30b)", () => {
+  it("maps each synced space to its group's kind and role, and leaves out groups that were left", () => {
+    const db = fresh();
+    db.run("INSERT INTO spaces (id, name, is_default, created_at, last_used_at) VALUES ('sp_a', 'A', 0, 0, 0), ('sp_b', 'B', 0, 0, 0), ('sp_c', 'C', 0, 0, 0)");
+    upsertGroup(db, view({ id: "grp_shared_view_1", role: "viewer" }), "Book club", 1, "usr_me");
+    upsertGroup(db, view({ id: "grp_personal_0001", kind: "personal" }), "Mine", 1, "usr_me");
+    upsertGroup(db, view({ id: "grp_left_00000001" }), "Old", 1, "usr_me");
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES ('sp_a', 'grp_shared_view_1'), ('sp_b', 'grp_personal_0001'), ('sp_c', 'grp_left_00000001')");
+    markLeft(db, "grp_left_00000001", 2);
+    expect([...spaceGroups(db)]).toEqual([
+      ["sp_a", { groupId: "grp_shared_view_1", kind: "shared", role: "viewer" }],
+      ["sp_b", { groupId: "grp_personal_0001", kind: "personal", role: "owner" }],
+    ]);
   });
 });

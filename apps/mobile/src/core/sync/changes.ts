@@ -30,7 +30,16 @@ const Value = z.union([z.string(), z.number(), z.null()]);
 const At = z.number().int().min(0).max(4_102_444_800_000);
 export const SyncChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: At, op: z.literal("upsert"), table: z.enum(SYNC_TABLES), row: z.record(z.string(), Value) }),
-  z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: At, op: z.literal("delete"), table: z.enum(SYNC_TABLES), row_id: z.string().min(1).max(64) }),
+  z.strictObject({
+    v: z.literal(1),
+    id: z.string().min(16).max(64),
+    at: At,
+    op: z.literal("delete"),
+    table: z.enum(SYNC_TABLES),
+    row_id: z.string().min(1).max(64),
+    // M30b, sessions only: the group the session moved to (it left this group's space for that group's space).
+    moved_to: z.string().min(1).max(64).optional(),
+  }),
   z.strictObject({
     v: z.literal(1),
     id: z.string().min(16).max(64),
@@ -80,19 +89,26 @@ function sessionOf(db: SqlDb, table: SyncTable, rowId: string): string | null {
 // Turns the rows changed on this iPhone (the dirty table, filled by triggers) into outbox entries, one per row,
 // parents before children and deletes last. Rows in spaces that do not sync are dropped. Every queued change is
 // also written to row_versions as this device's, so its echo, or an older change from another device, cannot
-// overwrite it. All changes of one run share one time, later than any change this iPhone has made or applied.
+// overwrite it. One run's deletes share one time, later than any change this iPhone has made or applied, and its
+// upserts and pieces the next millisecond, so a moved session's upsert in its new group is newer than its delete in the
+// old one (M30b).
 export function collectChanges(db: SqlDb, deps: SyncDeps): number {
   let made = 0;
   db.transaction(() => {
+    // The newest entry per row; a delete per row and group, so each old group of a moved session gets its delete.
     const dirty = db.all<{ table_name: SyncTable | "segments"; row_id: string; deleted: number; group_id: string | null }>(
-      `SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id)
+      `SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id, deleted, group_id)
        ORDER BY deleted, CASE table_name WHEN 'spaces' THEN 0 WHEN 'sessions' THEN 1 WHEN 'captures' THEN 2 WHEN 'flags' THEN 3 WHEN 'cards' THEN 4 ELSE 5 END, seq`,
     );
     const clock = db.get<{ clock: number }>("SELECT clock FROM sync_mode")?.clock ?? 0;
     const at = Math.max(deps.now(), clock + 1);
     for (const d of dirty) {
+      // A deleted row that is still here was moved: no delete for the group it is in now, and a session's delete names
+      // the group it is in (M30b).
+      const current = d.deleted === 1 ? groupOf(db, d.table_name, d.row_id) : null;
+      if (d.deleted === 1 && current !== null && current === d.group_id) continue;
       const group = d.deleted === 1 ? d.group_id : groupOf(db, d.table_name, d.row_id);
-      const change = group === null ? null : buildChange(db, d, deps.newId(), at);
+      const change = group === null ? null : buildChange(db, d, deps.newId(), d.deleted === 1 ? at : at + 1, current);
       if (group === null || change === null) continue;
       const body = JSON.stringify(change);
       if (new TextEncoder().encode(body).length > MAX_CHANGE_BYTES) continue;
@@ -102,18 +118,47 @@ export function collectChanges(db: SqlDb, deps: SyncDeps): number {
         changeKind(change),
         body,
         change.op === "upsert" && change.table === "captures" ? d.row_id : null,
-        at,
+        change.at,
       ]);
-      db.run("INSERT OR REPLACE INTO row_versions (table_name, row_id, at, device_id) VALUES (?, ?, ?, ?)", [rowTable(change), rowKey(change, group), at, deps.deviceId]);
+      // A moved session's delete (at) must not replace its upsert (at + 1) as this device's newest version.
+      db.run(
+        `INSERT INTO row_versions (table_name, row_id, at, device_id) VALUES (?, ?, ?, ?)
+         ON CONFLICT (table_name, row_id) DO UPDATE SET at = excluded.at, device_id = excluded.device_id WHERE excluded.at > row_versions.at`,
+        [rowTable(change), rowKey(change, group), change.at, deps.deviceId],
+      );
       made += 1;
     }
-    if (dirty.length > 0) db.run("UPDATE sync_mode SET clock = max(clock, ?)", [at]);
+    if (dirty.length > 0) db.run("UPDATE sync_mode SET clock = max(clock, ?)", [at + 1]);
     db.run("DELETE FROM dirty");
   });
   return made;
 }
 
-function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id: string; deleted: number }, id: string, at: number): SyncChange | null {
+// A session moved to another space (M30b). Its rows are queued for the new space's group (collectChanges finds it from
+// the space). When the old space synced, the session is also deleted for the old group, so devices only there drop it.
+// collectChanges keeps the newest upsert per row and one delete per row and old group, so all of them go out.
+export function markMoved(db: SqlDb, sessionId: string, oldGroupId: string | null): void {
+  db.transaction(() => {
+    db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 0, NULL)", [sessionId]);
+    for (const table of ["captures", "flags", "cards"]) {
+      db.run(`INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT '${table}', id, 0, NULL FROM ${table} WHERE session_id = ?`, [sessionId]);
+    }
+    db.run(
+      `INSERT INTO dirty (table_name, row_id, deleted, group_id)
+       SELECT DISTINCT 'segments', session_id || ':' || source || ':' || (t_start / ${SEGMENT_BUCKET_MS}), 0, NULL FROM segments WHERE session_id = ?`,
+      [sessionId],
+    );
+    if (oldGroupId !== null) db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 1, ?)", [sessionId, oldGroupId]);
+  });
+}
+
+function buildChange(
+  db: SqlDb,
+  d: { table_name: SyncTable | "segments"; row_id: string; deleted: number },
+  id: string,
+  at: number,
+  movedTo: string | null,
+): SyncChange | null {
   const base = { v: 1 as const, id, at };
   if (d.table_name === "segments") {
     const [sessionId, source, piece] = d.row_id.split(":");
@@ -125,7 +170,11 @@ function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id:
     );
     return { ...base, op: "segments", session_id: sessionId, source, bucket, rows };
   }
-  if (d.deleted === 1) return { ...base, op: "delete", table: d.table_name, row_id: d.row_id };
+  if (d.deleted === 1) {
+    return d.table_name === "sessions" && movedTo !== null
+      ? { ...base, op: "delete", table: d.table_name, row_id: d.row_id, moved_to: movedTo }
+      : { ...base, op: "delete", table: d.table_name, row_id: d.row_id };
+  }
   const columns = SYNC_COLUMNS[d.table_name];
   const row = db.get<Record<string, SqlValue>>(`SELECT ${columns.join(", ")} FROM ${d.table_name} WHERE id = ?`, [d.row_id]);
   if (row === null) return null;
@@ -152,6 +201,16 @@ function spaceOf(db: SqlDb, table: ChildTable, id: string): string | null {
   return db.get<{ space_id: string }>(sql, [id])?.space_id ?? null;
 }
 
+// The space this iPhone maps to a group, or null.
+function spaceFor(db: SqlDb, groupId: string): string | null {
+  return db.get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId])?.space_id ?? null;
+}
+
+// Whether a space syncs with some group on this iPhone.
+function synced(db: SqlDb, spaceId: string): boolean {
+  return db.get("SELECT 1 AS ok FROM space_groups WHERE space_id = ?", [spaceId]) !== null;
+}
+
 // A row that is not here but has a version was deleted.
 function wasDeleted(db: SqlDb, table: ChildTable, id: string): boolean {
   return db.get("SELECT 1 AS ok FROM row_versions WHERE table_name = ? AND row_id = ?", [table, id]) !== null;
@@ -161,9 +220,11 @@ function wasDeleted(db: SqlDb, table: ChildTable, id: string): boolean {
 // throws for a bad change:
 // - "applied": written; "older": not newer than what this iPhone has (an echo, a replay, a late change, or its
 //   session was deleted);
-// - "deferred": its session (or a card's photo) has not arrived; kept in sync_pending and applied when it does;
-// - "rejected": unusable (unknown group, a row outside the group's space, a value the tables refuse).
-// Everything lands in the space this iPhone maps to the group; nothing outside it is read or changed.
+// - "deferred": its session (or a card's photo) has not arrived, or the session is in another synced space here (it is
+//   being moved, M30b); kept in sync_pending and applied when it arrives or its own group moves it here;
+// - "rejected": unusable (unknown group, a row in another space, a value the tables refuse).
+// Everything lands in the space this iPhone maps to the group (a session its group moved away goes to the space of the
+// group it moved to); nothing outside that space is changed.
 export function applyChange(db: SqlDb, groupId: string, change: SyncChange, deviceId: string): ApplyResult {
   const space = db.get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId])?.space_id;
   if (space === undefined) return "rejected";
@@ -209,8 +270,17 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     const here = spaceOf(db, change.table, key);
     if (here !== null && here !== space) return "rejected";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
-    db.run(`DELETE FROM ${change.table} WHERE id = ?`, [key]);
     if (change.table === "sessions") db.run("DELETE FROM sync_pending WHERE group_id = ? AND wait_for = ?", [groupId, key]);
+    // Moved to a group this iPhone also syncs (M30b): the session and its rows stay, in that group's space, and what that
+    // group sent while the session was still here is applied. Only the session's own group can move it out of its space.
+    const movedTo = change.table === "sessions" && here !== null && change.moved_to !== undefined && change.moved_to !== groupId ? change.moved_to : null;
+    const target = movedTo === null ? null : spaceFor(db, movedTo);
+    if (movedTo !== null && target !== null) {
+      db.run("UPDATE sessions SET space_id = ? WHERE id = ?", [target, key]);
+      retryPending(db, movedTo, target, key);
+      return "applied";
+    }
+    db.run(`DELETE FROM ${change.table} WHERE id = ?`, [key]);
     return "applied";
   }
   if (change.op === "upsert" && change.table === "spaces") {
@@ -221,7 +291,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   }
   if (change.op === "upsert" && change.table === "sessions") {
     const here = spaceOf(db, "sessions", key);
-    if (here !== null && here !== space) return "rejected";
+    // In another group's space here: it waits until that group moves it out (a delete with moved_to, M30b).
+    if (here !== null && here !== space) return synced(db, here) ? defer(db, groupId, change, deviceId, table, key, key) : "rejected";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
     upsertRow(db, "sessions", { ...change.row, space_id: space });
     retryPending(db, groupId, space, key);
@@ -232,7 +303,7 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   if (typeof sessionId !== "string") return "rejected";
   const parent = spaceOf(db, "sessions", sessionId);
   if (parent === null) return wasDeleted(db, "sessions", sessionId) ? "older" : defer(db, groupId, change, deviceId, table, key, sessionId);
-  if (parent !== space) return "rejected";
+  if (parent !== space) return synced(db, parent) ? defer(db, groupId, change, deviceId, table, key, sessionId) : "rejected";
   if (change.op === "segments") {
     if (!newer(db, table, key, change.at, deviceId)) return "older";
     const from = change.bucket * SEGMENT_BUCKET_MS;
@@ -288,7 +359,10 @@ function defer(db: SqlDb, groupId: string, change: SyncChange, deviceId: string,
 
 // Applies what waited for this session or photo (a card may then wait again, for its photo).
 function retryPending(db: SqlDb, groupId: string, space: string, waitFor: string): void {
-  const waiting = db.all<{ body: string; device_id: string }>("SELECT body, device_id FROM sync_pending WHERE group_id = ? AND wait_for = ? ORDER BY at", [groupId, waitFor]);
+  const waiting = db.all<{ body: string; device_id: string }>(
+    "SELECT body, device_id FROM sync_pending WHERE group_id = ? AND wait_for = ? ORDER BY table_name <> 'sessions', at",
+    [groupId, waitFor],
+  );
   db.run("DELETE FROM sync_pending WHERE group_id = ? AND wait_for = ?", [groupId, waitFor]);
   for (const p of waiting) {
     const parsed = SyncChangeSchema.safeParse(JSON.parse(p.body));

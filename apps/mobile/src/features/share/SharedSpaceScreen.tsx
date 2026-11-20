@@ -125,6 +125,13 @@ export default function SharedSpaceScreen() {
         );
       })}
 
+      <Row
+        title="Key history"
+        subtitle={`Key ${group.keyVersion}`}
+        right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+        onPress={() => router.push(`/shared/keys?groupId=${encodeURIComponent(id)}`)}
+      />
+
       {canInvite(group.role) ? (
         <PrimaryButton
           label="Invite someone"

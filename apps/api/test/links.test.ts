@@ -233,6 +233,13 @@ describe("POST /v1/links", () => {
     expect(await taken.json()).toEqual({ code: "conflict", message: "link id taken", retry_after: null });
   });
 
+  test("data over 4 MiB gives 400, not 500, and no row is written", async () => {
+    const rig = await makeRig();
+    const res = await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, "A".repeat(5_600_000)));
+    expect(res.status).toBe(400);
+    expect(await rowOf(rig, LINK)).toBeNull();
+  });
+
   test("bad data gives 400: key version 1, 32 bytes, or an expiry at now, and no row is written", async () => {
     const rig = await makeRig();
     const wrongVersion = toBase64Url(await lockedFor(LINK, 1));
@@ -306,6 +313,17 @@ describe("DELETE /v1/links/:id", () => {
     const unknown = await signed(rig, "u1", "DELETE", `/v1/links/${UNKNOWN}`);
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ code: "not_found", message: "no such link", retry_after: null });
+  });
+
+  test("its maker can still turn it off after leaving the group; another former member gets 404", async () => {
+    const rig = await makeRig();
+    await seedLink(rig, LINK, { createdBy: "u2" });
+    await seedLink(rig, LINK2, { createdBy: "u1" });
+    await rig.db.prepare("UPDATE memberships SET left_at = ? WHERE user_id = 'u2'").bind(NOW - 1).run();
+    expect((await signed(rig, "u2", "DELETE", `/v1/links/${LINK2}`)).status).toBe(404);
+    const own = await signed(rig, "u2", "DELETE", `/v1/links/${LINK}`);
+    expect(own.status).toBe(200);
+    expect(rig.mem.objects.has(linkKey(LINK))).toBe(false);
   });
 });
 

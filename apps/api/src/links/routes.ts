@@ -88,9 +88,13 @@ export function linkRoutes(deps: { now: () => number; fetch: FetchLike }) {
         .bind(c.req.param("id"))
         .first<LinkRow>();
       if (link === null) throw new ApiFailure("not_found", "no such link");
-      const membership = await activeMembership(db, link.group_id, user.id, now);
-      if (membership === null) throw new ApiFailure("not_found", "no such link");
-      if (link.created_by !== user.id && membership.role !== "owner") throw new ApiFailure("forbidden", "only its maker or an owner can revoke a link");
+      // Its maker can always turn it off, also after leaving or being removed from the group (M30b). Anyone else needs
+      // to be an active owner of the group.
+      if (link.created_by !== user.id) {
+        const membership = await activeMembership(db, link.group_id, user.id, now);
+        if (membership === null) throw new ApiFailure("not_found", "no such link");
+        if (membership.role !== "owner") throw new ApiFailure("forbidden", "only its maker or an owner can revoke a link");
+      }
       const revokedAt = link.revoked_at ?? now;
       await db.prepare("UPDATE links SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(revokedAt, link.id).run();
       const bucket: LinkBucket = c.env.BUCKET;
