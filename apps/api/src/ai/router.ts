@@ -1,7 +1,14 @@
 import type { InstantTask } from "@waypoint/contracts";
-import { decideRoute, RouterAnswersSchema, type RouteDecision, type RouterAnswers } from "@waypoint/router";
+import {
+  decideRoute,
+  RouterAnswersSchema,
+  SUBJECTS,
+  type RouteDecision,
+  type RouterAnswers,
+} from "@waypoint/router";
+import { z } from "zod";
 import type { LoadedConfig } from "../config/load.ts";
-import { gatewayOptions, replyText, type AiBinding } from "./gateway.ts";
+import { gatewayOptions, type AiBinding } from "./gateway.ts";
 
 export const ROUTER_TIMEOUT_MS = 3000;
 
@@ -15,41 +22,87 @@ export const UNSURE_ANSWERS: RouterAnswers = {
   unsafe: { value: false, p: 0 },
 };
 
-export const ROUTER_SYSTEM_PROMPT = [
-  "You route a student's request to a model. Do not answer the request.",
-  "Reply with one JSON object and nothing else, in exactly this shape:",
-  '{"difficulty":{"value":<integer 1-5>,"p":<0-1>},"needs_web":{"value":<true|false>,"p":<0-1>},"subject":{"value":"math"|"science"|"language"|"history"|"other","p":<0-1>},"unsafe":{"value":<true|false>,"p":<0-1>}}',
-  "difficulty: how hard a good answer is to write, 1 (a plain definition) to 5 (needs careful expert reasoning).",
-  "needs_web: true only if a good answer needs facts newer than or missing from general knowledge.",
-  "subject: the school subject. unsafe: true if the request asks for harmful content.",
-  "p is your confidence in that value, from 0 to 1.",
-].join("\n");
-
-const ROUTER_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["difficulty", "needs_web", "subject", "unsafe"],
-  properties: {
-    difficulty: answer({ type: "integer", minimum: 1, maximum: 5 }),
-    needs_web: answer({ type: "boolean" }),
-    subject: answer({ type: "string", enum: ["math", "science", "language", "history", "other"] }),
-    unsafe: answer({ type: "boolean" }),
+// Clef-flash takes its questions as data, not as chat messages, so they are sent as this object.
+const CLEF_QUESTIONS = {
+  difficulty: {
+    type: "score",
+    instructions: "How hard is a good answer to write for a student?",
+    criteria: [
+      "a plain definition",
+      "a short explanation",
+      "a normal explanation",
+      "a multi-step explanation",
+      "careful expert reasoning",
+    ],
   },
+  needs_web: { type: "noul", instructions: "Does a good answer need facts newer than or missing from general knowledge?" },
+  subject: {
+    type: "choice",
+    instructions: "Which school subject is this?",
+    criteria: { math: null, science: null, language: null, history: null, other: null },
+  },
+  unsafe: { type: "noul", instructions: "Does the request ask for harmful content?" },
+} as const;
+
+const Probability = z.number().min(0).max(1);
+const Level = z.enum(["0", "1", "2", "3", "4"]);
+
+// Clef-flash's answers. Fields the mapping does not use (legend, confidence, usage) are dropped.
+const ClefReply = z.object({
+  answers: z.object({
+    // Above 4 is allowed: a score past the top level still means the top level, which the mapping clamps.
+    difficulty: z.object({
+      type: z.literal("score"),
+      score: z.number().min(0).max(5),
+      probabilities: z.record(Level, Probability),
+    }),
+    needs_web: z.object({ type: z.literal("noul"), noul: Probability }),
+    subject: z.object({
+      type: z.literal("choice"),
+      choice: z.enum(SUBJECTS),
+      probabilities: z.record(z.enum(SUBJECTS), Probability),
+    }),
+    unsafe: z.object({ type: z.literal("noul"), noul: Probability }),
+  }),
+});
+
+// The reply may come bare or wrapped as { result }.
+const ClefReplySchema = z.union([ClefReply, z.object({ result: ClefReply })]);
+
+// Score levels that make up each difficulty value's tier band. p for a value is the probability
+// that the answer falls in the same tier band, which is what the router package's tiers depend on.
+const DIFFICULTY_BANDS: Record<number, z.infer<typeof Level>[]> = {
+  1: ["0", "1"],
+  2: ["0", "1"],
+  3: ["2", "3"],
+  4: ["2", "3"],
+  5: ["4"],
 };
 
-function answer(value: Record<string, unknown>): Record<string, unknown> {
+// Clef reads noul as the probability of yes, so the value is yes from one half up.
+function yesNo(noul: number): { value: boolean; p: number } {
+  const value = noul >= 0.5;
+  return { value, p: value ? noul : 1 - noul };
+}
+
+function toAnswers(answers: z.infer<typeof ClefReply>["answers"]): RouterAnswers {
+  const { difficulty, needs_web, subject, unsafe } = answers;
+  const value = Math.min(5, Math.max(1, Math.round(difficulty.score) + 1));
+  const band = DIFFICULTY_BANDS[value] ?? [];
+  // Clamped to 1 so two band probabilities that round above 1 still pass RouterAnswersSchema.
+  const bandP = Math.min(1, band.reduce((sum, level) => sum + difficulty.probabilities[level], 0));
   return {
-    type: "object",
-    additionalProperties: false,
-    required: ["value", "p"],
-    properties: { value, p: { type: "number", minimum: 0, maximum: 1 } },
+    difficulty: { value, p: bandP },
+    needs_web: yesNo(needs_web.noul),
+    subject: { value: subject.choice, p: subject.probabilities[subject.choice] },
+    unsafe: yesNo(unsafe.noul),
   };
 }
 
 export type RouterInput = { task: InstantTask; question: string; text: string };
 
 // Asks the router model the four questions. Returns null on any failure: the call throws or
-// times out, the reply has no text, the text is not JSON, or the JSON is not RouterAnswers.
+// times out, the reply does not match Clef-flash's answer shape, or the mapped answers are not RouterAnswers.
 export async function askRouter(
   ai: AiBinding,
   gatewayId: string,
@@ -57,35 +110,31 @@ export async function askRouter(
   input: RouterInput,
 ): Promise<RouterAnswers | null> {
   let output: unknown;
+  // The abort signal only helps if the binding honors it, so the wait is also raced against a timer.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("router timeout")), ROUTER_TIMEOUT_MS);
+  });
   try {
-    output = await ai.run(
+    output = await Promise.race([ai.run(
       model,
       {
-        messages: [
-          { role: "system", content: ROUTER_SYSTEM_PROMPT },
-          { role: "user", content: `Task: ${input.task}\nWord or question: ${input.question}\nText:\n${input.text}` },
-        ],
-        response_format: { type: "json_schema", json_schema: { name: "router_answers", schema: ROUTER_JSON_SCHEMA, strict: true } },
-        temperature: 0,
-        max_tokens: 200,
+        // The model field is the last path segment of the configured id, e.g. "clef-flash".
+        model: model.slice(model.lastIndexOf("/") + 1),
+        state: { task: input.task, question: input.question, text: input.text },
+        questions: CLEF_QUESTIONS,
       },
       { gateway: gatewayOptions(gatewayId), signal: AbortSignal.timeout(ROUTER_TIMEOUT_MS) },
-    );
+    ), timeout]);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
-  const text = replyText(output);
-  if (text === null) return null;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end < start) return null;
-  let json: unknown;
-  try {
-    json = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-  const parsed = RouterAnswersSchema.safeParse(json);
+  const reply = ClefReplySchema.safeParse(output);
+  if (!reply.success) return null;
+  const answers = "result" in reply.data ? reply.data.result.answers : reply.data.answers;
+  const parsed = RouterAnswersSchema.safeParse(toAnswers(answers));
   return parsed.success ? parsed.data : null;
 }
 
