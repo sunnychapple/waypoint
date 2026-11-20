@@ -24,6 +24,7 @@ import { doubleCheckRoute } from "./tasks/double-check.ts";
 import { explainRoute } from "./tasks/explain.ts";
 import { moreDetailRoute } from "./tasks/more-detail.ts";
 import { quoteRoute } from "./tasks/quote.ts";
+import { syncRoutes } from "./sync/routes.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
 
@@ -61,5 +62,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", jobEventsRoute({ now: deps.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }));
   app.route("/", groupRoutes({ now: deps.now }));
   app.route("/", memberRoutes({ now: deps.now }));
+  app.route("/", syncRoutes({ now: deps.now }));
   return app;
 }
