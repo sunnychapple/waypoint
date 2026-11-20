@@ -1,7 +1,10 @@
+import type { JobType } from "@waypoint/contracts";
 import type { CloudFailure } from "../cloud/failure.ts";
 import type { SqlDb } from "../db/sql.ts";
 
-export type SentTask = "explain" | "more_detail" | "double_check";
+export type SentTask = "explain" | "more_detail" | "double_check" | JobType;
+// The tasks the Explain sheet runs (the instant ones; jobs log through M34).
+export type InstantSentTask = Exclude<SentTask, JobType>;
 
 // UTF-8 length without TextEncoder, so it runs the same in Node and Hermes.
 export function utf8Length(text: string): number {
