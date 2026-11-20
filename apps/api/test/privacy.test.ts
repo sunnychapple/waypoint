@@ -6,11 +6,13 @@ import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
 import { privacyRoutes } from "../src/privacy/routes.ts";
 import { createTestDb } from "./helpers/d1.ts";
+import { insertDevice, makeTestDevice, signedInit } from "./helpers/signing.ts";
 
 const NOW = 1_800_000_000_000;
 const PLUS: SessionUser = { id: "u1", clerk_id: "user_1", plan: "plus", billing_account_id: "u1", zero_retention: false };
 const FREE: SessionUser = { id: "u1", clerk_id: "user_1", plan: "free", billing_account_id: "u1", zero_retention: false };
 const OWN: SessionUser = { id: "u1", clerk_id: "user_1", plan: "own", billing_account_id: "u1", zero_retention: false };
+const PHONE = await makeTestDevice("phone_u1");
 
 // A DB with users u1 and u2 (both free unless said), and the given activity rows for each.
 async function fixture(rows: { user: string; id: string; at: number }[] = []) {
@@ -23,6 +25,7 @@ async function fixture(rows: { user: string; id: string; at: number }[] = []) {
     .prepare("INSERT INTO users (id, clerk_id, created_at, plan, billing_account_id) VALUES (?, ?, ?, ?, ?)")
     .bind("u2", "user_2", NOW, "plus", "u2")
     .run();
+  await insertDevice(db, PHONE, { userId: "u1" });
   for (const row of rows) {
     await db
       .prepare(
@@ -45,12 +48,10 @@ function setup(user: SessionUser) {
   return app;
 }
 
-function put(app: ReturnType<typeof setup>, env: { DB: ReturnType<typeof createTestDb> }, body: string, key: string) {
-  return app.request(
-    "/v1/settings/zero-retention",
-    { method: "PUT", headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body },
-    env,
-  );
+// Signed by u1's approved phone, as every call from the app is.
+async function put(app: ReturnType<typeof setup>, env: { DB: ReturnType<typeof createTestDb> }, body: string, key: string) {
+  const init = await signedInit(PHONE, { method: "PUT", path: "/v1/settings/zero-retention", rawBody: body, now: NOW, idempotencyKey: key });
+  return app.request("/v1/settings/zero-retention", init, env);
 }
 
 async function zeroRetentionColumn(db: ReturnType<typeof createTestDb>, id: string): Promise<number> {
@@ -121,6 +122,18 @@ describe("PUT /v1/settings/zero-retention", () => {
       expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
     }
     expect(await zeroRetentionColumn(db, "u1")).toBe(0);
+  });
+
+  test("without a device signature (a session alone) gets 401 and the column is unchanged", async () => {
+    const db = await fixture();
+    await db.prepare("UPDATE users SET zero_retention = 1 WHERE id = 'u1'").run();
+    const res = await setup(PLUS).request(
+      "/v1/settings/zero-retention",
+      { method: "PUT", headers: { "Content-Type": "application/json", "Idempotency-Key": "key-unsigned-00001" }, body: '{"enabled":false}' },
+      { DB: db },
+    );
+    expect(res.status).toBe(401);
+    expect(await zeroRetentionColumn(db, "u1")).toBe(1);
   });
 
   test("the same key and body twice gives the stored reply with Idempotent-Replayed: true", async () => {

@@ -46,8 +46,9 @@ export function toBase64(bytes: Uint8Array): string {
 const round = (seconds: number): number => Math.round(Math.max(0, seconds) * 100) / 100;
 
 // The make step: Whisper on each chunk in order, then seal. Stops reading chunks once the audio passes the quoted
-// minutes (plus 30 s). Charges the per-minute price for each started minute of reported audio, never above the
-// quote; if a chunk's duration is not reported, charges the quote.
+// minutes (plus 30 s), and cuts the transcript there: audio packed at a very low bit rate fits many more minutes under
+// the byte cap, and none of the words past the quote come back. Charges the per-minute price for each started minute
+// of reported audio, never above the quote; if a chunk's duration is not reported, charges the quote.
 export async function makeTranscript(deps: RetranscribeDeps, input: JobRunInput, uploaded: AudioUploaded | null): Promise<Made> {
   if (uploaded === null || input.minutes === null) return failed("no_upload");
   const quotedMinutes = Math.ceil(input.minutes);
@@ -87,13 +88,21 @@ export async function makeTranscript(deps: RetranscribeDeps, input: JobRunInput,
     if (!parsed.success) throw new ModelError();
     const duration = parsed.data.transcription_info?.duration ?? null;
     if (duration === null) allKnown = false;
-    seconds += duration ?? 300;
+    // What is left of the quote in this chunk. A chunk that runs past it keeps only the segments that start before.
+    const room = limitSeconds - seconds;
+    const cut = duration !== null && duration > room;
+    const segments = (parsed.data.segments ?? []).filter((s) => !cut || s.start < room);
+    seconds += duration === null ? 300 : Math.min(duration, room);
     chunks.push({
       n,
-      duration: duration === null ? null : round(duration),
-      text: parsed.data.text.trim(),
-      segments: (parsed.data.segments ?? []).map((s) => ({ start: round(s.start), end: round(s.end), text: s.text.trim() })),
+      duration: duration === null ? null : round(Math.min(duration, room)),
+      text: cut ? segments.map((s) => s.text.trim()).filter((t) => t !== "").join(" ") : parsed.data.text.trim(),
+      segments: segments.map((s) => ({ start: round(s.start), end: round(cut ? Math.min(s.end, room) : s.end), text: s.text.trim() })),
     });
+    if (cut) {
+      truncated = true;
+      break;
+    }
   }
   const perMinute = Math.max(1, Math.floor(input.credits / quotedMinutes));
   const credits = allKnown ? Math.min(input.credits, perMinute * Math.max(1, Math.ceil(seconds / 60))) : input.credits;

@@ -8,6 +8,10 @@ export const IDEMPOTENCY_ROWS_KEEP_MS = 24 * 60 * 60 * 1000;
 // A blob reservation (PR 29) whose upload never finished: the Worker stopped between the reservation and the end of
 // the upload. After a day it no longer counts against the uploader's media storage.
 export const PENDING_BLOB_KEEP_MS = 24 * 60 * 60 * 1000;
+// A device that registered (S1B) but was never approved, and has no live pairing, is marked removed after a day: it
+// leaves Settings › Devices (each "Start again" on a waiting iPhone registers a new id). The app on that iPhone then
+// finds its keys unknown and registers again (planRegistration: start_over).
+export const WAITING_DEVICE_KEEP_MS = 24 * 60 * 60 * 1000;
 // The card's cap: a run deletes at most MAX_LIST_PAGES pages of 1,000 objects per prefix.
 export const MAX_LIST_PAGES = 20;
 // A safety limit on pages listed per prefix per run, so a run always ends.
@@ -49,7 +53,7 @@ export type CleanupEnv = { DB: Db; BUCKET: CleanupBucket };
 export async function cleanup(
   env: CleanupEnv,
   now: number,
-): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number; pending_blobs: number }> {
+): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number; pending_blobs: number; waiting_devices: number }> {
   const results = await deleteOlderThan(env.BUCKET, "results/", now - RESULTS_KEEP_MS);
   const tmpAudio = await deleteOlderThan(env.BUCKET, "tmp/audio/", now - TMP_AUDIO_KEEP_MS);
   const tmpInput = await deleteOlderThan(env.BUCKET, "tmp/input/", now - TMP_INPUT_KEEP_MS);
@@ -57,6 +61,12 @@ export async function cleanup(
   // Nonces of signed requests (S1A) whose timestamp has left the 5-minute window.
   const nonces = await env.DB.prepare("DELETE FROM request_nonces WHERE expires_at < ?").bind(now).run();
   const pendingBlobs = await env.DB.prepare("DELETE FROM blobs WHERE stored_at IS NULL AND created_at < ?").bind(now - PENDING_BLOB_KEEP_MS).run();
+  const waitingDevices = await env.DB.prepare(
+    `UPDATE devices SET removed_at = ? WHERE kind = 'device' AND approved_at IS NULL AND removed_at IS NULL AND added_at < ?
+       AND NOT EXISTS (SELECT 1 FROM device_pairings p WHERE p.device_id = devices.id AND p.expires_at > ?)`,
+  )
+    .bind(now, now - WAITING_DEVICE_KEEP_MS, now)
+    .run();
   return {
     results,
     tmp_audio: tmpAudio,
@@ -64,5 +74,6 @@ export async function cleanup(
     idempotency: idempotency.meta.changes,
     request_nonces: nonces.meta.changes,
     pending_blobs: pendingBlobs.meta.changes,
+    waiting_devices: waitingDevices.meta.changes,
   };
 }
