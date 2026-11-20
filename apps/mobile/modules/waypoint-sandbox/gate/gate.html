@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Sandbox gate</title>
+<link rel="dns-prefetch" href="//HOST">
+<link rel="preconnect" href="http://HOST:8999">
+<link rel="prefetch" href="http://HOST:8999/link-prefetch">
+<link rel="stylesheet" href="http://HOST:8999/link-css">
+<style>
+  @import url("http://HOST:8999/css-import");
+  @font-face { font-family: x; src: url("http://HOST:8999/font"); }
+  body { font: 14px -apple-system; background: url("http://HOST:8999/css-bg"); }
+  .f { font-family: x; }
+</style>
+<meta http-equiv="refresh" content="3; url=http://HOST:8999/meta-refresh">
+</head>
+<body>
+<h3>Sandbox gate</h3><div class="f">font probe</div><ol id="out"></ol>
+<img src="http://HOST:8999/img">
+<img srcset="http://HOST:8999/srcset 2x">
+<iframe src="http://HOST:8999/iframe"></iframe>
+<object data="http://HOST:8999/object"></object>
+<video src="http://HOST:8999/video" autoplay muted></video>
+<audio src="http://HOST:8999/audio" autoplay></audio>
+<a id="ping" href="#" ping="http://HOST:8999/a-ping">ping</a>
+<form id="form" action="http://HOST:8999/form" method="post"><input name="x" value="1"></form>
+<script>
+const H = "http://HOST:8999/";
+const out = document.getElementById("out");
+const say = (name, result) => { const li = document.createElement("li"); li.textContent = name + ": " + result; out.appendChild(li); };
+const probe = async (name, run) => { try { await run(); say(name, "no error (check the server log)"); } catch (e) { say(name, "blocked (" + (e && e.name) + ")"); } };
+probe("fetch", () => fetch(H + "fetch"));
+probe("xhr", () => new Promise((ok, no) => { const x = new XMLHttpRequest(); x.open("GET", H + "xhr"); x.onload = ok; x.onerror = () => no(new Error("xhr")); x.send(); }));
+probe("websocket", () => new Promise((ok, no) => { const w = new WebSocket("ws://HOST:8999/ws"); w.onopen = ok; w.onerror = () => no(new Error("ws")); }));
+probe("eventsource", () => new Promise((ok, no) => { const s = new EventSource(H + "sse"); s.onopen = ok; s.onerror = () => no(new Error("sse")); }));
+probe("beacon", () => { if (!navigator.sendBeacon(H + "beacon", "x")) throw new Error("beacon"); });
+probe("webrtc", async () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:HOST:8999" }] }); pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer()); });
+probe("worker", () => new Worker("data:text/javascript,fetch('" + H + "worker')"));
+probe("import", () => import(H + "import.js"));
+probe("image", () => new Promise((ok, no) => { const i = new Image(); i.onload = ok; i.onerror = () => no(new Error("img")); i.src = H + "js-image"; }));
+probe("window.open", () => { if (window.open(H + "open") === null) throw new Error("open"); });
+probe("localStorage", () => { localStorage.setItem("gate", String(Date.now())); say("localStorage before", String(localStorage.getItem("gate"))); });
+probe("indexedDB", () => new Promise((ok, no) => { const r = indexedDB.open("gate"); r.onsuccess = ok; r.onerror = () => no(new Error("idb")); }));
+probe("cookie", () => { document.cookie = "gate=1"; say("cookie", document.cookie || "(empty)"); });
+probe("bridge", () => { if (window.webkit && window.webkit.messageHandlers && Object.keys(window.webkit.messageHandlers).length) throw new Error("bridge present"); say("bridge", "none"); });
+setTimeout(() => { document.getElementById("ping").click(); document.getElementById("form").submit(); }, 500);
+setTimeout(() => { location.href = H + "location"; }, 1000);
+setTimeout(() => { location.href = "waypoint://gate"; }, 1500);
+</script>
+</body>
+</html>

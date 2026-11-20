@@ -14,6 +14,7 @@ function RootStack() {
         <Stack.Screen name="dev/audio" />
         <Stack.Screen name="dev/model" />
         <Stack.Screen name="dev/pages" />
+        <Stack.Screen name="dev/sandbox" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "app"}>
         <Stack.Screen name="(tabs)" />
@@ -24,6 +25,8 @@ function RootStack() {
         <Stack.Screen name="job/[id]" />
         <Stack.Screen name="made/new" />
         <Stack.Screen name="practice/[id]" />
+        <Stack.Screen name="diagram/[id]" />
+        <Stack.Screen name="mini-app/[id]" />
         <Stack.Screen name="research/new" />
         <Stack.Screen name="research/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
