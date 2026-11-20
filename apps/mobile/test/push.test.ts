@@ -19,7 +19,7 @@ describe("push", () => {
   });
   it("taps", () => {
     expect(actionForPush({ kind: "device_approved", ref: "dev" })).toEqual({ kind: "refresh_device" });
-    expect(actionForPush({ kind: "job_ready", ref: "job_1" })).toEqual({ kind: "none" });
+    expect(actionForPush({ kind: "job_ready", ref: "job_1" })).toEqual({ kind: "open_job", jobId: "job_1" });
     expect(actionForPush({})).toEqual({ kind: "none" });
   });
 });

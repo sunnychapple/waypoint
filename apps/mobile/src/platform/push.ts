@@ -1,12 +1,14 @@
 import { useEffect } from "react";
 import { getIosPushNotificationServiceEnvironmentAsync } from "expo-application";
 import * as Notifications from "expo-notifications";
+import { router } from "expo-router";
 import { PUSH_SENT_KEY, actionForPush, pushEnvironment, pushSentValue, pushTokenRequest } from "../core/push/push.ts";
 import { getSetting, setSetting } from "../core/db/settings.ts";
 import { getDeviceKeys } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
 import { getDb, writeDb } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
+import { followJob } from "./jobs.ts";
 
 // Alerts show as banners while the app is open, too.
 Notifications.setNotificationHandler({
@@ -43,6 +45,10 @@ function handle(response: Notifications.NotificationResponse | null): void {
   if (response === null) return;
   const action = actionForPush(response.notification.request.content.data ?? {});
   if (action.kind === "refresh_device") void refreshDeviceNow();
+  if (action.kind === "open_job") {
+    void followJob(action.jobId);
+    router.push(`/job/${encodeURIComponent(action.jobId)}`);
+  }
 }
 
 // Called once in (tabs)/_layout.tsx: registers the token once this iPhone has a device row, and handles taps.

@@ -150,4 +150,27 @@ CREATE TABLE sent_log (
 CREATE INDEX sent_log_at ON sent_log (at);
 `,
   },
+  {
+    version: 3,
+    sql: `
+CREATE TABLE jobs (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN ('research', 'overview_script', 'video_slides', 'diagram', 'mini_app', 'practice', 'retranscribe')),
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  request_key TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  quoted INTEGER NOT NULL CHECK (quoted >= 1),
+  spent INTEGER CHECK (spent >= 0),
+  result_ready INTEGER NOT NULL DEFAULT 0 CHECK (result_ready IN (0, 1)),
+  detail TEXT NOT NULL DEFAULT '{}',
+  saved_at INTEGER,
+  deleted_at INTEGER,
+  problem TEXT CHECK (problem IN ('unreadable')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX jobs_open ON jobs (deleted_at, created_at);
+CREATE INDEX jobs_session ON jobs (session_id, created_at);
+`,
+  },
 ];

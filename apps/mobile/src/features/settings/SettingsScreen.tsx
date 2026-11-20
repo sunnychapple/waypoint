@@ -120,6 +120,12 @@ export default function SettingsScreen() {
         onPress={() => router.push("/plans")}
       />
 
+      <Row
+        title="Cloud jobs"
+        right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+        onPress={() => router.push("/jobs")}
+      />
+
       <Caption style={styles.section}>ON THIS IPHONE</Caption>
       <Row
         title="Speech pack"
