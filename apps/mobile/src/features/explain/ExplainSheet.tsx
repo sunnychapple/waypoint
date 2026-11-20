@@ -3,36 +3,49 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { router, useLocalSearchParams } from "expo-router";
 import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
+import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
+import type { SentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useConfig } from "../../platform/config.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
-import { useColors } from "../../ui/theme.ts";
+import { useColors, type Colors } from "../../ui/theme.ts";
 import { CloudLine } from "./CloudLine.tsx";
 import { useExplain } from "./useExplain.ts";
 
-// D1–D3: a tapped word, explained by the cloud. Opened as a sheet over the recording or the session.
+// D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
+// recording or the session.
 export default function ExplainSheet() {
   const params = useLocalSearchParams<{ sessionId: string; t: string; word: string }>();
   const t = Number(params.t);
   return <ExplainBody sessionId={params.sessionId} t={Number.isFinite(t) ? t : 0} word={params.word.slice(0, 100)} />;
 }
 
+const HEADINGS: Record<SentTask, string> = { explain: "Explanation", more_detail: "More detail", double_check: "Double-check" };
+const RUNNING: Record<SentTask, string> = { explain: "Explaining…", more_detail: "Adding more detail…", double_check: "Double-checking…" };
+// Used only until the live price table (M13) has loaded.
+const FALLBACK_PRICES: Record<SentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
+
 function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; word: string }) {
   const colors = useColors();
   const config = useConfig();
   const model = useExplain(sessionId, t, word);
   const [showSent, setShowSent] = useState(false);
-  const price = priceOf(config, "explain") ?? 1;
-  const phase = model.phase;
+  const { phase, explanation, unsavedItem } = model;
+  const thread = explanation?.thread ?? [];
+  const hasAnswer = thread.some((item) => item.kind === "explain");
+  const explained = hasAnswer || unsavedItem?.kind === "explain";
+  const cost = (task: SentTask): string => creditsLabel(priceOf(config, task) ?? FALLBACK_PRICES[task]);
 
   // A "Try again" after "already finished" starts a new paid request, so the button says what it costs.
   function actionLabel(action: FailureAction): string {
-    if (action === "try_again" && phase.kind === "failed" && phase.failure.kind === "already_finished") return `Explain again · ${creditsLabel(price)}`;
+    if (action === "try_again" && phase.kind === "failed" && phase.failure.kind === "already_finished") {
+      return phase.task === "explain" ? `Explain again · ${cost("explain")}` : `Try again · ${cost(phase.task)}`;
+    }
     return ACTION_LABELS[action];
   }
 
   function act(action: FailureAction): void {
-    if (action === "try_again") void model.explain();
+    if (action === "try_again" && phase.kind === "failed") void model.run(phase.task);
     else if (action === "get_credits" && phase.kind === "failed" && phase.failure.kind === "out_of_credits") router.push(`/plans?need=${phase.failure.shortfall}`);
     else if (action === "ask_later") model.saveForLater();
     else if (action === "approve_device") router.push("/device-waiting");
@@ -44,41 +57,42 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
       <Title>{word}</Title>
       <Caption>{`At ${formatOffset(t)} in this recording`}</Caption>
 
-      {phase.kind === "ready" ? (
-        <>
-          {model.excerpt === "" ? (
-            <Body>There isn't enough of the transcript around this word yet.</Body>
-          ) : (
-            <>
-              <Body style={{ color: colors.ink2 }}>Waypoint sends this word and about a minute of the transcript around it, for this task only.</Body>
-              <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
-                <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
-              </Pressable>
-              {showSent ? <Text style={[styles.sent, { color: colors.ink3, backgroundColor: colors.surface2 }]}>{model.excerpt}</Text> : null}
-              <PrimaryButton label={`Explain · ${creditsLabel(price)}`} icon="sparkle.magnifyingglass" onPress={() => void model.explain()} />
-            </>
-          )}
-        </>
+      {phase.kind === "idle" && !explained ? (
+        model.excerpt === "" ? (
+          <Body>There isn't enough of the transcript around this word yet.</Body>
+        ) : (
+          <>
+            <Body style={{ color: colors.ink2 }}>Waypoint sends this word and about a minute of the transcript around it, for this task only.</Body>
+            <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
+              <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
+            </Pressable>
+            {showSent ? <Text style={[styles.sent, { color: colors.ink3, backgroundColor: colors.surface2 }]}>{model.excerpt}</Text> : null}
+            <PrimaryButton label={`Explain · ${cost("explain")}`} icon="sparkle.magnifyingglass" onPress={() => void model.run("explain")} />
+          </>
+        )
       ) : null}
 
-      {phase.kind === "streaming" ? (
-        <View style={styles.answer}>
-          {phase.text === "" ? <ActivityIndicator /> : <Body>{phase.text}</Body>}
-          <Caption>Explaining…</Caption>
+      {thread.map((item, index) => (
+        <ThreadBlock key={`${item.sentId}-${index}`} item={item} colors={colors} />
+      ))}
+
+      {unsavedItem !== null ? (
+        <View style={styles.block}>
+          <ThreadBlock item={unsavedItem} colors={colors} />
+          <Caption>Couldn't save this on the iPhone</Caption>
         </View>
       ) : null}
 
-      {phase.kind === "done" ? (
-        <View style={styles.answer}>
-          <Body>{phase.text}</Body>
-          <CloudLine retention={phase.retention} />
-          {phase.unsaved ? <Caption>Couldn't save this on the iPhone</Caption> : null}
-          <PrimaryButton label="Done" onPress={() => router.back()} />
+      {phase.kind === "running" ? (
+        <View style={styles.block}>
+          <Caption>{HEADINGS[phase.task]}</Caption>
+          {phase.text === "" ? <ActivityIndicator /> : <Body>{phase.text}</Body>}
+          <Caption>{RUNNING[phase.task]}</Caption>
         </View>
       ) : null}
 
       {phase.kind === "failed" ? (
-        <View style={styles.answer}>
+        <View style={styles.block}>
           {phase.text !== "" ? <Body style={{ color: colors.ink3 }}>{phase.text}</Body> : null}
           <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
             <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(phase.failure).title}</Text>
@@ -94,7 +108,40 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
           )}
         </View>
       ) : null}
+
+      {phase.kind === "idle" && explained ? (
+        <View style={styles.block}>
+          {hasAnswer ? (
+            <>
+              <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
+              <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
+              <SecondaryButton
+                label={explanation?.saved === true ? "Saved" : "Save"}
+                icon={explanation?.saved === true ? "bookmark.fill" : "bookmark"}
+                tone={explanation?.saved === true ? "accent" : "surface"}
+                onPress={model.toggleSave}
+              />
+              {explanation?.saved === true ? <Caption>Saved with this recording.</Caption> : null}
+            </>
+          ) : null}
+          <PrimaryButton label="Done" onPress={() => router.back()} />
+        </View>
+      ) : null}
     </ScrollView>
+  );
+}
+
+function ThreadBlock({ item, colors }: { item: ThreadItem; colors: Colors }) {
+  const verdict = item.kind === "double_check" ? verdictOf(item.text) : null;
+  const tint = verdict === "correct" ? colors.local : verdict === "partly" ? colors.flag : verdict === "not" ? colors.danger : null;
+  return (
+    <View style={styles.block}>
+      <Caption>{HEADINGS[item.kind]}</Caption>
+      <View style={tint === null ? undefined : [styles.verdict, { borderColor: tint }]}>
+        <Body>{item.text}</Body>
+      </View>
+      <CloudLine retention={item.retention} onPress={() => router.push(`/sent?id=${encodeURIComponent(item.sentId)}`)} />
+    </View>
   );
 }
 
@@ -108,10 +155,11 @@ const ACTION_LABELS: Record<FailureAction, string> = {
 
 const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 40, gap: 14 },
-  answer: { gap: 14 },
+  block: { gap: 10 },
   link: { fontSize: 15, fontWeight: "600" },
   sent: { fontSize: 14, lineHeight: 20, padding: 12, borderRadius: 12 },
   box: { padding: 14, borderRadius: 14, gap: 4 },
   boxTitle: { fontSize: 16, fontWeight: "700" },
   boxBody: { fontSize: 15, lineHeight: 21 },
+  verdict: { borderLeftWidth: 4, paddingLeft: 12 },
 });
