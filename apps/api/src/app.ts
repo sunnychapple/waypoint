@@ -15,6 +15,7 @@ import { audioRoutes } from "./jobs/audio-routes.ts";
 import { jobsRoutes } from "./jobs/routes.ts";
 import { jobWorkflow } from "./jobs/start.ts";
 import { linkRoutes } from "./links/routes.ts";
+import { viewerRoute } from "./links/viewer.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
@@ -69,5 +70,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", blobRoutes({ now: deps.now }));
   app.route("/", linkRoutes({ now: deps.now, fetch: (input, init) => fetch(input, init) }));
   app.route("/", audioRoutes({ now: deps.now }));
+  app.route("/", viewerRoute());
   return app;
 }
