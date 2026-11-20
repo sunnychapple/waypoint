@@ -384,4 +384,20 @@ CREATE TRIGGER sync_segments_delete AFTER DELETE ON segments WHEN (SELECT applyi
 END;
 `,
   },
+  {
+    version: 9,
+    sql: `
+CREATE TABLE links (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions (id) ON DELETE SET NULL,
+  group_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  has_passcode INTEGER NOT NULL CHECK (has_passcode IN (0, 1)),
+  expires_at INTEGER,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX links_session ON links (session_id, created_at);
+`,
+  },
 ];

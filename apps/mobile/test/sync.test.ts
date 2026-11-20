@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { addFlag, addPhoto, finishRecording, savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
+import { moveSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { createSpace, ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { saveCards } from "../src/core/study/cards.ts";
@@ -9,6 +10,7 @@ import {
   applyPulled,
   collectChanges,
   lastSeq,
+  markMoved,
   MAX_CHANGE_BYTES,
   MAX_PENDING,
   nextOutgoing,
@@ -154,6 +156,38 @@ describe("collecting changes", () => {
     a.db.run("UPDATE flags SET question = ?", ["x".repeat(MAX_CHANGE_BYTES + 1)]);
     addFlag(a.db, a.deps, s.id, 2);
     expect(send(a).map((c) => c.op === "upsert" && c.row.question)).toEqual([""]);
+  });
+});
+
+describe("moving a session (M30b)", () => {
+  it("a moved session goes to the new space's group, and a delete goes to the old group", () => {
+    const a = device("a");
+    const other = createSpace(a.db, a.deps, "Chemistry");
+    const G2 = "grp_fedcba9876543210";
+    a.db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES (?, 'personal', 'owner', 1, 0)", [G2]);
+    a.db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, ?)", [other.id, G2]);
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    addFlag(a.db, a.deps, s.id, 5);
+    send(a);
+    moveSession(a.db, s.id, other.id, 2_000);
+    markMoved(a.db, s.id, G);
+    collectChanges(a.db, a.deps);
+    expect(nextOutgoing(a.db).map((o) => [o.kind, o.groupId])).toEqual([
+      ["sessions", G2],
+      ["flags", G2],
+      ["segments", G2],
+      ["delete_sessions", G],
+    ]);
+  });
+  it("a session in a space that does not sync moves with no delete, and nothing is sent", () => {
+    const a = device("a", { synced: false });
+    const other = createSpace(a.db, a.deps, "Chemistry");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    moveSession(a.db, s.id, other.id, 2_000);
+    markMoved(a.db, s.id, null);
+    expect(collectChanges(a.db, a.deps)).toBe(0);
+    expect(count(a, "dirty")).toBe(0);
   });
 });
 

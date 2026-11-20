@@ -85,7 +85,7 @@ export function collectChanges(db: SqlDb, deps: SyncDeps): number {
   let made = 0;
   db.transaction(() => {
     const dirty = db.all<{ table_name: SyncTable | "segments"; row_id: string; deleted: number; group_id: string | null }>(
-      `SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id)
+      `SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id, deleted)
        ORDER BY deleted, CASE table_name WHEN 'spaces' THEN 0 WHEN 'sessions' THEN 1 WHEN 'captures' THEN 2 WHEN 'flags' THEN 3 WHEN 'cards' THEN 4 ELSE 5 END, seq`,
     );
     const clock = db.get<{ clock: number }>("SELECT clock FROM sync_mode")?.clock ?? 0;
@@ -111,6 +111,24 @@ export function collectChanges(db: SqlDb, deps: SyncDeps): number {
     db.run("DELETE FROM dirty");
   });
   return made;
+}
+
+// A session moved to another space (M30b). Its rows are queued for the new space's group (collectChanges finds it from
+// the space). When the old space synced, the session is also deleted for the old group, so devices only there drop it.
+// collectChanges keeps the newest entry per row and per deleted flag, so the upsert and the delete both go out.
+export function markMoved(db: SqlDb, sessionId: string, oldGroupId: string | null): void {
+  db.transaction(() => {
+    db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 0, NULL)", [sessionId]);
+    for (const table of ["captures", "flags", "cards"]) {
+      db.run(`INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT '${table}', id, 0, NULL FROM ${table} WHERE session_id = ?`, [sessionId]);
+    }
+    db.run(
+      `INSERT INTO dirty (table_name, row_id, deleted, group_id)
+       SELECT DISTINCT 'segments', session_id || ':' || source || ':' || (t_start / ${SEGMENT_BUCKET_MS}), 0, NULL FROM segments WHERE session_id = ?`,
+      [sessionId],
+    );
+    if (oldGroupId !== null) db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 1, ?)", [sessionId, oldGroupId]);
+  });
 }
 
 function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id: string; deleted: number }, id: string, at: number): SyncChange | null {

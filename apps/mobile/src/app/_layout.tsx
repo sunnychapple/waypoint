@@ -65,6 +65,8 @@ function RootStack() {
         <Stack.Screen name="study/help-steps" />
         <Stack.Screen name="sent" options={{ presentation: "modal" }} />
         <Stack.Screen name="invite/[token]" />
+        <Stack.Screen name="share/[sessionId]" />
+        <Stack.Screen name="shared/keys" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />
