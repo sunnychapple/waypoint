@@ -269,6 +269,14 @@ async function fetchMedia(user: string, groupId: string, generation: number): Pr
 // One send (and, when asked, a pull and the media down). Never throws: a failure waits for the next run. The send and
 // the pull fail apart, so a failed send does not hold back the group's incoming changes in the same run.
 async function runOnce(groupId: string, pull: boolean): Promise<void> {
+  try {
+    await runNow(groupId, pull);
+  } catch {
+    // Nobody is signed in (the notes are closed) or the notes changed: nothing to do, and the queue must go on.
+  }
+}
+
+async function runNow(groupId: string, pull: boolean): Promise<void> {
   // This run starts now, so a request made from here on queues a run of its own (it may carry newer changes).
   if (pull) pullQueued.delete(groupId);
   const generation = dbGeneration();
@@ -302,7 +310,7 @@ async function afterFailure(groupId: string, error: unknown): Promise<void> {
 
 function enqueue(groupId: string, pull: boolean): Promise<void> {
   waiting.set(groupId, (waiting.get(groupId) ?? 0) + 1);
-  const run = (queues.get(groupId) ?? Promise.resolve()).then(() => runOnce(groupId, pull));
+  const run = (queues.get(groupId) ?? Promise.resolve()).catch(() => undefined).then(() => runOnce(groupId, pull));
   const done = run.finally(() => waiting.set(groupId, (waiting.get(groupId) ?? 1) - 1));
   queues.set(groupId, done);
   return done;
@@ -324,7 +332,11 @@ function pullSoon(groupId: string): Promise<void> {
 
 // Acknowledges what was pulled, as the socket asks (PR 28).
 function acknowledge(ws: WebSocket, groupId: string): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ack", seq: lastSeq(getDb(), groupId) }));
+  try {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ack", seq: lastSeq(getDb(), groupId) }));
+  } catch {
+    // Signed out meanwhile (no notes open): nothing to acknowledge.
+  }
 }
 
 function linkFor(groupId: string): Link {
@@ -373,8 +385,12 @@ async function connect(groupId: string): Promise<void> {
     } catch {
       return;
     }
-    if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
-      void pullSoon(groupId).then(() => acknowledge(ws, groupId));
+    try {
+      if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
+        void pullSoon(groupId).then(() => acknowledge(ws, groupId));
+      }
+    } catch {
+      // Signed out meanwhile (no notes open).
     }
   };
   ws.onclose = (event) => {
@@ -401,13 +417,19 @@ function disconnect(): void {
 function startForeground(): void {
   if (foreground) return;
   foreground = true;
-  const db = getDb();
-  for (const groupId of syncedGroupIds(db)) {
+  const groupIds = (): string[] => {
+    try {
+      return syncedGroupIds(getDb());
+    } catch {
+      return []; // nobody is signed in
+    }
+  };
+  for (const groupId of groupIds()) {
     void connect(groupId);
     void syncNow(groupId);
   }
   sendTimer = setInterval(() => {
-    for (const groupId of syncedGroupIds(getDb())) if ((waiting.get(groupId) ?? 0) === 0) void enqueue(groupId, false);
+    for (const groupId of groupIds()) if ((waiting.get(groupId) ?? 0) === 0) void enqueue(groupId, false);
   }, SEND_EVERY_MS);
 }
 

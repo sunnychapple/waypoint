@@ -8,7 +8,7 @@ import { expiryFor, linkUrl, markRevoked, recordLink, sharedItem, type LinkExpir
 import { failureCopy } from "../core/cloud/failure.ts";
 import { api } from "./api.ts";
 import { createGroup } from "./groups.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 import { toFailure } from "./tasks.ts";
 
 // The personal group for links from a session whose space does not sync. Made once; never mapped to a space.
@@ -26,14 +26,16 @@ async function groupForLink(sessionId: string): Promise<string> {
   if (synced) return synced.group_id;
   const known = getSetting(getDb(), SHARED_LINKS_KEY);
   if (known !== null) return known;
+  const generation = dbGeneration();
   const id = await createGroup("personal", SHARED_LINKS_NAME);
-  writeDb((db) => setSetting(db, SHARED_LINKS_KEY, id));
+  writeDbIf(generation,(db) => setSetting(db, SHARED_LINKS_KEY, id));
   return id;
 }
 
 // Makes a link to one session: a new random link id and key, the locked item, POST /v1/links (signed). The key is kept
 // only in the URL and this phone's links table. Throws on failure (the screen uses toFailure).
 export async function createLink(sessionId: string, options: { passcode: string | null; expiry: LinkExpiry }): Promise<{ url: string; cut: boolean }> {
+  const generation = dbGeneration();
   const made = sharedItem(getDb(), sessionId);
   if (made === null) throw new Error("no such session");
   if (options.passcode !== null && !LinkPasscodeSchema.safeParse(options.passcode).success) throw new RangeError("passcode");
@@ -44,19 +46,20 @@ export async function createLink(sessionId: string, options: { passcode: string 
   const expiresAt = expiryFor(options.expiry, now);
   await api.createLink({ id: linkId, group_id: groupId, data: locked.data, passcode: options.passcode, expires_at: expiresAt });
   const url = linkUrl(baseUrl, linkId, locked.key);
-  writeDb((db) => recordLink(db, { id: linkId, sessionId, groupId, url, hasPasscode: options.passcode !== null, expiresAt, createdAt: now }));
+  writeDbIf(generation, (db) => recordLink(db, { id: linkId, sessionId, groupId, url, hasPasscode: options.passcode !== null, expiresAt, createdAt: now }));
   return { url, cut: made.cut };
 }
 
 // Turns a link off on the server (DELETE /v1/links/:id, signed), then marks it revoked here. Its maker can always turn
 // it off, so a 404 means the server has no such link: there is nothing to turn off, and it is marked revoked too.
 export async function revokeLink(linkId: string): Promise<void> {
+  const generation = dbGeneration();
   try {
     await api.revokeLink(linkId);
   } catch (error) {
     if (!(error instanceof ApiCallError && error.status === 404)) throw error;
   }
-  writeDb((db) => markRevoked(db, linkId, Date.now()));
+  writeDbIf(generation, (db) => markRevoked(db, linkId, Date.now()));
 }
 
 // A 403: a viewer making a link, or someone other than its maker or an owner turning one off.

@@ -5,7 +5,7 @@ import { renderScript } from "../../modules/waypoint-voices/index.ts";
 import type { CloudFailure } from "../core/cloud/failure.ts";
 import { getOverview, overviewsToRender, saveOverview, setRendered, setRenderFailed, setRenderPending, setRendering, spokenLines } from "../core/overviews/overviews.ts";
 import { notesForResearch } from "../core/research/research.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDb, writeDbIf } from "./db.ts";
 import { RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 import { startJob } from "./jobs.ts";
 import { renderVideo } from "./videos.ts";
@@ -41,15 +41,16 @@ async function renderNext(id: string): Promise<void> {
   const overview = getOverview(getDb(), id);
   if (overview === null || overview.state === "ready") return;
   if (overview.kind === "video") return renderVideo(overview);
+  const generation = dbGeneration();
   writeDb((db) => setRendering(db, id));
   try {
     const file = `overviews/${id}.m4a`;
     const language = Intl.DateTimeFormat().resolvedOptions().locale;
     const done = await renderScript(spokenLines(overview), file, language);
-    writeDb((db) => setRendered(db, id, { file, durationMs: done.durationMs, lineStarts: done.lineStartsMs, voices: done.voices }));
+    writeDbIf(generation, (db) => setRendered(db, id, { file, durationMs: done.durationMs, lineStarts: done.lineStartsMs, voices: done.voices }));
   } catch (error) {
     const code = errorCode(error);
-    writeDb((db) => {
+    writeDbIf(generation, (db) => {
       if (code === "busy" || code === "cancelled") setRenderPending(db, id);
       else setRenderFailed(db, id, code === "no_voices" ? "no_voices" : "failed");
     });

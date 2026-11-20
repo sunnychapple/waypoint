@@ -3,7 +3,7 @@ import { createSpace, freeSpaceName } from "../core/db/spaces.ts";
 import { getGroup, upsertGroup, type Role } from "../core/groups/groups.ts";
 import { acceptNewAccountKey } from "../core/groups/keys.ts";
 import { SHARED_FALLBACK_NAME, safetyCode } from "../core/share/spaces.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId } from "./device.ts";
 import {
   acceptInvite,
@@ -62,7 +62,9 @@ export async function invite(groupId: string, role: Role, history: HistoryChoice
 export async function join(token: string): Promise<string> {
   const user = currentUserId();
   if (user === null) throw new Error("signed out");
+  const generation = dbGeneration();
   const view = await acceptInvite(token);
+  if (!stillSame(generation)) throw new Error("signed out"); // the group is not mapped into someone else's notes
   const groupId = view.id;
   writeDb((db) => upsertGroup(db, view, null, Date.now(), user));
   if (getDb().get("SELECT 1 AS ok FROM space_groups WHERE group_id = ?", [groupId]) === null) {
@@ -80,8 +82,9 @@ export async function join(token: string): Promise<string> {
 export async function leave(groupId: string): Promise<void> {
   const me = currentUserId();
   if (me === null) throw new Error("signed out");
+  const generation = dbGeneration();
   await removeGroupMember(groupId, me);
-  writeDb((db) => db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]));
+  writeDbIf(generation,(db) => db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]));
 }
 
 // An owner removes a member. The new key is made at once.
@@ -94,13 +97,14 @@ export async function pendingKeyChanges(): Promise<PendingKeyChange[]> {
   const rows = getDb().all<{ user_id: string; pending_sign_pub: string; changed_at: number }>(
     "SELECT user_id, pending_sign_pub, changed_at FROM known_accounts WHERE pending_sign_pub IS NOT NULL ORDER BY changed_at",
   );
+  const generation = dbGeneration();
   return Promise.all(
     rows.map(async (r) => ({
       userId: r.user_id,
       changedAt: r.changed_at,
       code: safetyCode(await digestStringAsync(CryptoDigestAlgorithm.SHA256, r.pending_sign_pub)),
       trust: async () => {
-        writeDb((db) => acceptNewAccountKey(db, r.user_id));
+        writeDbIf(generation, (db) => acceptNewAccountKey(db, r.user_id));
         await ensureAllKeysNow();
       },
     })),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkpointDone, clerkIdsIn, LEGACY_DB_NAME, legacyIsTheirs, notesStep, userDbName } from "../src/core/db/users.ts";
+import { checkpointDone, clerkIdsIn, LEGACY_DB_NAME, legacyIsTheirs, notesStep, seedFromLegacy, userDbName } from "../src/core/db/users.ts";
 
 describe("userDbName", () => {
   it("names a person's database after their Clerk user id", () => {
@@ -49,5 +49,17 @@ describe("checkpointDone", () => {
     expect(checkpointDone({ busy: 0 })).toBe(true);
     expect(checkpointDone({ busy: 1 })).toBe(false);
     expect(checkpointDone(null)).toBe(false);
+  });
+});
+
+describe("seedFromLegacy", () => {
+  it("names the one person the old database records, when the old flag was set", () => {
+    expect(seedFromLegacy({ flagSet: true, recorded: ["user_a"] })).toBe("user_a");
+  });
+  it("names nobody without the flag, with none or several recorded, or an id that is not a Clerk id", () => {
+    expect(seedFromLegacy({ flagSet: false, recorded: ["user_a"] })).toBeNull();
+    expect(seedFromLegacy({ flagSet: true, recorded: [] })).toBeNull();
+    expect(seedFromLegacy({ flagSet: true, recorded: ["user_a", "user_b"] })).toBeNull();
+    expect(seedFromLegacy({ flagSet: true, recorded: ["../x"] })).toBeNull();
   });
 });

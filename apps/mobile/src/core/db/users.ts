@@ -21,6 +21,15 @@ export function legacyIsTheirs(recorded: readonly string[], clerkUserId: string)
   return recorded.length === 0 || recorded.includes(clerkUserId);
 }
 
+// An iPhone updated from the single-database app has no Keychain user yet. Offline on its first launch it would have no
+// one to open: when the old "signed in before" flag was set and the old database records exactly one Clerk id, that
+// person is the one signed in last.
+export function seedFromLegacy(input: { flagSet: boolean; recorded: readonly string[] }): string | null {
+  const [only] = input.recorded;
+  if (!input.flagSet || input.recorded.length !== 1 || only === undefined) return null;
+  return /^[A-Za-z0-9_]{1,64}$/.test(only) ? only : null;
+}
+
 // PRAGMA wal_checkpoint(TRUNCATE) returns (busy, log, checkpointed) and does not throw when it could not finish: the
 // old file may be renamed only when busy is 0, otherwise the write-ahead log would be left behind.
 export function checkpointDone(row: { busy: number } | null | undefined): boolean {

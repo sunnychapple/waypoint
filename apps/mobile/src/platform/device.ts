@@ -39,7 +39,12 @@ onNotesClosed(() => {
   clerkId = null;
   running = null;
   accountKeyProblem = false;
-  setStatus("signed_out");
+  // Not setStatus: this can run while the sign-in gate renders, when other components may not be updated. Listeners are
+  // told right after the render.
+  status = "signed_out";
+  queueMicrotask(() => {
+    for (const listener of listeners) listener();
+  });
 });
 
 function setStatus(next: DeviceStatus): void {

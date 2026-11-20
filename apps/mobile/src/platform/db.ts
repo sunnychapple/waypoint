@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
 import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
-import { LEGACY_DB_NAME, checkpointDone, clerkIdsIn, legacyIsTheirs, userDbName } from "../core/db/users.ts";
+import { LEGACY_DB_NAME, checkpointDone, clerkIdsIn, legacyIsTheirs, seedFromLegacy, userDbName } from "../core/db/users.ts";
 import { userIdKey } from "../core/device/registration.ts";
 
 function openDeviceDb(name: string): { db: SqlDb; close: () => void } {
@@ -30,6 +30,7 @@ function openDeviceDb(name: string): { db: SqlDb; close: () => void } {
 // Whose notes are open (open question 52). The Keychain keeps the Clerk user id of the person signed in last, readable
 // after the first unlock, so a silent push that wakes the app with no screen opens that same person's notes.
 const DB_USER_KEY = "waypoint.db_user";
+const SIGNED_IN_BEFORE = "waypoint.signed_in_before"; // kept by the single-database app
 const KEYCHAIN = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
 
 let open: { user: string; db: SqlDb; close: () => void } | null = null;
@@ -37,8 +38,18 @@ let open: { user: string; db: SqlDb; close: () => void } | null = null;
 let stored: string | null | undefined;
 // The Keychain writes, one after the other: a delete at sign-out finishes before the next person's id is written.
 let forgetting: Promise<void> = Promise.resolve();
-let deleting = false;
+let pendingKeychain = 0; // Keychain writes queued and not finished: while any, a new id is written behind them
 const retryOnce = (op: () => Promise<void>): Promise<void> => op().catch(op).catch(() => undefined);
+
+function queueKeychain(op: () => Promise<void>): Promise<void> {
+  pendingKeychain += 1;
+  const done = forgetting.then(() => retryOnce(op));
+  forgetting = done;
+  void done.then(() => {
+    pendingKeychain -= 1;
+  });
+  return done;
+}
 const closeHooks = new Set<() => void>();
 
 // Called once whenever open notes are closed (sign-out, or another person's notes opening): module state kept for the
@@ -67,11 +78,44 @@ export function dbGeneration(): number {
   return generation;
 }
 
+// Whether these are still the notes that were open when `generation` was read (before an await).
+export function stillSame(generation: number): boolean {
+  return generation === dbGeneration();
+}
+
+// writeDb that does nothing when the notes changed since `generation` was read: async work that awaits and then
+// writes uses this so a write never lands in someone else's notes. undefined when it did not write.
+export function writeDbIf<T>(generation: number, write: (db: SqlDb) => T): T | undefined {
+  return stillSame(generation) ? writeDb(write) : undefined;
+}
+
+// First launch after the update from the single database (see seedFromLegacy): the person it records, kept as the
+// Keychain user, and the old flag is dropped so this happens once.
+function seedFromLegacyDb(): string | null {
+  try {
+    if (SecureStore.getItem(SIGNED_IN_BEFORE) !== "1" || !new File(Paths.document, "SQLite", LEGACY_DB_NAME).exists) return null;
+    const old = openDatabaseSync(LEGACY_DB_NAME);
+    let user: string | null;
+    try {
+      const keys = old.getAllSync<{ key: string }>("SELECT key FROM settings WHERE key LIKE ?", [`${userIdKey("")}%`]).map((row) => row.key);
+      user = seedFromLegacy({ flagSet: true, recorded: clerkIdsIn(keys) });
+    } finally {
+      old.closeSync();
+    }
+    if (user === null) return null;
+    SecureStore.setItem(DB_USER_KEY, user, KEYCHAIN);
+    void SecureStore.deleteItemAsync(SIGNED_IN_BEFORE).catch(() => undefined);
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 // The person whose notes this iPhone opens: the one signed in, or signed in last. null when nobody is.
 export function dbUser(): string | null {
   if (stored === undefined) {
     try {
-      stored = SecureStore.getItem(DB_USER_KEY, KEYCHAIN);
+      stored = SecureStore.getItem(DB_USER_KEY, KEYCHAIN) ?? seedFromLegacyDb();
     } catch {
       return null; // not readable yet (before the first unlock): asked again next time
     }
@@ -129,13 +173,14 @@ export function openUserDb(clerkUserId: string): SqlDb {
   if (stored !== clerkUserId) {
     stored = clerkUserId;
     try {
-      if (deleting) forgetting = forgetting.then(() => retryOnce(() => SecureStore.setItemAsync(DB_USER_KEY, clerkUserId, KEYCHAIN)));
+      if (pendingKeychain > 0) void queueKeychain(() => SecureStore.setItemAsync(DB_USER_KEY, clerkUserId, KEYCHAIN));
       else SecureStore.setItem(DB_USER_KEY, clerkUserId, KEYCHAIN);
     } catch {
       // Not kept: a silent push does nothing until the next sign-in keeps it.
     }
   }
   version += 1; // every query reads the newly opened notes
+  notifyLater();
   return db;
 }
 
@@ -145,14 +190,10 @@ export async function closeUserDb(): Promise<void> {
   closeOpen();
   generation += 1;
   version += 1;
+  notifyLater();
   if (stored !== null) {
     stored = null;
-    deleting = true;
-    const done = forgetting.then(() => retryOnce(() => SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN)));
-    forgetting = done;
-    void done.then(() => {
-      if (forgetting === done) deleting = false;
-    });
+    void queueKeychain(() => SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN));
   }
   await forgetting;
 }
@@ -168,6 +209,14 @@ export function getDb(): SqlDb {
 
 let version = 0;
 const listeners = new Set<() => void>();
+
+// Tells the mounted screens to read again. Opening can happen while the sign-in gate renders, and React does not allow
+// other components to be updated during a render, so the screens are told right after it.
+function notifyLater(): void {
+  queueMicrotask(() => {
+    for (const listener of listeners) listener();
+  });
+}
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);

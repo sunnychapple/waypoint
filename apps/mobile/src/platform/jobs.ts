@@ -8,7 +8,7 @@ import { logSent, settleSent } from "../core/explain/sent.ts";
 import { toBase64Url } from "../core/jobs/bytes.ts";
 import { getJob, markDeleted, markSaved, markUnreadable, nextStep, openJobs, recordJob, updateJob, type LocalJob } from "../core/jobs/jobs.ts";
 import { api } from "./api.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId, requireApprovedDevice, useDeviceStatus } from "./device.ts";
 import { BEFORE_FOLLOW, RESULT_SAVERS } from "./jobResults.ts";
 import { toFailure } from "./tasks.ts";
@@ -16,8 +16,8 @@ import { toFailure } from "./tasks.ts";
 const FINISHED = new Set<JobView["state"]>(["succeeded", "failed", "cancelled"]);
 
 // A newer view of a job. When it has finished, sent_log gets the credits charged (0 when it failed).
-function note(view: JobView): void {
-  writeDb((db) => {
+function note(view: JobView, generation: number): void {
+  writeDbIf(generation, (db) => {
     updateJob(db, view, Date.now());
     const job = getJob(db, view.id);
     if (job !== null && FINISHED.has(view.state)) settleSent(db, job.requestKey, view.spent ?? 0, view.retention);
@@ -35,9 +35,12 @@ export type StartJobInput = {
 // Logs what is sent, makes the job, and starts following it. A failure is returned, never thrown.
 export async function startJob(input: StartJobInput): Promise<{ ok: true; jobId: string } | { ok: false; failure: CloudFailure }> {
   if (!requireApprovedDevice()) return { ok: false, failure: { kind: "device" } };
+  const generation = dbGeneration();
   writeDb((db) => logSent(db, { id: input.key, task: input.request.type, sessionId: input.sessionId, body: input.sent ?? input.request, at: Date.now() }));
   try {
     const view = await api.createJob(input.request, input.key);
+    // Signed out or another person signed in while the server made the job: nothing is recorded in their notes.
+    if (!stillSame(generation)) return { ok: false, failure: { kind: "failed" } };
     writeDb((db) => recordJob(db, view, { sessionId: input.sessionId, requestKey: input.key, detail: input.detail, now: Date.now() }));
     void followJob(view.id);
     return { ok: true, jobId: view.id };
@@ -47,19 +50,21 @@ export async function startJob(input: StartJobInput): Promise<{ ok: true; jobId:
 }
 
 // Opens the sealed result with this iPhone's key and hands it to the job type's saver. false: nothing to do yet.
-async function fetchResult(job: LocalJob): Promise<boolean> {
+async function fetchResult(job: LocalJob, generation: number): Promise<boolean> {
   const save = RESULT_SAVERS[job.type];
   const user = currentUserId();
   if (save === undefined || user === null) return false;
   const sealed = await api.jobResult(job.id);
+  if (!stillSame(generation)) return false;
   try {
     const text = await openSealedResult(user, job.id, toBase64Url(sealed));
+    if (!stillSame(generation)) return false;
     writeDb((db) => {
       save(db, job, text);
       markSaved(db, job.id, Date.now());
     });
   } catch {
-    writeDb((db) => markUnreadable(db, job.id, Date.now()));
+    writeDbIf(generation, (db) => markUnreadable(db, job.id, Date.now()));
   }
   return true;
 }
@@ -73,8 +78,10 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 export async function followJob(id: string): Promise<void> {
   if (following.has(id)) return;
   following.add(id);
+  const generation = dbGeneration();
   try {
     for (let failures = 0; failures < 8; ) {
+      if (!stillSame(generation)) return; // signed out or another person meanwhile: this walk ends
       const job = getJob(getDb(), id);
       if (job === null) return;
       const step = nextStep(job);
@@ -83,18 +90,18 @@ export async function followJob(id: string): Promise<void> {
         if (step === "follow") {
           const before = BEFORE_FOLLOW[job.type];
           if (before !== undefined) await before(job);
-          await api.jobEvents(id, note);
+          await api.jobEvents(id, (view) => note(view, generation));
         } else if (step === "fetch") {
-          if (!(await fetchResult(job))) return;
+          if (!(await fetchResult(job, generation))) return;
         } else {
           const view = await api.deleteJob(id);
-          note(view);
-          writeDb((db) => markDeleted(db, id, Date.now()));
+          note(view, generation);
+          writeDbIf(generation, (db) => markDeleted(db, id, Date.now()));
         }
         failures = 0;
       } catch (error) {
         if (error instanceof ApiCallError && error.status === 404) {
-          writeDb((db) => markDeleted(db, id, Date.now()));
+          writeDbIf(generation, (db) => markDeleted(db, id, Date.now()));
           return;
         }
         if (!(error instanceof NetworkError)) return;
@@ -110,15 +117,16 @@ export async function followJob(id: string): Promise<void> {
 // Cancel from the job screen. Nothing is charged unless the job had already finished (docs/architecture.md section 4).
 // A job that has already succeeded is not deleted here: it is charged either way, so its result is fetched and kept.
 export async function cancelJob(id: string): Promise<CloudFailure | null> {
+  const generation = dbGeneration();
   try {
     const current = await api.job(id);
-    note(current);
+    note(current, generation);
     if (current.state === "succeeded") {
       void followJob(id);
       return null;
     }
-    note(await api.deleteJob(id));
-    writeDb((db) => markDeleted(db, id, Date.now()));
+    note(await api.deleteJob(id), generation);
+    writeDbIf(generation, (db) => markDeleted(db, id, Date.now()));
     return null;
   } catch (error) {
     return toFailure(error);

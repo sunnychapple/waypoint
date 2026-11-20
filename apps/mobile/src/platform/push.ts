@@ -6,7 +6,7 @@ import { PUSH_SENT_KEY, actionForPush, pushEnvironment, pushSentValue, pushToken
 import { getSetting, setSetting } from "../core/db/settings.ts";
 import { getDeviceKeys } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { followJob } from "./jobs.ts";
 import { syncNow } from "./sync.ts";
@@ -20,6 +20,7 @@ Notifications.setNotificationHandler({
 export async function registerPushToken(): Promise<void> {
   try {
     const userId = currentUserId();
+    const generation = dbGeneration();
     const keys = userId === null ? null : getDeviceKeys(userId);
     if (keys === null) return;
     if ((await Notifications.getPermissionsAsync()).status !== "granted") return;
@@ -29,7 +30,7 @@ export async function registerPushToken(): Promise<void> {
     const request = pushTokenRequest(keys.deviceId, String(token.data), environment);
     if (request === null || getSetting(getDb(), PUSH_SENT_KEY) === pushSentValue(request)) return;
     await api.pushToken(request);
-    writeDb((db) => setSetting(db, PUSH_SENT_KEY, pushSentValue(request)));
+    writeDbIf(generation, (db) => setSetting(db, PUSH_SENT_KEY, pushSentValue(request)));
   } catch {
     // Tried again on the next launch.
   }

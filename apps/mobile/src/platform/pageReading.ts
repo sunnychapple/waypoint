@@ -4,7 +4,7 @@ import { readPage } from "../../modules/waypoint-pages/index.ts";
 import { pagesToRead, setPageText, titleFromText } from "../core/capture/pages.ts";
 import { renameSession } from "../core/capture/sessions.ts";
 import type { SqlDb } from "../core/db/sql.ts";
-import { getDb, writeDb } from "./db.ts";
+import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 
 const INTERVAL_MS = 5000;
 const BATCH = 2;
@@ -18,6 +18,7 @@ export function usePageReader(): void {
       if (busy || AppState.currentState !== "active") return;
       busy = true;
       try {
+        const generation = dbGeneration();
         for (const row of pagesToRead(getDb(), BATCH)) {
           let text = "";
           let lines = "[]";
@@ -29,7 +30,7 @@ export function usePageReader(): void {
             // A failed read stores empty text, so the page is not tried again.
           }
           try {
-            writeDb((db) => {
+            writeDbIf(generation, (db) => {
               setPageText(db, row.id, text, lines);
               nameUntitledPages(db);
             });
