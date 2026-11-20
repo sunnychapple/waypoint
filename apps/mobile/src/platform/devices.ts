@@ -13,6 +13,7 @@ import {
 import { approverStep, removalPlan } from "../core/device/devices.ts";
 import { api } from "./api.ts";
 import { currentUserId, refreshDeviceNow } from "./device.ts";
+import { envelopesForDevice, rewrapForNewAccount } from "./groups.ts";
 
 // This iPhone's nonce for each pairing it started, this launch only, keyed by user id and device id.
 const approverNonces = new Map<string, string>();
@@ -78,14 +79,22 @@ export async function pollApproval(deviceId: string): Promise<ApprovalView> {
   }
 }
 
-// "They match": certify the new device and give it the account key (M28b adds the group keys).
+// "They match": certify the new device, give it the account key and the group keys it may hold.
 export async function approveWaiting(deviceId: string): Promise<void> {
   const user = currentUserId();
   if (user === null) throw new Error("signed out");
   const target = (await api.devices()).devices.find((d) => d.kind === "device" && d.id === deviceId);
   if (target === undefined) throw new Error("no such device");
   const made = await certifyDevice(user, { id: target.id, signPub: target.sign_pub, boxPub: target.box_pub }, false);
-  await api.approveDevice(deviceId, { cert: made.cert, account_envelope: made.accountEnvelope, envelopes: [] });
+  const envelopes = await envelopesForDevice(user, {
+    id: target.id,
+    userId: user,
+    kind: "device",
+    signPub: target.sign_pub,
+    boxPub: target.box_pub,
+    cert: made.cert,
+  });
+  await api.approveDevice(deviceId, { cert: made.cert, account_envelope: made.accountEnvelope, envelopes });
   approverNonces.delete(slot(user, deviceId));
 }
 
@@ -117,6 +126,7 @@ export async function removeDevice(targetId: string): Promise<RemoveResult> {
       throw error;
     }
     await finishAccountRotation(user, accountId, true);
+    await rewrapForNewAccount(user, rotated.account);
   }
   if (targetId === me.deviceId) {
     await deleteDeviceKeys(user);

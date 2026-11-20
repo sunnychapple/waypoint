@@ -7,6 +7,7 @@ import { useIndexer } from "../../platform/indexer.ts";
 import { usePageReader } from "../../platform/pageReading.ts";
 import { useStoreSync } from "../../platform/store.ts";
 import { usePush } from "../../platform/push.ts";
+import { useGroupKeys } from "../../platform/groups.ts";
 import { useRecoveryPrompt } from "../../platform/recovery.ts";
 import "../../platform/jobKinds.ts";
 import { useJobs } from "../../platform/jobs.ts";
@@ -27,6 +28,7 @@ export default function TabsLayout() {
   usePageReader();
   usePush();
   useRecoveryPrompt();
+  useGroupKeys();
   useJobs();
   useOverviewRenders();
   useTranscriptionQueue();
