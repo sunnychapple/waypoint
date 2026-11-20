@@ -3,7 +3,7 @@ import { useFocusEffect } from "expo-router";
 import type { ActivityItem } from "@waypoint/contracts";
 import { ApiCallError, NetworkError } from "@waypoint/api-client";
 import { ZERO_RETENTION_KEY } from "../core/cloud/activity.ts";
-import { getSetting, setSetting } from "../core/db/settings.ts";
+import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { api } from "./api.ts";
 import { useQuery, writeDb } from "./db.ts";
 
@@ -23,6 +23,10 @@ export async function setZeroRetention(enabled: boolean): Promise<SwitchResult> 
 
 export function useStoredZeroRetention(): string | null {
   return useQuery((db) => getSetting(db, ZERO_RETENTION_KEY));
+}
+
+export function clearStoredZeroRetention(): void {
+  writeDb((db) => deleteSetting(db, ZERO_RETENTION_KEY));
 }
 
 export type ActivityState = { items: ActivityItem[]; more: boolean; error: "offline" | "failed" | null; loadMore: () => void };

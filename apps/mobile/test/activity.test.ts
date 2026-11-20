@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityLine, sentKeyOf, sizeLabel, zeroRetentionShown } from "../src/core/cloud/activity.ts";
+import { activityLine, needsZeroRetentionClear, sentKeyOf, sizeLabel, zeroRetentionShown } from "../src/core/cloud/activity.ts";
 
 describe("activity", () => {
   it("sentKeyOf takes the Idempotency-Key from the hold id", () => {
@@ -23,5 +23,12 @@ describe("activity", () => {
     expect(zeroRetentionShown("1", "own")).toBe(false);
     expect(zeroRetentionShown("0", "plus")).toBe(false);
     expect(zeroRetentionShown(null, null)).toBe(false);
+  });
+  it("needsZeroRetentionClear only when the plan is known, not Plus, and a value is stored", () => {
+    expect(needsZeroRetentionClear("1", "free")).toBe(true);
+    expect(needsZeroRetentionClear("0", "own")).toBe(true);
+    expect(needsZeroRetentionClear("1", "plus")).toBe(false);
+    expect(needsZeroRetentionClear(null, "free")).toBe(false);
+    expect(needsZeroRetentionClear("1", null)).toBe(false);
   });
 });

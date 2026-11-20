@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text } from "react-native";
 import { SymbolView } from "expo-symbols";
-import { useColors } from "../../ui/theme.ts";
+import { useColors } from "./theme.ts";
 
 // The line under every cloud answer (docs/architecture.md section 6, "What is kept, by route").
 export function CloudLine({ retention, onPress }: { retention: "standard" | "zero"; onPress?: () => void }) {

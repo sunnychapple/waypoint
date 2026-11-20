@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { activityLine, sentKeyOf, zeroRetentionShown } from "../../core/cloud/activity.ts";
+import { activityLine, needsZeroRetentionClear, sentKeyOf, zeroRetentionShown } from "../../core/cloud/activity.ts";
 import { getSent } from "../../core/explain/sent.ts";
 import { useQuery } from "../../platform/db.ts";
-import { setZeroRetention, useActivity, useStoredZeroRetention, type SwitchResult } from "../../platform/privacy.ts";
+import { clearStoredZeroRetention, setZeroRetention, useActivity, useStoredZeroRetention, type SwitchResult } from "../../platform/privacy.ts";
 import { useWallet } from "../../platform/wallet.ts";
+import { CloudLine } from "../../ui/CloudLine.tsx";
 import { Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -51,6 +52,9 @@ export default function CloudScreen() {
 
   const plan = wallet?.plan ?? null;
   const on = zeroRetentionShown(stored, plan);
+  useEffect(() => {
+    if (needsZeroRetentionClear(stored, plan)) clearStoredZeroRetention();
+  }, [stored, plan]);
   const keys = activity.items.map((item) => sentKeyOf(item.id)).filter((key): key is string => key !== null);
   const localKeys = useQuery((db) => new Set(keys.filter((key) => getSent(db, key) !== null)), keys.join(","));
 
@@ -128,10 +132,7 @@ export default function CloudScreen() {
               onPress={onDevice ? () => router.push(`/sent?id=${key}`) : undefined}
             />
             <View style={styles.cloud}>
-              <SymbolView name="cloud" tintColor={colors.cloud} size={14} />
-              <Text style={[styles.cloudText, { color: colors.cloudInk }]}>
-                {line.retention === "zero" ? "Not stored in the cloud" : "Sent for this task only"}
-              </Text>
+              <CloudLine retention={line.retention} />
             </View>
           </View>
         );
@@ -157,8 +158,7 @@ const styles = StyleSheet.create({
   warning: { padding: 12, borderRadius: 12 },
   warningText: { fontSize: 14, lineHeight: 20 },
   item: { gap: 6 },
-  cloud: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16 },
-  cloudText: { fontSize: 13, fontWeight: "500" },
+  cloud: { paddingHorizontal: 16 },
   textButton: { minHeight: 44, justifyContent: "center" },
   textButtonLabel: { fontSize: 17, fontWeight: "600" },
 });

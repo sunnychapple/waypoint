@@ -35,3 +35,8 @@ export const ZERO_RETENTION_KEY = "zero_retention";
 export function zeroRetentionShown(stored: string | null, plan: "free" | "plus" | "own" | null): boolean {
   return plan === "plus" && stored === "1";
 }
+
+// A stored "1" from a Plus period must not outlive Plus: once the plan is known and is not Plus, the stored value is cleared.
+export function needsZeroRetentionClear(stored: string | null, plan: "free" | "plus" | "own" | null): boolean {
+  return plan !== null && plan !== "plus" && stored !== null;
+}
