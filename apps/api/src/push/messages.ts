@@ -14,6 +14,20 @@ export const PushMessageSchema = z.strictObject({
 
 export type PushMessage = z.infer<typeof PushMessageSchema>;
 
+// The part of the push queue binding producers use. Queue<PushMessage> satisfies this type.
+export type PushQueue = { send(message: PushMessage): Promise<unknown> };
+
+// A push only nudges the app, so losing one never fails the request that caused it. A message the consumer would
+// drop (an id outside the schema's limits) is not sent.
+export async function sendPush(queue: PushQueue, message: PushMessage): Promise<void> {
+  if (!PushMessageSchema.safeParse(message).success) return;
+  try {
+    await queue.send(message);
+  } catch {
+    // Dropped; the app still sees the change the next time it asks.
+  }
+}
+
 export type ApnsNotification = {
   pushType: "alert" | "background";
   priority: 10 | 5;

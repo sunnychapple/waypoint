@@ -148,6 +148,18 @@ describe("usage consumer", () => {
     expect(h.points).toEqual([]);
   });
 
+  test("a cancelled event with credits 0 is written and acked; an unknown outcome is acked and writes nothing", async () => {
+    const db = await dbWithUser();
+    const cancelled = { ...GOOD, id: "job:u1:k1", task: "overview_script", outcome: "cancelled", credits: 0 };
+    const h = harness((index) => (index === 0 ? cancelled : { ...GOOD, id: "job:u1:k2", outcome: "other" }), 2);
+    await handleUsageBatch(h.batch, { DB: db, ANALYTICS: h.analytics });
+    expect(await activityRows(db)).toEqual([expect.objectContaining({ id: "job:u1:k1", credits: 0 })]);
+    expect(h.points).toHaveLength(1);
+    expect(h.points[0]?.blobs[3]).toBe("cancelled");
+    expect(h.acks).toEqual([0, 1]);
+    expect(h.retries).toEqual([]);
+  });
+
   test("no data point holds the user id", async () => {
     const db = await dbWithUser();
     const h = harness(() => GOOD);

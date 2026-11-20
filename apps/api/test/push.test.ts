@@ -9,7 +9,7 @@ import {
   type FetchLike,
 } from "../src/push/apns.ts";
 import { handlePushBatch, PUSH_QUEUE_NAME, type PushEnv } from "../src/push/consumer.ts";
-import { notificationFor, PushMessageSchema, type PushMessage } from "../src/push/messages.ts";
+import { notificationFor, PushMessageSchema, sendPush, type PushMessage, type PushQueue } from "../src/push/messages.ts";
 import type { QueueBatch, QueueMessage } from "../src/queue.ts";
 import type { Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
@@ -325,5 +325,39 @@ describe("push consumer", () => {
     const keyLine = PEM.split("\n")[1] ?? "";
     expect(keyLine.length).toBeGreaterThan(0);
     expect(seen).not.toContain(keyLine);
+  });
+});
+
+// Compile-time check: a Queue<PushMessage> is accepted as the PushQueue that sendPush takes.
+export const pushQueueFits: (queue: Queue<PushMessage>) => PushQueue = (queue) => queue;
+
+describe("sendPush", () => {
+  const GOOD_PUSH: PushMessage = { user_id: "u1", kind: "job_ready", ref: "job_abcdefghijklmnopqrstuv", device_id: "device_a1" };
+
+  test("sends a valid message once, unchanged", async () => {
+    const sent: PushMessage[] = [];
+    await sendPush({ send: async (message) => void sent.push(message) }, GOOD_PUSH);
+    expect(sent).toEqual([GOOD_PUSH]);
+  });
+
+  test("sends nothing for a ref of 49 characters or a device_id of 7 characters", async () => {
+    const sent: PushMessage[] = [];
+    const queue = { send: async (message: PushMessage) => void sent.push(message) };
+    await sendPush(queue, { ...GOOD_PUSH, ref: "r".repeat(49) });
+    await sendPush(queue, { ...GOOD_PUSH, device_id: "d".repeat(7) });
+    expect(sent).toEqual([]);
+  });
+
+  test("a queue whose send throws resolves without an error", async () => {
+    await expect(
+      sendPush(
+        {
+          send: async () => {
+            throw new Error("queue down");
+          },
+        },
+        GOOD_PUSH,
+      ),
+    ).resolves.toBeUndefined();
   });
 });
