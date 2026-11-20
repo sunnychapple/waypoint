@@ -129,7 +129,9 @@ export function jobLine(job: LocalJob): string {
     case "running":
       return "Working on it";
     case "succeeded":
-      return job.savedAt === null ? "Getting the result" : `Ready · ${creditsLabel(job.spent ?? job.quoted)}`;
+      if (job.savedAt !== null) return `Ready · ${creditsLabel(job.spent ?? job.quoted)}`;
+      // Deleted before its result was saved: it finished just as it was cancelled, or its result had expired.
+      return job.deletedAt !== null ? `Finished, but the result is gone · ${creditsLabel(job.spent ?? job.quoted)}` : "Getting the result";
     case "failed":
       return "Didn't work · nothing charged";
     case "cancelled":

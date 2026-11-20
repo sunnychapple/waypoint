@@ -101,7 +101,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
       return;
     }
     // The answer is paid for and is shown even if saving it on the iPhone fails. A save failure is not a cloud failure,
-    // so the key is kept and there is no "Try again".
+    // so there is no "Try again"; the key is dropped either way, because the server answers a used key with 409.
     const item: ThreadItem = { kind: task, text, at: Date.now(), retention, sentId: key };
     let next: Explanation | null;
     try {
@@ -113,6 +113,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
         return addToThread(db, id, item);
       });
     } catch {
+      delete keys.current[task];
       setUnsavedItem(item);
       setPhase({ kind: "idle" });
       return;
