@@ -39,7 +39,7 @@ probe("xhr", () => new Promise((ok, no) => { const x = new XMLHttpRequest(); x.o
 probe("websocket", () => new Promise((ok, no) => { const w = new WebSocket("ws://HOST:8999/ws"); w.onopen = ok; w.onerror = () => no(new Error("ws")); }));
 probe("eventsource", () => new Promise((ok, no) => { const s = new EventSource(H + "sse"); s.onopen = ok; s.onerror = () => no(new Error("sse")); }));
 probe("beacon", () => { if (!navigator.sendBeacon(H + "beacon", "x")) throw new Error("beacon"); });
-probe("webrtc", async () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:HOST:8999" }] }); pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer()); });
+probe("webrtc", async () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:HOST:3478" }] }); pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer()); });
 probe("worker", () => new Worker("data:text/javascript,fetch('" + H + "worker')"));
 probe("\x69mport", () => import(H + "import.js"));
 probe("image", () => new Promise((ok, no) => { const i = new Image(); i.onload = ok; i.onerror = () => no(new Error("img")); i.src = H + "js-image"; }));
@@ -52,15 +52,31 @@ storage("caches", () => caches);
 document.cookie = "gate=1";
 say("cookie", document.cookie ? "NOT BLOCKED" : "blocked (empty)");
 const realm = (name, w) => {
-  if (!w) { say(name, "no frame window"); return; }
   ["fetch", "RTCPeerConnection", "WebSocket", "Worker"].forEach((k) => {
     try { say(name + " " + k, typeof w[k] === "undefined" ? "blocked (undefined)" : "NOT BLOCKED"); } catch (e) { say(name + " " + k, "blocked (" + (e && e.name) + ")"); }
   });
 };
-const srcFrame = document.createElement("iframe"); srcFrame.srcdoc = "<p>srcdoc</p>"; document.body.appendChild(srcFrame);
-const blankFrame = document.createElement("iframe"); document.body.appendChild(blankFrame);
-setTimeout(() => { realm("srcdoc frame", srcFrame.contentWindow); realm("about:blank frame", blankFrame.contentWindow); for (let i = 0; i < window.frames.length; i++) realm("window.frames[" + i + "]", window.frames[i]); }, 300);
-probe("bridge", () => { if (window.webkit && window.webkit.messageHandlers && Object.keys(window.webkit.messageHandlers).length) throw new Error("bridge present"); say("bridge", "none"); });
+const make = (name, run) => { try { run(); say(name, "NOT BLOCKED"); } catch (e) { say(name, "blocked (" + (e && e.name) + ")"); } };
+const F = '<iframe src="' + H + 'made-frame"></iframe>';
+const box = document.createElement("div"); document.body.appendChild(box);
+make("make iframe", () => document.body.appendChild(document.createElement("iframe")));
+make("make iframe (namespace)", () => document.body.appendChild(document.createElementNS("http://www.w3.org/1999/xhtml", "iframe")));
+make("make object", () => document.body.appendChild(document.createElement("object")));
+make("make embed", () => document.body.appendChild(document.createElement("embed")));
+make("make meta", () => document.head.appendChild(document.createElement("meta")));
+make("innerHTML frame", () => { box.innerHTML = F; });
+make("insertAdjacentHTML frame", () => box.insertAdjacentHTML("beforeend", F));
+make("DOMParser frame", () => box.appendChild(document.adoptNode(new DOMParser().parseFromString(F, "text/html").body.firstChild)));
+make("DOMParser xml", () => new DOMParser().parseFromString("<a/>", "application/xml"));
+make("createContextualFragment frame", () => box.appendChild(document.createRange().createContextualFragment(F)));
+make("document.write frame", () => document.write(F));
+make("XSLTProcessor", () => new XSLTProcessor());
+say("bridge", window.webkit && window.webkit.messageHandlers && Object.keys(window.webkit.messageHandlers).length ? "NOT BLOCKED" : "none");
+setTimeout(() => {
+  say("frames", window.length === 0 ? "none" : window.length + " NOT BLOCKED");
+  for (let i = 0; i < window.length; i++) realm("window.frames[" + i + "]", window.frames[i]);
+  say("lockdown", typeof WebAssembly === "undefined" ? "on" : "OFF (NOT BLOCKED)");
+}, 300);
 setTimeout(() => { document.getElementById("ping").click(); document.getElementById("form").submit(); }, 500);
 setTimeout(() => { location.href = H + "location"; }, 1000);
 setTimeout(() => { location.href = "waypoint://gate"; }, 1500);

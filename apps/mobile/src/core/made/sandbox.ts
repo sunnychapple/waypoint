@@ -1,3 +1,7 @@
+import { sanitizeMiniApp, scriptJson } from "./miniAppHtml.ts";
+
+export { scriptJson };
+
 // The page a sandboxed web view loads (M25b). Everything here is defence in depth; the native view is the control.
 export const SANDBOX_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src 'none'; " +
@@ -5,14 +9,10 @@ export const SANDBOX_CSP =
 
 const HEAD = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"><meta name="viewport" content="width=device-width, initial-scale=1">`;
 
-// A model's HTML, after our head: the CSP meta comes first, so it applies before anything the HTML contains.
+// A model's HTML, rebuilt by sanitizeMiniApp (M25c), after our head: the CSP meta comes first, so it applies before
+// anything the HTML contains.
 export function miniAppPage(html: string): string {
-  return `${HEAD}</head><body>${html}</body></html>`;
-}
-
-// JSON that is safe inside <script>: "<" never appears, so "</script>" cannot end the script.
-export function scriptJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+  return `${HEAD}</head><body>${sanitizeMiniApp(html)}</body></html>`;
 }
 
 // A Mermaid diagram page. The native view inserts Mermaid's own script where MERMAID_SCRIPT is.
