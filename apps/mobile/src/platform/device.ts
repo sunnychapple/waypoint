@@ -7,7 +7,7 @@ import { router } from "expo-router";
 import { ApiCallError, NetworkError, type DeviceSigner } from "@waypoint/api-client";
 import type { DeviceView } from "@waypoint/contracts";
 import { accountStep, knownDevicesKey, newDeviceStep, pairingApproverKey, parseApprover, parseKnown, updateKnown } from "../core/device/devices.ts";
-import { deviceName, planRegistration, statusKey, userIdKey, type DeviceStatus } from "../core/device/registration.ts";
+import { accountKeyLost, deviceName, planRegistration, statusKey, userIdKey, type DeviceStatus } from "../core/device/registration.ts";
 import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import {
   adoptAccountKey,
@@ -139,9 +139,10 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
       if (clerkId !== clerkUserId) return;
       return approve(user, keys.deviceId);
     } catch (error) {
-      // Another device became the first one meanwhile: drop our account key and register as waiting.
       if (!(firstTry && error instanceof ApiCallError && error.status === 409)) throw error;
-      await deleteAccountKey(user);
+      // Another device became the first one meanwhile: drop our account key and register as waiting. Any other 409
+      // (our own registration still in progress, or already done) keeps it: the account key exists nowhere else.
+      if (accountKeyLost((await api.devices()).devices, account.signPub)) await deleteAccountKey(user);
       return register(clerkUserId, false);
     }
   }

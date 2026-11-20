@@ -13,15 +13,17 @@ let packMissing = false;
 // Writes down the audio of sessions whose words were not written live. Runs only while the app is active,
 // the speech pack is installed and the recorder is idle. Errors are kept per session; see below.
 async function tick(): Promise<void> {
-  if (ticking || packMissing || AppState.currentState !== "active") return;
+  if (ticking || AppState.currentState !== "active") return;
   ticking = true;
   try {
-    if ((await getSpeechStatus()).pack !== "installed") return;
     if (getRecorderStatus().state !== "idle") return;
+    // First, with or without a speech pack: a recording cut off by a crash or a kill becomes interrupted (and shows in
+    // its space) on every iPhone, also one that cannot transcribe.
     if (!recovered) {
       writeDb((db) => recoverSessions(db, getRecorderStatus()));
       recovered = true;
     }
+    if (packMissing || (await getSpeechStatus()).pack !== "installed") return;
     for (const session of pendingTranscriptions(getDb())) {
       try {
         await transcribeSession(session.sessionId, session.parts);

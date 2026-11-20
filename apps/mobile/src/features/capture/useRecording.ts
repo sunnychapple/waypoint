@@ -116,8 +116,30 @@ export function useRecording(): RecordingModel {
       }),
       onSpeechPackProgress((e) => setFraction(e.fraction)),
     ];
-    return () => {
+    const removeAll = (): void => {
       for (const subscription of subscriptions) subscription.remove();
+    };
+    // The screen can go away while recording without Stop being tapped (the session ended and the app went back to
+    // sign-in). Then the recording is stopped and saved here, so the microphone does not run on with nothing to stop it.
+    // The listeners stay until the stop settles: the last audio part and the last words arrive during stopRecording.
+    return () => {
+      const current = sessionRef.current;
+      if (current === null || stoppingRef.current) {
+        removeAll();
+        return;
+      }
+      stoppingRef.current = true;
+      stopRecording()
+        .then(
+          (recordedMs) =>
+            writeDb((db) => {
+              if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
+              finishRecording(db, current.id, Date.now(), recordedMs);
+            }),
+          () => undefined, // never started, or already stopped: the next launch's recoverSessions marks it interrupted
+        )
+        .catch(() => undefined) // a failed save: recoverSessions marks it interrupted at the next launch
+        .finally(removeAll);
     };
   }, []);
 
@@ -144,6 +166,12 @@ export function useRecording(): RecordingModel {
         setPack(speech.pack);
         setPhase("recording");
         await startRecording(created.session.id);
+        if (cancelled) {
+          // The screen went away while the recorder was starting, so the unmount stop came too early. Stop it now;
+          // the session stays unfinished and the next launch's recoverSessions marks it interrupted.
+          stopRecording().catch(() => undefined);
+          return;
+        }
         setAnchor({ ms: 0, at: Date.now() });
         setRecorder("recording");
         if (speech.pack === "not_installed") {
