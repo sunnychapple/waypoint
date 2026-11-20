@@ -112,6 +112,14 @@ export default function SettingsScreen() {
         </View>
       ) : null}
 
+      <Caption style={styles.section}>ACCOUNT</Caption>
+      <Row
+        title="Plans & credits"
+        leading={<SymbolView name="creditcard" tintColor={colors.ink} size={20} />}
+        right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+        onPress={() => router.push("/plans")}
+      />
+
       <Caption style={styles.section}>ON THIS IPHONE</Caption>
       <Row
         title="Speech pack"
