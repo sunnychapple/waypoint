@@ -2,4 +2,6 @@
 import "./second.ts";
 
 import "./research.ts";
+
+import "./made.ts";
 export {};
