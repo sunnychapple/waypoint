@@ -25,20 +25,17 @@ import {
 import { isScannerSupported, scanPages } from "../../../modules/waypoint-pages/index.ts";
 import { addPiece, EMPTY_LIVE, type LiveTranscript, type Piece } from "../../core/capture/transcript.ts";
 import { addFlag, addPhoto, finishRecording, savePart, saveSegment, setPaused, startRecordingSession } from "../../core/capture/recording.ts";
-import type { SessionRow } from "../../core/capture/sessions.ts";
+import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.ts";
+import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import { getSavingTo } from "../../core/db/spaces.ts";
 import { writeDb } from "../../platform/db.ts";
+import { deleteSessionFiles } from "../../platform/files.ts";
 
 const deps = { now: Date.now, newId: randomUUID };
 const LEVELS_KEPT = 48;
-const GAP_MIN_MS = 1000;
 const TOAST_MS = 2000;
 
-export type TimelineItem =
-  | { kind: "line"; key: string; at: number; text: string }
-  | { kind: "gap"; key: string; at: number; gapMs: number }
-  | { kind: "flag"; key: string; at: number }
-  | { kind: "photo"; key: string; at: number; file: string };
+export type { TimelineItem };
 
 export type Banner = { kind: "downloading"; percent: number } | { kind: "unsupported" } | null;
 
@@ -74,6 +71,7 @@ export function useRecording(): RecordingModel {
   const [levels, setLevels] = useState<number[]>([]);
   const [live, setLive] = useState<LiveTranscript>(EMPTY_LIVE);
   const [parts, setParts] = useState<PartEvent[]>([]);
+  const [resumes, setResumes] = useState<number[]>([]);
   const [flags, setFlags] = useState<number[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [pack, setPack] = useState<SpeechStatus["pack"] | null>(null);
@@ -91,6 +89,9 @@ export function useRecording(): RecordingModel {
     const subscriptions = [
       onRecorderState((e) => {
         if (!mine(e.sessionId)) return;
+        // A resume: the gap row can be drawn now (session time, the same clock flags use).
+        const started = sessionRef.current?.startedAt;
+        if (e.state === "recording" && started !== undefined) setResumes((previous) => [...previous, Date.now() - started]);
         setRecorder(e.state);
         setPauseReason(e.reason);
         setAnchor({ ms: e.recordedMs, at: Date.now() });
@@ -149,6 +150,13 @@ export function useRecording(): RecordingModel {
             .catch(() => setPack(null));
         }
       } catch (error) {
+        // The session row was written before the recorder started; a recorder that never started leaves nothing.
+        const failed = sessionRef.current;
+        if (failed !== null) {
+          sessionRef.current = null;
+          writeDb((db) => deleteSessionRow(db, failed.id));
+          deleteSessionFiles(failed.id);
+        }
         Alert.alert("Couldn't start the recording.", messageOf(error), [{ text: "OK", onPress: () => router.back() }]);
       }
     })();
@@ -235,7 +243,7 @@ export function useRecording(): RecordingModel {
     pauseReason,
     clockMs,
     levels: bars,
-    timeline: buildTimeline(live.finals, parts, flags, photos),
+    timeline: buildTimeline(live.finals, parts, resumes, flags, photos),
     volatile: live.volatile,
     banner,
     toast,
@@ -246,26 +254,6 @@ export function useRecording(): RecordingModel {
     photo: () => void photo(),
     stop: () => void stop(),
   };
-}
-
-// Finals, gaps between parts, flags and photos, in time order.
-function buildTimeline(
-  finals: Piece[],
-  parts: PartEvent[],
-  flags: number[],
-  photos: Photo[],
-): TimelineItem[] {
-  const items: TimelineItem[] = finals.map((piece) => ({ kind: "line", key: `line-${piece.tStart}`, at: piece.tStart, text: piece.text }));
-  parts.forEach((part, i) => {
-    const previous = parts[i - 1];
-    if (!previous) return;
-    const gapStart = previous.startMs + previous.durationMs;
-    const gapMs = part.startMs - gapStart;
-    if (gapMs >= GAP_MIN_MS) items.push({ kind: "gap", key: `gap-${part.index}`, at: gapStart, gapMs });
-  });
-  flags.forEach((t, i) => items.push({ kind: "flag", key: `flag-${i}`, at: t }));
-  photos.forEach((p) => items.push({ kind: "photo", key: `photo-${p.id}`, at: p.t, file: p.file }));
-  return items.sort((a, b) => a.at - b.at);
 }
 
 function messageOf(error: unknown): string {

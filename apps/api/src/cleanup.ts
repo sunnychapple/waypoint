@@ -5,6 +5,9 @@ export const TMP_AUDIO_KEEP_MS = 24 * 60 * 60 * 1000;
 // Locked job input (PR 20). A job deletes its own when it ends; this catches the ones whose job never ended.
 export const TMP_INPUT_KEEP_MS = 24 * 60 * 60 * 1000;
 export const IDEMPOTENCY_ROWS_KEEP_MS = 24 * 60 * 60 * 1000;
+// A blob reservation (PR 29) whose upload never finished: the Worker stopped between the reservation and the end of
+// the upload. After a day it no longer counts against the uploader's media storage.
+export const PENDING_BLOB_KEEP_MS = 24 * 60 * 60 * 1000;
 // The card's cap: a run deletes at most MAX_LIST_PAGES pages of 1,000 objects per prefix.
 export const MAX_LIST_PAGES = 20;
 // A safety limit on pages listed per prefix per run, so a run always ends.
@@ -46,12 +49,20 @@ export type CleanupEnv = { DB: Db; BUCKET: CleanupBucket };
 export async function cleanup(
   env: CleanupEnv,
   now: number,
-): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number }> {
+): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number; pending_blobs: number }> {
   const results = await deleteOlderThan(env.BUCKET, "results/", now - RESULTS_KEEP_MS);
   const tmpAudio = await deleteOlderThan(env.BUCKET, "tmp/audio/", now - TMP_AUDIO_KEEP_MS);
   const tmpInput = await deleteOlderThan(env.BUCKET, "tmp/input/", now - TMP_INPUT_KEEP_MS);
   const idempotency = await env.DB.prepare("DELETE FROM idempotency WHERE created_at < ?").bind(now - IDEMPOTENCY_ROWS_KEEP_MS).run();
   // Nonces of signed requests (S1A) whose timestamp has left the 5-minute window.
   const nonces = await env.DB.prepare("DELETE FROM request_nonces WHERE expires_at < ?").bind(now).run();
-  return { results, tmp_audio: tmpAudio, tmp_input: tmpInput, idempotency: idempotency.meta.changes, request_nonces: nonces.meta.changes };
+  const pendingBlobs = await env.DB.prepare("DELETE FROM blobs WHERE stored_at IS NULL AND created_at < ?").bind(now - PENDING_BLOB_KEEP_MS).run();
+  return {
+    results,
+    tmp_audio: tmpAudio,
+    tmp_input: tmpInput,
+    idempotency: idempotency.meta.changes,
+    request_nonces: nonces.meta.changes,
+    pending_blobs: pendingBlobs.meta.changes,
+  };
 }
