@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
@@ -6,7 +6,7 @@ import { SymbolView } from "expo-symbols";
 import { JOB_PROMPT_MAX_CHARS, type ResearchDepth } from "@waypoint/contracts";
 import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel } from "../../core/config/config.ts";
-import { notesForResearch } from "../../core/research/research.ts";
+import { keyForRequest, notesForResearch, researchRequest } from "../../core/research/research.ts";
 import { getDb } from "../../platform/db.ts";
 import { useQuote } from "../../platform/jobs.ts";
 import { startResearch } from "../../platform/research.ts";
@@ -37,8 +37,9 @@ export default function NewResearchScreen() {
   const [depth, setDepth] = useState<ResearchDepth>("quick");
   const [withNotes, setWithNotes] = useState(false);
   const [showSent, setShowSent] = useState(false);
-  // Made when the screen opens; kept for "Try again" when the request never ran (keepsKey).
-  const [key, setKey] = useState(() => randomUUID());
+  // The last failed request that may be re-sent (keepsKey), with its key and body. "Try again" reuses the key only
+  // while the body is unchanged (keyForRequest).
+  const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
   const quote = useQuote({ task: "research", depth });
@@ -54,14 +55,17 @@ export default function NewResearchScreen() {
     if (trimmed === "" || price === null || starting) return;
     setStarting(true);
     setFailure(null);
-    const result = await startResearch({ question: trimmed, depth, notes: notesOrNull(), sessionId, key });
+    const request = researchRequest({ question: trimmed, depth, notes: notesOrNull() });
+    const body = JSON.stringify(request);
+    const key = keyForRequest(attempt.current, body, () => randomUUID());
+    const result = await startResearch({ request, sessionId, key });
     setStarting(false);
     if (result.ok) {
       router.replace(`/job/${encodeURIComponent(result.jobId)}`);
       return;
     }
     setFailure(result.failure);
-    if (!keepsKey(result.failure)) setKey(randomUUID());
+    attempt.current = keepsKey(result.failure) ? { key, body } : null;
   }
 
   function act(action: FailureAction): void {

@@ -56,3 +56,18 @@ export function notesForResearch(db: SqlDb, sessionId: string, max: number = JOB
   const space = cut.lastIndexOf(" ");
   return space > 0 ? cut.slice(0, space) : cut;
 }
+
+export type ResearchRequest = { type: "research"; depth: ResearchDepth; question: string; text?: string };
+
+// The request body for a research job. The session's notes are added only when there are some.
+export function researchRequest(input: { question: string; depth: ResearchDepth; notes: string | null }): ResearchRequest {
+  return input.notes === null || input.notes === ""
+    ? { type: "research", depth: input.depth, question: input.question }
+    : { type: "research", depth: input.depth, question: input.question, text: input.notes };
+}
+
+// The Idempotency-Key for a request. "Try again" keeps the failed attempt's key only when the body is unchanged: the
+// server answers 409 when a key comes back with a different body, and sent_log keeps one body per key.
+export function keyForRequest(previous: { key: string; body: string } | null, body: string, newKey: () => string): string {
+  return previous !== null && previous.body === body ? previous.key : newKey();
+}

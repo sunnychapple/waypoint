@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { getResearch, notesForResearch, researchForSession, saveResearch } from "../src/core/research/research.ts";
+import { getResearch, keyForRequest, notesForResearch, researchForSession, researchRequest, saveResearch } from "../src/core/research/research.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 function setup() {
@@ -39,5 +39,23 @@ describe("research", () => {
     db.run("INSERT INTO captures (id, session_id, kind, t, position, file, found_text) VALUES ('c1', ?, 'page', 0, 0, 'p.jpg', 'gamma delta')", [session.id]);
     expect(notesForResearch(db, session.id)).toBe("alpha beta gamma delta");
     expect(notesForResearch(db, session.id, 13)).toBe("alpha beta");
+  });
+  it("researchRequest: notes are added only when there are some", () => {
+    expect(researchRequest({ question: "Q?", depth: "quick", notes: null })).toEqual({ type: "research", depth: "quick", question: "Q?" });
+    expect(researchRequest({ question: "Q?", depth: "quick", notes: "" })).toEqual({ type: "research", depth: "quick", question: "Q?" });
+    expect(researchRequest({ question: "Q?", depth: "deep", notes: "alpha" })).toEqual({ type: "research", depth: "deep", question: "Q?", text: "alpha" });
+  });
+  it("keyForRequest: a retry with the same body keeps the key; a changed body gets a new one", () => {
+    let n = 0;
+    const fresh = () => `key_${++n}`;
+    const body = JSON.stringify(researchRequest({ question: "Q?", depth: "quick", notes: null }));
+    const first = keyForRequest(null, body, fresh);
+    expect(first).toBe("key_1");
+    expect(keyForRequest({ key: first, body }, body, fresh)).toBe("key_1");
+    const changed = JSON.stringify(researchRequest({ question: "Q?", depth: "deep", notes: null }));
+    expect(keyForRequest({ key: first, body }, changed, fresh)).toBe("key_2");
+    const withNotes = JSON.stringify(researchRequest({ question: "Q?", depth: "quick", notes: "alpha" }));
+    expect(keyForRequest({ key: first, body }, withNotes, fresh)).toBe("key_3");
+    expect(n).toBe(3);
   });
 });
