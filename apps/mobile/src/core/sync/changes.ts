@@ -214,6 +214,9 @@ function synced(db: SqlDb, spaceId: string): boolean {
 // When this iPhone's person joined the group, for an invite "from now"; 0 for "everything" (and for the group's owner).
 // A group or membership row that is missing reads as 0 (everything): this fails open, which is safe because the server
 // already sends a member only changes written after their history_from; this check only drops what the server cannot.
+// How far an author's clock may be behind the server's join time before a note still counts as older (clock skew).
+export const HISTORY_FROM_SLACK_MS = 5 * 60_000;
+
 function historyFrom(db: SqlDb, groupId: string): number {
   return db.get<{ history_from: number }>("SELECT history_from FROM groups WHERE id = ?", [groupId])?.history_from ?? 0;
 }
@@ -302,7 +305,7 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     // In another group's space here: it waits until that group moves it out (a delete with moved_to, M30b).
     if (here !== null && here !== space) return synced(db, here) ? defer(db, groupId, change, deviceId, table, key, key) : "rejected";
     // A note started before this member joined "from now" (open question 56) is not theirs to see.
-    if (here === null && typeof change.row.started_at === "number" && change.row.started_at < historyFrom(db, groupId)) return "older";
+    if (here === null && typeof change.row.started_at === "number" && change.row.started_at < historyFrom(db, groupId) - HISTORY_FROM_SLACK_MS) return "older";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
     upsertRow(db, "sessions", { ...change.row, space_id: space });
     retryPending(db, groupId, space, key);

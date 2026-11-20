@@ -2,11 +2,9 @@ import { useEffect } from "react";
 import { getIosPushNotificationServiceEnvironmentAsync } from "expo-application";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
-import { PUSH_SENT_KEY, actionForPush, pushEnvironment, pushSentValue, pushTokenRequest } from "../core/push/push.ts";
-import { getSetting, setSetting } from "../core/db/settings.ts";
+import { actionForPush, pushEnvironment, pushSentValue, pushTokenRequest } from "../core/push/push.ts";
 import { getDeviceKeys } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
-import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { followJob } from "./jobs.ts";
 import { syncNow } from "./sync.ts";
@@ -16,11 +14,14 @@ Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
 
+// What was last sent this launch, per person and token. Not in the notes database: the server keeps one row per token,
+// so another person registering the same token on a shared iPad removes this one's row, and this must send again.
+let sentValue: string | null = null;
+
 // Sends this iPhone's APNs token for its devices.id when notifications are allowed. Never asks; never throws.
 export async function registerPushToken(): Promise<void> {
   try {
     const userId = currentUserId();
-    const generation = dbGeneration();
     const keys = userId === null ? null : getDeviceKeys(userId);
     if (keys === null) return;
     if ((await Notifications.getPermissionsAsync()).status !== "granted") return;
@@ -28,9 +29,9 @@ export async function registerPushToken(): Promise<void> {
     if (environment === null) return;
     const token = await Notifications.getDevicePushTokenAsync();
     const request = pushTokenRequest(keys.deviceId, String(token.data), environment);
-    if (request === null || getSetting(getDb(), PUSH_SENT_KEY) === pushSentValue(request)) return;
+    if (request === null || sentValue === `${userId}:${pushSentValue(request)}`) return;
     await api.pushToken(request);
-    writeDbIf(generation, (db) => setSetting(db, PUSH_SENT_KEY, pushSentValue(request)));
+    if (currentUserId() === userId) sentValue = `${userId}:${pushSentValue(request)}`; // not if someone else signed in meanwhile
   } catch {
     // Tried again on the next launch.
   }

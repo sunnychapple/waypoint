@@ -314,6 +314,29 @@ export function syncLimitHit(error: unknown, generation: number): boolean {
   return true;
 }
 
+// Forgets the local pause. A no-op when nobody is signed in.
+export function clearSyncPause(): void {
+  try {
+    writeDb((db) => deleteSetting(db, SYNC_LIMIT_KEY));
+  } catch {
+    // nobody is signed in
+  }
+}
+
+// The sync-limit sheet opened: forget the pause and send now, so the sheet offers to buy only if the server says 429
+// again. Resolves when the sends are done, with whether notes still wait to be sent (offline, or another failure);
+// never rejects.
+export async function recheckSyncLimit(): Promise<boolean> {
+  clearSyncPause();
+  try {
+    const groupIds = syncedGroupIds(getDb());
+    await Promise.all(groupIds.map((groupId) => syncNow(groupId)));
+    return groupIds.some((groupId) => nextOutgoing(getDb(), 1, groupId).length > 0);
+  } catch {
+    return false; // nobody is signed in
+  }
+}
+
 // The Idempotency-Key of the purchase the sheet is trying. Kept until the purchase is done or the server says this key
 // can never buy (extraOutcome), so a tap after buying credits, after a lost reply or while the last one is still running
 // never pays twice.
@@ -462,6 +485,7 @@ function disconnect(): void {
 function startForeground(): void {
   if (foreground) return;
   foreground = true;
+  clearSyncPause(); // bought elsewhere, or a lost reply: the next send sets it again only if the server still says 429
   const groupIds = (): string[] => {
     try {
       return syncedGroupIds(getDb());
