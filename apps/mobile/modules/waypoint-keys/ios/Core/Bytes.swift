@@ -4,7 +4,7 @@ import Foundation
 // Every way a Waypoint format can be refused. JavaScript sees the case name as error.code (see WaypointKeysModule).
 public enum KeysError: Error, Equatable {
   case badBase64URL, badHex, badLabel, badId, badPublicKey, badSignature, badNonce, badInput
-  case badEnvelope, badSealed, badRecovery, badContent
+  case badEnvelope, badSealed, badRecovery, badContent, badCommitment
 }
 
 // Base64url without padding (docs/security.md section 4). Decoding is strict: no padding, no "+/", and the text

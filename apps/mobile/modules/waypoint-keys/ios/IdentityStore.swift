@@ -12,6 +12,8 @@ struct StoredIdentity: Codable {
   var accountId: String?
   var accountKey: Data? // 64 bytes: account signing scalar, then account encryption scalar
   var pairingNonce: String? // base64url, 32 bytes; kept until the pairing ends (M27b)
+  var pendingAccountId: String? // a new account key made for a device removal, until the server accepts it (M27b)
+  var pendingAccountKey: Data?
 }
 
 enum IdentityStore {
@@ -91,12 +93,14 @@ enum IdentityStore {
 }
 
 enum KeysModuleError: Error {
-  case noSecureEnclave, noIdentity, exists, keychain(Int)
+  case noSecureEnclave, noIdentity, exists, keychain(Int), noAccountKey, noPairing
 
   var code: String {
     switch self {
     case .noSecureEnclave: return "no_secure_enclave"
     case .noIdentity: return "no_identity"
+    case .noAccountKey: return "no_account_key"
+    case .noPairing: return "no_pairing"
     case .exists: return "exists"
     case .keychain: return "keychain"
     }
