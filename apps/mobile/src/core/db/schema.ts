@@ -276,8 +276,10 @@ CREATE TABLE sync_state (
   pulled_at INTEGER
 );
 
+-- Sent in seq order (the order collectChanges queued them: parents before children).
 CREATE TABLE outbox (
-  id TEXT PRIMARY KEY,
+  seq INTEGER PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
   group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -285,8 +287,9 @@ CREATE TABLE outbox (
   created_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX outbox_order ON outbox (created_at);
 
+-- The newest write this iPhone knows for each synced row, its own (written by collectChanges) or received.
+-- row_id is the row's id; for segments "<session>:<source>:<10-minute bucket>"; for a space, the group id.
 CREATE TABLE row_versions (
   table_name TEXT NOT NULL,
   row_id TEXT NOT NULL,
@@ -295,9 +298,23 @@ CREATE TABLE row_versions (
   PRIMARY KEY (table_name, row_id)
 );
 
+-- Received changes whose session (or a card's capture) has not arrived yet; applied when it does. At most 2,000 per
+-- group (the oldest go first).
+CREATE TABLE sync_pending (
+  group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+  table_name TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  wait_for TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  device_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (group_id, table_name, row_id)
+);
+CREATE INDEX sync_pending_wait ON sync_pending (group_id, wait_for);
+
 -- Filled by the triggers below when this iPhone changes a row (plain inserts: a trigger's OR REPLACE is not reliable
--- under foreign-key actions); emptied by collectChanges, which uses each row's last entry. A deleted row keeps the
--- group it belonged to, found before it was gone.
+-- under foreign-key actions), only once some space syncs; emptied by collectChanges, which uses each row's last entry.
+-- A deleted row keeps the group it belonged to, found before it was gone.
 CREATE TABLE dirty (
   seq INTEGER PRIMARY KEY,
   table_name TEXT NOT NULL,
@@ -306,59 +323,64 @@ CREATE TABLE dirty (
   group_id TEXT
 );
 
--- 1 while applyChange writes, so changes that arrive are not sent back.
-CREATE TABLE sync_mode (applying INTEGER NOT NULL CHECK (applying IN (0, 1)));
-INSERT INTO sync_mode (applying) VALUES (0);
+-- applying is 1 while applyChange writes, so changes that arrive are not sent back. clock is the newest change time
+-- this iPhone has made or applied; its next change is stamped later than it (a phone with a slow clock still wins
+-- over what it has already seen).
+CREATE TABLE sync_mode (
+  applying INTEGER NOT NULL CHECK (applying IN (0, 1)),
+  clock INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO sync_mode (applying, clock) VALUES (0, 0);
 
 ALTER TABLE captures ADD COLUMN blob_id TEXT;
 
-CREATE TRIGGER sync_spaces_update AFTER UPDATE OF name ON spaces WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_spaces_update AFTER UPDATE OF name ON spaces WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('spaces', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_insert AFTER INSERT ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_insert AFTER INSERT ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_update AFTER UPDATE OF space_id, kind, title, state, transcript, started_at, ended_at, recorded_ms ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_update AFTER UPDATE OF space_id, kind, title, state, transcript, started_at, ended_at, recorded_ms ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_captures_insert AFTER INSERT ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_insert AFTER INSERT ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_captures_update AFTER UPDATE OF session_id, kind, t, position, duration_ms, found_text, found_lines, blob_id ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_update AFTER UPDATE OF session_id, kind, t, position, duration_ms, found_text, found_lines, blob_id ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_flags_insert AFTER INSERT ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_insert AFTER INSERT ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_flags_update AFTER UPDATE OF session_id, t, question, state ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_update AFTER UPDATE OF session_id, t, question, state ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_cards_insert AFTER INSERT ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_insert AFTER INSERT ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_cards_update AFTER UPDATE OF session_id, kind, front, back, capture_id, t, made_by, created_at, due_at, fsrs ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_update AFTER UPDATE OF session_id, kind, front, back, capture_id, t, made_by, created_at, due_at, fsrs ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_delete AFTER DELETE ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_delete AFTER DELETE ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', old.id, 1, (SELECT group_id FROM space_groups WHERE space_id = old.space_id));
 END;
-CREATE TRIGGER sync_captures_delete AFTER DELETE ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_delete AFTER DELETE ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_flags_delete AFTER DELETE ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_delete AFTER DELETE ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_cards_delete AFTER DELETE ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_delete AFTER DELETE ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_segments_insert AFTER INSERT ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source, 0, NULL);
+CREATE TRIGGER sync_segments_insert AFTER INSERT ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source || ':' || (new.t_start / 600000), 0, NULL);
 END;
-CREATE TRIGGER sync_segments_update AFTER UPDATE ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source, 0, NULL);
+CREATE TRIGGER sync_segments_update AFTER UPDATE ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source || ':' || (new.t_start / 600000), 0, NULL);
 END;
-CREATE TRIGGER sync_segments_delete AFTER DELETE ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', old.session_id || ':' || old.source, 0, NULL);
+CREATE TRIGGER sync_segments_delete AFTER DELETE ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', old.session_id || ':' || old.source || ':' || (old.t_start / 600000), 0, NULL);
 END;
 `,
   },
