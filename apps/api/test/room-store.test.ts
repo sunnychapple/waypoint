@@ -342,3 +342,59 @@ describe("restart", () => {
     expect(second.after(0, 10).last_seq).toBe(3);
   });
 });
+
+describe("after options and page limits", () => {
+  test("after(0, 10, { fromAt: T }) returns only changes appended with now >= T, in seq order; last_seq is still the largest seq", () => {
+    const room = createRoomStore(createTestStore());
+    room.append(change(), 1000);
+    room.append(change(), 2000);
+    room.append(change(), 3000);
+    const result = room.after(0, 10, { fromAt: 2000 });
+    expect(result.changes.map((c) => c.seq)).toEqual([2, 3]);
+    expect(result.changes.map((c) => c.at)).toEqual([2000, 3000]);
+    expect(result.last_seq).toBe(3);
+  });
+
+  test("after with maxBytes stops before the change that would pass it, and the first change always comes", () => {
+    const room = createRoomStore(createTestStore());
+    for (let i = 0; i < 3; i++) room.append(change({ locked_bytes: new Uint8Array(100).buffer }), 1000 + i);
+    expect(room.after(0, 10, { maxBytes: 250 }).changes.map((c) => c.seq)).toEqual([1, 2]);
+    expect(room.after(0, 10, { maxBytes: 1 }).changes.map((c) => c.seq)).toEqual([1]);
+    expect(room.after(0, 10).changes.map((c) => c.seq)).toEqual([1, 2, 3]);
+  });
+
+  test("after with fromAt -1, fromAt 1.5 or maxBytes 0 throws RangeError", () => {
+    const room = createRoomStore(createTestStore());
+    room.append(change(), 1000);
+    expect(() => room.after(0, 10, { fromAt: -1 })).toThrow(RangeError);
+    expect(() => room.after(0, 10, { fromAt: 1.5 })).toThrow(RangeError);
+    expect(() => room.after(0, 10, { maxBytes: 0 })).toThrow(RangeError);
+  });
+
+  test("lastSeq() is 0 for an empty room and the largest seq after appends", () => {
+    const room = createRoomStore(createTestStore());
+    expect(room.lastSeq()).toBe(0);
+    room.append(change(), 1);
+    room.append(change(), 2);
+    expect(room.lastSeq()).toBe(2);
+  });
+});
+
+describe("duePushes", () => {
+  const T = 1_763_560_000_000;
+
+  test("duePushes(['a','b'], T) gives both; at T+59,999 none; at T+60,000 both; a device pushed before is due only after the minute", () => {
+    const room = createRoomStore(createTestStore());
+    expect(room.duePushes(["a", "b"], T)).toEqual(["a", "b"]);
+    expect(room.duePushes(["a", "b"], T + 59_999)).toEqual([]);
+    expect(room.duePushes(["a", "b"], T + 60_000)).toEqual(["a", "b"]);
+    expect(room.duePushes(["c"], T + 60_000)).toEqual(["c"]);
+    expect(room.duePushes(["c", "d"], T + 60_001)).toEqual(["d"]);
+  });
+
+  test("an invalid device id throws RangeError and records nothing for the valid ids in the same call", () => {
+    const room = createRoomStore(createTestStore());
+    expect(() => room.duePushes(["good-id", "bad id!"], T)).toThrow(RangeError);
+    expect(room.duePushes(["good-id"], T)).toEqual(["good-id"]);
+  });
+});

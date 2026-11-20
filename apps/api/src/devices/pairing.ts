@@ -19,6 +19,7 @@ import type { AppEnv } from "../env.ts";
 import { ApiFailure } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
 import { checkEnvelope, isUniqueViolation } from "../keys/envelopes.ts";
+import { sendPush } from "../push/messages.ts";
 import type { Db } from "../storage.ts";
 import { DEVICE_COLUMNS } from "./view.ts";
 
@@ -182,6 +183,8 @@ export function pairingRoutes(deps: { now: () => number }) {
         if (isUniqueViolation(error)) throw new ApiFailure("conflict", "device already has a key for this version");
         throw error;
       }
+      // Tell the new device it was approved, so it fetches its keys (S1F).
+      await sendPush(c.env.PUSH_QUEUE, { user_id: user.id, kind: "device_approved", ref: target.id, device_id: target.id });
       const device = await db.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE id = ?`).bind(target.id).first<DeviceView>();
       return c.json({ device });
     });

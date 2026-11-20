@@ -20,6 +20,7 @@ const EXPECTED = {
   memberships: ["group_id", "user_id", "role", "starts_at", "ends_at", "history_from", "left_at"],
   key_envelopes: ["group_id", "key_version", "device_id", "wrapped_key"],
   invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by", "created_by", "history_from", "ends_at"],
+  blobs: ["id", "group_id", "user_id", "bytes", "created_at", "stored_at"],
   links: ["id", "group_id", "blob_key", "passcode_hash", "expires_at", "revoked_at", "views"],
   purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
   jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id", "command_key", "model", "retention", "bytes_sent", "deadline_at", "finished_at"],
@@ -43,6 +44,7 @@ const EXPECTED_TYPES = {
   memberships: { group_id: "TEXT", user_id: "TEXT", role: "TEXT", starts_at: "INTEGER", ends_at: "INTEGER?", history_from: "INTEGER", left_at: "INTEGER?" },
   key_envelopes: { group_id: "TEXT", key_version: "INTEGER", device_id: "TEXT", wrapped_key: "TEXT" },
   invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?", created_by: "TEXT?", history_from: "INTEGER", ends_at: "INTEGER?" },
+  blobs: { id: "TEXT", group_id: "TEXT", user_id: "TEXT?", bytes: "INTEGER", created_at: "INTEGER", stored_at: "INTEGER?" },
   links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER" },
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
   jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?", command_key: "TEXT?", model: "TEXT?", retention: "TEXT?", bytes_sent: "INTEGER", deadline_at: "INTEGER?", finished_at: "INTEGER?" },
@@ -62,6 +64,8 @@ const REQUIRED_INDEXES = [
   ["purchases", ["billing_account_id"]],
   ["jobs", ["user_id", "created_at"]],
   ["activity", ["user_id", "at"]],
+  ["blobs", ["user_id"]],
+  ["blobs", ["group_id"]],
   ["links", ["group_id"]],
   ["key_envelopes", ["device_id"]],
   ["invites", ["group_id"]],
@@ -487,6 +491,32 @@ test("rejects an invite whose created_by is a missing user", () => {
   assert.throws(
     () =>
       db.prepare("INSERT INTO invites (token_hash, group_id, role, expires_at, created_by) VALUES ('h1', 'g1', 'viewer', 1, 'missing')").run(),
+    /FOREIGN KEY constraint failed/,
+  );
+});
+
+test("deleting a group removes its blob rows", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.exec("INSERT INTO blobs (id, group_id, user_id, bytes, created_at, stored_at) VALUES ('b1', 'g1', 'u1', 10, 1, 1)");
+  db.prepare("DELETE FROM groups WHERE id = 'g1'").run();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM blobs WHERE group_id = 'g1'"), 0);
+});
+
+test("deleting a user sets blobs.user_id to NULL and keeps the row", () => {
+  const db = freshDb();
+  seedGroupAndDevice(db);
+  db.exec("INSERT INTO blobs (id, group_id, user_id, bytes, created_at, stored_at) VALUES ('b1', 'g1', 'u1', 10, 1, 1)");
+  db.prepare("DELETE FROM users WHERE id = 'u1'").run();
+  const row = db.prepare("SELECT user_id FROM blobs WHERE id = 'b1'").get();
+  assert.equal(row.user_id, null);
+});
+
+test("rejects a blob for a missing group", () => {
+  const db = freshDb();
+  seedUser(db);
+  assert.throws(
+    () => db.prepare("INSERT INTO blobs (id, group_id, user_id, bytes, created_at) VALUES ('b1', 'missing', 'u1', 10, 1)").run(),
     /FOREIGN KEY constraint failed/,
   );
 });
