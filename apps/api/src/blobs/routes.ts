@@ -88,7 +88,13 @@ export function blobRoutes(deps: { now: () => number }) {
         await db.prepare("DELETE FROM blobs WHERE id = ? AND stored_at IS NULL").bind(blobId).run();
         throw new ApiFailure("bad_request", "upload incomplete");
       }
-      await db.prepare("UPDATE blobs SET stored_at = ? WHERE id = ?").bind(now, blobId).run();
+      // A failed retry of the same id may have deleted this upload's reservation meanwhile; then the file is counted
+      // nowhere, so it is deleted and the app uploads it again.
+      const done = await db.prepare("UPDATE blobs SET stored_at = ? WHERE id = ?").bind(now, blobId).run();
+      if (done.meta.changes !== 1) {
+        await bucket.delete(key);
+        throw new ApiFailure("conflict", "upload interrupted, try again");
+      }
       return c.json({ id: blobId, group_id: groupId, bytes }, 201);
     })
     .get("/v1/blobs/:id", async (c) => {

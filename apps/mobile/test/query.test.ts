@@ -3,6 +3,7 @@ import { migrate } from "../src/core/db/migrate.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import { indexSession, type Embedder } from "../src/core/search/indexer.ts";
 import { clearVectorCache, searchNotes } from "../src/core/search/query.ts";
+import { quantize } from "../src/core/search/vectors.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 let db: SqlDb;
@@ -106,5 +107,62 @@ describe("searchNotes", () => {
     addSession("bread", "space-1", "Bread", ["cheap bread"]);
     await indexSession(db, fakeEmbedder(table), "bread", 6000);
     expect(await searchNotes(db, fakeEmbedder(table), "supply", {})).toHaveLength(2);
+  });
+
+  it("a meaning match below 0.25 similarity is not a hit", async () => {
+    addSession("far", "space-1", "Far", ["cells divide"]);
+    const table = { "cells divide": [1, 0, 0], tax: [0.2, 0.98, 0] };
+    await indexSession(db, fakeEmbedder(table), "far", 5000);
+    expect(await searchNotes(db, fakeEmbedder(table), "tax", {})).toEqual([]);
+  });
+
+  it("keyword hits are ranked by bm25, not by insert order", async () => {
+    addSession("many", "space-1", "Many", ["photosynthesis photosynthesis photosynthesis"]);
+    addSession("once", "space-1", "Once", ["photosynthesis happens in leaves with light and water every day"]);
+    await indexSession(db, fakeEmbedder({}), "many", 5000);
+    await indexSession(db, fakeEmbedder({}), "once", 5000);
+    const hits = await searchNotes(db, fakeEmbedder({}), "photosynthesis", {});
+    expect(hits.map((h) => h.sessionId)).toEqual(["many", "once"]);
+  });
+
+  it("vectors of another length are skipped instead of failing the search", async () => {
+    addSession("old", "space-1", "Old", ["supply curve"]);
+    await indexSession(db, fakeEmbedder({ "supply curve": [1, 0] }), "old", 5000);
+    const hits = await searchNotes(db, fakeEmbedder({ supply: [1, 0, 0] }), "supply", {});
+    expect(hits.map((h) => h.sessionId)).toEqual(["old"]);
+  });
+});
+
+describe("searchNotes without a usable query vector", () => {
+  it("keeps the keyword hits when the embedder throws", async () => {
+    addSession("econ", "space-1", "Economics", ["deadweight loss explained"]);
+    await indexSession(db, fakeEmbedder({ "deadweight loss explained": [0, 1, 0] }), "econ", 5000);
+    const broken: Embedder = { modelVersion: "test-1", embed: () => Promise.reject(new Error("unavailable")) };
+    const hits = await searchNotes(db, broken, "deadweight", {});
+    expect(hits.map((h) => h.sessionTitle)).toEqual(["Economics"]);
+  });
+
+  it("an all-zero query vector gives keyword hits only and does not throw", async () => {
+    addSession("econ", "space-1", "Economics", ["deadweight loss explained"]);
+    const table = { "deadweight loss explained": [0, 1, 0], deadweight: [0, 0, 0] };
+    await indexSession(db, fakeEmbedder(table), "econ", 5000);
+    const hits = await searchNotes(db, fakeEmbedder(table), "deadweight", {});
+    expect(hits.map((h) => h.sessionTitle)).toEqual(["Economics"]);
+  });
+
+  it("a re-index that writes no chunks still clears the vector cache", async () => {
+    const table = { "supply and demand": [1, 0, 0], market: [1, 0, 0] };
+    addSession("s1", "space-1", "One", ["supply and demand"]);
+    await indexSession(db, fakeEmbedder(table), "s1", 5000);
+    await searchNotes(db, fakeEmbedder(table), "market", {}); // loads the cache
+    db.run("DELETE FROM segments WHERE session_id = 's1'");
+    expect(await indexSession(db, fakeEmbedder(table), "s1", 6000)).toBe(0);
+    // A vector written without indexSession is only found if the cache was cleared by the empty re-index.
+    addSession("s2", "space-1", "Two", []);
+    db.run("INSERT INTO chunks (id, session_id, source, capture_id, t_start, t_end, text) VALUES (99, 's2', 'transcript', NULL, 0, 900, 'prices')");
+    const v = quantize([1, 0, 0]);
+    db.run("INSERT INTO search_index (chunk_id, model_version, dim, scale, vector) VALUES (99, 'test-1', 3, ?, ?)", [v.scale, v.bytes]);
+    const hits = await searchNotes(db, fakeEmbedder(table), "market", {});
+    expect(hits.map((h) => h.sessionId)).toEqual(["s2"]);
   });
 });

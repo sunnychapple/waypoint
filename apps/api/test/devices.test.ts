@@ -240,6 +240,62 @@ describe("POST /v1/devices", () => {
     expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
     expect((await rowsOf(db, "u1")).map((row) => row.id)).toEqual(["account_1"]);
   });
+
+  test("a 65-byte key that starts 0x04 but is off the curve gives 400 and no row, for box_pub and for the account's two keys", async () => {
+    const db = await fixture();
+    const account = await makeTestDevice("account_1");
+    const device = await makeTestDevice("device_1");
+    const offCurve = toBase64Url(new Uint8Array([4, ...new Array<number>(64).fill(1)]));
+    const body = firstBody(device, account, await certFor(account, "u1", device));
+    const cases = [
+      { ...body, box_pub: offCurve },
+      { ...body, account: { ...body.account, sign_pub: offCurve } },
+      { ...body, account: { ...body.account, box_pub: offCurve } },
+    ];
+    for (const bad of cases) {
+      const res = await postDevice(db, "u1", bad, device);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ code: "bad_request", message: "invalid request", retry_after: null });
+    }
+    expect(await rowsOf(db, "u1")).toEqual([]);
+  });
+
+  test("a waiting device is stored with can_approve 0", async () => {
+    const db = await fixture();
+    const account = await makeTestDevice("account_1");
+    await seedAccount(db, "u1", account);
+    const waiting = await makeTestDevice("device_2");
+    expect((await postDevice(db, "u1", newBody(waiting), waiting)).status).toBe(201);
+    expect((await rowsOf(db, "u1")).find((row) => row.id === "device_2")?.can_approve).toBe(0);
+  });
+
+  test("a user whose only account row is removed can register a first device with an account", async () => {
+    const db = await fixture();
+    await insertDevice(db, await makeTestDevice("account_0"), { userId: "u1", kind: "account", removedAt: NOW - 1 });
+    const account = await makeTestDevice("account_1");
+    const device = await makeTestDevice("device_1");
+    const res = await postDevice(db, "u1", firstBody(device, account, await certFor(account, "u1", device)), device);
+    expect(res.status).toBe(201);
+    expect((await rowsOf(db, "u1")).map((row) => row.id)).toEqual(["account_0", "account_1", "device_1"]);
+  });
+
+  test("with three waiting devices, a fourth is 201 once one of them is approved, and again once one is removed", async () => {
+    const db = await fixture();
+    const account = await makeTestDevice("account_1");
+    await seedAccount(db, "u1", account);
+    for (const id of ["waiting_1", "waiting_2", "waiting_3"]) {
+      const device = await makeTestDevice(id);
+      expect((await postDevice(db, "u1", newBody(device), device)).status).toBe(201);
+    }
+    // waiting_1 is approved, so it no longer waits: two still wait and a fourth is accepted.
+    await db.prepare("UPDATE devices SET approved_at = ?, approved_by = ? WHERE id = ?").bind(NOW, "account_1", "waiting_1").run();
+    const fourth = await makeTestDevice("waiting_4");
+    expect((await postDevice(db, "u1", newBody(fourth), fourth)).status).toBe(201);
+    // waiting_2 is removed, so it no longer waits: waiting_3 and waiting_4 still wait and a fifth is accepted.
+    await db.prepare("UPDATE devices SET removed_at = ? WHERE id = ?").bind(NOW, "waiting_2").run();
+    const fifth = await makeTestDevice("waiting_5");
+    expect((await postDevice(db, "u1", newBody(fifth), fifth)).status).toBe(201);
+  });
 });
 
 describe("GET /v1/devices", () => {
@@ -256,6 +312,18 @@ describe("GET /v1/devices", () => {
     const list = DeviceListSchema.parse(body);
     expect(list.user_id).toBe("u1");
     expect(list.devices.map((device) => device.id)).toEqual(["a_dev", "acc_u1", "b_dev"]);
+  });
+
+  test("orders by added_at before id: the device added later comes last, whatever its id", async () => {
+    const db = await fixture();
+    await insertDevice(db, await makeTestDevice("a_dev"), { userId: "u1" });
+    await insertDevice(db, await makeTestDevice("b_dev"), { userId: "u1" });
+    await db.prepare("UPDATE devices SET added_at = ? WHERE id = ?").bind(NOW + 1, "a_dev").run();
+    await db.prepare("UPDATE devices SET added_at = ? WHERE id = ?").bind(NOW, "b_dev").run();
+    const res = await appFor(userOf("u1")).request("/v1/devices", { method: "GET" }, { DB: db });
+    expect(res.status).toBe(200);
+    const list = DeviceListSchema.parse(await res.json());
+    expect(list.devices.map((device) => device.id)).toEqual(["b_dev", "a_dev"]);
   });
 });
 

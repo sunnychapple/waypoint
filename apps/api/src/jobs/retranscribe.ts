@@ -68,6 +68,8 @@ export async function makeTranscript(deps: RetranscribeDeps, input: JobRunInput,
     if (object === null) return failed("no_upload");
     const audio = new Uint8Array(await object.arrayBuffer());
     bytes += audio.length;
+    // The parts read, not the sizes POST .../audio/done reported: a part can be replaced until the job starts.
+    if (bytes > quotedMinutes * MAX_AUDIO_BYTES_PER_MINUTE) return failed("no_upload");
     let output: unknown;
     try {
       output = await deps.ai.run(

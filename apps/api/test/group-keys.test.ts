@@ -226,6 +226,67 @@ describe("S2 group keys", () => {
     expect(await res.json()).toEqual({ key_version: 3, first: true });
   });
 
+  test("after a first set, an editor's add for another member's new device → 409 and no row; the owner's add for another member's device → 201", async () => {
+    const w = await world();
+    expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2) })).status).toBe(201);
+    const added = await makeTestDevice("dev_u1b");
+    await insertDevice(w.db, added, { userId: "u1" });
+    const byEditor = await post(w, "u2", w.d.dev_u2!, { key_version: 2, envelopes: [await envelope(w.d.dev_u2!, added, 2)] });
+    expect(byEditor.status).toBe(409);
+    expect(await errorOf(byEditor)).toEqual({ code: "conflict", message: "only an owner can add keys for another member", retry_after: null });
+    expect((await rowsFor(w.db, 2)).map((r) => r.device_id)).not.toContain("dev_u1b");
+    const u2b = await makeTestDevice("dev_u2b");
+    await insertDevice(w.db, u2b, { userId: "u2" });
+    expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: [await envelope(w.d.dev_u1!, u2b, 2)] })).status).toBe(201);
+  });
+
+  test("after a first set, an owner's add for a waiting, removed or third-user device → 409 and no row", async () => {
+    const w = await world();
+    expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2) })).status).toBe(201);
+    for (const id of ["wait_u2", "old_u2", "dev_u3"]) {
+      const res = await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: [await envelope(w.d.dev_u1!, w.d[id]!, 2)] });
+      expect(res.status).toBe(409);
+      expect(await errorOf(res)).toMatchObject({ code: "conflict", message: "not a device of a current member" });
+    }
+    expect((await rowsFor(w.db, 2)).map((r) => r.device_id)).toEqual([...TARGETS].sort());
+  });
+
+  test("a first set for a version after an older version's set, that does not cover every device → 409 and no rows", async () => {
+    const w = await world();
+    expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2) })).status).toBe(201);
+    await w.db.prepare("UPDATE groups SET key_version = 3 WHERE id = 'g1'").run();
+    const partial = await post(w, "u1", w.d.dev_u1!, { key_version: 3, envelopes: await fullSet(w, w.d.dev_u1!, 3, ["acct_u1", "dev_u1"]) });
+    expect(partial.status).toBe(409);
+    expect(await errorOf(partial)).toMatchObject({ code: "conflict", message: "envelopes must cover every device" });
+    expect(await rowsFor(w.db, 3)).toEqual([]);
+  });
+
+  test("an add with one new envelope and one for a device that already has one → 409 and the new one is not stored", async () => {
+    const w = await world();
+    expect((await post(w, "u1", w.d.dev_u1!, { key_version: 2, envelopes: await fullSet(w, w.d.dev_u1!, 2) })).status).toBe(201);
+    const u2b = await makeTestDevice("dev_u2b");
+    await insertDevice(w.db, u2b, { userId: "u2" });
+    const body = { key_version: 2, envelopes: [await envelope(w.d.dev_u1!, u2b, 2), await envelope(w.d.dev_u1!, w.d.acct_u1!, 2)] };
+    const res = await post(w, "u1", w.d.dev_u1!, body);
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toMatchObject({ code: "conflict", message: "a device already has a key for this version" });
+    expect((await rowsFor(w.db, 2)).map((r) => r.device_id)).not.toContain("dev_u2b");
+  });
+
+  test("GET devices and GET keys?device= refuse a non-member, a member who left, and a removed device; has_current_key is false before any set", async () => {
+    const w = await world();
+    const before = (await (await appFor(userOf("u1")).request(DEVICES_PATH, {}, { DB: w.db })).json()) as { devices: { has_current_key: boolean }[] };
+    expect(before.devices.length).toBeGreaterThan(0);
+    expect(before.devices.every((x) => x.has_current_key === false)).toBe(true);
+    expect((await appFor(userOf("u3")).request(DEVICES_PATH, {}, { DB: w.db })).status).toBe(404);
+    expect((await appFor(userOf("u3")).request(`${PATH}?device=dev_u3`, {}, { DB: w.db })).status).toBe(404);
+    await insertDevice(w.db, await makeTestDevice("old_u1"), { userId: "u1", removedAt: NOW });
+    expect((await appFor(userOf("u1")).request(`${PATH}?device=old_u1`, {}, { DB: w.db })).status).toBe(404);
+    await w.db.prepare("UPDATE memberships SET left_at = ? WHERE group_id = 'g1' AND user_id = 'u2'").bind(NOW).run();
+    expect((await appFor(userOf("u2")).request(DEVICES_PATH, {}, { DB: w.db })).status).toBe(404);
+    expect((await appFor(userOf("u2")).request(`${PATH}?device=dev_u2`, {}, { DB: w.db })).status).toBe(404);
+  });
+
   test("POST without a signature → 401", async () => {
     const w = await world();
     const res = await appFor(userOf("u1")).request(
