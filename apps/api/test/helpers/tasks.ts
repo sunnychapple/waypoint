@@ -10,11 +10,21 @@ import { createTestStore } from "./sql.ts";
 
 export const TASK_NOW = 1_800_000_000_000;
 
-export const GOOD_ANSWERS = {
-  difficulty: { value: 1, p: 0.9 },
-  needs_web: { value: false, p: 0.9 },
-  subject: { value: "science", p: 0.9 },
-  unsafe: { value: false, p: 0.9 },
+// A Clef-flash reply for a light-tier, confident answer: an easy question (difficulty value 1, p 0.95),
+// no web, science at 0.9, and safe at 0.9.
+export const GOOD_CLEF_REPLY = {
+  model: "clef-flash",
+  answers: {
+    difficulty: { type: "score", score: 0.1, probabilities: { "0": 0.9, "1": 0.05, "2": 0.03, "3": 0.01, "4": 0.01 } },
+    needs_web: { type: "noul", noul: 0.1 },
+    subject: {
+      type: "choice",
+      choice: "science",
+      probabilities: { math: 0.025, science: 0.9, language: 0.025, history: 0.025, other: 0.025 },
+    },
+    unsafe: { type: "noul", noul: 0.1 },
+  },
+  usage: { input_tokens: 472, output_tokens: 0 },
 };
 
 export function configEntries(routes: RouteTable = DEFAULT_ROUTES): Record<string, unknown> {
@@ -83,7 +93,7 @@ export async function readEvents(res: Response): Promise<{ event: string; data: 
 export type TaskEnvOptions = {
   // What the model call with stream: true returns (default goodStream()).
   stream?: () => Promise<unknown>;
-  // What any other model call returns: the router, and double-check (default GOOD_ANSWERS as chat JSON).
+  // What any other model call returns: the router, and double-check (default GOOD_CLEF_REPLY).
   reply?: () => Promise<unknown>;
   monthly?: number;
   routes?: RouteTable;
@@ -118,7 +128,7 @@ export function makeTaskEnv(options: TaskEnvOptions = {}) {
     run: async (model, inputs, callOptions) => {
       aiCalls.push({ model, inputs, options: callOptions });
       if (inputs["stream"] === true) return (options.stream ?? (async () => goodStream()))();
-      return (options.reply ?? (async () => ({ choices: [{ message: { content: JSON.stringify(GOOD_ANSWERS) } }] })))();
+      return (options.reply ?? (async () => GOOD_CLEF_REPLY))();
     },
   };
   const USAGE_QUEUE: UsageQueue = {

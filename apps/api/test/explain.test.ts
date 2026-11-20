@@ -12,7 +12,7 @@ import type { SessionUser } from "../src/auth/users.ts";
 import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
 import { explainRoute } from "../src/tasks/explain.ts";
-import { failingStream, GOOD_ANSWERS, goodStream, makeTaskEnv, readEvents, sse, TASK_NOW } from "./helpers/tasks.ts";
+import { failingStream, GOOD_CLEF_REPLY, goodStream, makeTaskEnv, readEvents, sse, TASK_NOW } from "./helpers/tasks.ts";
 
 const USER: SessionUser = {
   id: "u1",
@@ -150,7 +150,10 @@ describe("POST /v1/tasks/explain: the answer", () => {
 
   test("the router says needs_web with p 0.9, so done offers research", async () => {
     const made = makeTaskEnv({
-      reply: async () => ({ response: JSON.stringify({ ...GOOD_ANSWERS, needs_web: { value: true, p: 0.9 } }) }),
+      reply: async () => ({
+        ...GOOD_CLEF_REPLY,
+        answers: { ...GOOD_CLEF_REPLY.answers, needs_web: { type: "noul", noul: 0.9 } },
+      }),
     });
     const events = await readEvents(await post(made.env));
     expect(StreamDoneSchema.parse(events[events.length - 1]?.data).offer_research).toBe(true);
