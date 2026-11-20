@@ -6,14 +6,26 @@ import { idempotent } from "../idempotency.ts";
 import type { BatchDb, DbStatement } from "../storage.ts";
 import { activeMembership } from "./membership.ts";
 
-// docs/cards/security.md: PR 27 bumps a group's key version with exactly this, in the same batch that ends a membership.
-export const BUMP_GROUP_SQL = "UPDATE groups SET key_version = key_version + 1 WHERE id = ?";
+// docs/cards/security.md: PR 27 bumps a group's key version with this, in the same batch that ends a membership. The
+// changes() guard (review fix list) bumps only when the membership update just before it changed a row.
+export const BUMP_GROUP_SQL = "UPDATE groups SET key_version = key_version + 1 WHERE id = ? AND changes() > 0";
 
 // The statements that end userId's membership at `at`: the row gets left_at, the group a new key version, and open
-// invites the user made are withdrawn. Run them in one db.batch.
-export function endMembershipStatements(db: BatchDb, groupId: string, userId: string, at: number): DbStatement[] {
+// invites the user made are withdrawn. Run them in one db.batch. With `selected`, the row is ended only if it is still
+// the one that was selected: same start, and its end date has passed by `endsBy`.
+export function endMembershipStatements(
+  db: BatchDb,
+  groupId: string,
+  userId: string,
+  at: number,
+  selected?: { startsAt: number; endsBy: number },
+): DbStatement[] {
+  const exact = selected === undefined ? "" : " AND starts_at = ? AND ends_at <= ?";
+  const exactValues = selected === undefined ? [] : [selected.startsAt, selected.endsBy];
   return [
-    db.prepare("UPDATE memberships SET left_at = ? WHERE group_id = ? AND user_id = ? AND left_at IS NULL").bind(at, groupId, userId),
+    db
+      .prepare(`UPDATE memberships SET left_at = ? WHERE group_id = ? AND user_id = ? AND left_at IS NULL${exact}`)
+      .bind(at, groupId, userId, ...exactValues),
     db.prepare(BUMP_GROUP_SQL).bind(groupId),
     db.prepare("DELETE FROM invites WHERE group_id = ? AND created_by = ? AND accepted_by IS NULL").bind(groupId, userId),
   ];

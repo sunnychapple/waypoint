@@ -50,9 +50,25 @@ async function world(): Promise<World> {
 }
 
 // A signed request from `who`'s device. Each call uses a fresh Idempotency-Key unless one is given.
-async function call(w: World, who: Who, method: string, path: string, body?: unknown, key: string = crypto.randomUUID()): Promise<Response> {
+async function call(w: World, who: Who, method: string, path: string, body?: unknown, key: string = crypto.randomUUID(), db: BatchDb = w.db): Promise<Response> {
   const init = await signedInit(w.d[who], { method, path, body, now: NOW, idempotencyKey: key });
-  return appFor(userOf(who)).request(path, init, { DB: w.db });
+  return appFor(userOf(who)).request(path, init, { DB: db });
+}
+
+// Holds each db.batch until `parties` batches are waiting, then runs them: every request has passed its checks
+// before any of them writes, as in the review's reproduction.
+function holdBatches(db: BatchDb, parties: number): BatchDb {
+  const waiting: Array<() => void> = [];
+  return {
+    prepare: (query) => db.prepare(query),
+    batch: async (statements) => {
+      await new Promise<void>((release) => {
+        waiting.push(release);
+        if (waiting.length === parties) for (const go of waiting) go();
+      });
+      return db.batch(statements);
+    },
+  };
 }
 
 // The same request with no device signature.
@@ -204,6 +220,20 @@ describe("DELETE /v1/groups/:id/members/:user", () => {
     expect(list.groups.map((g) => g.id)).toEqual([G2]);
   });
 
+  test("a member leaving while an owner removes them: both 200, and the key version is bumped once", async () => {
+    const w = await groupWorld();
+    const held = holdBatches(w.db, 2);
+    const [leave, removed] = await Promise.all([
+      call(w, "u2", "DELETE", `/v1/groups/${G1}/members/u2`, undefined, undefined, held),
+      call(w, "u1", "DELETE", `/v1/groups/${G1}/members/u2`, undefined, undefined, held),
+    ]);
+    expect(leave.status).toBe(200);
+    expect(removed.status).toBe(200);
+    expect(MembershipEndedSchema.parse(await removed.json())).toEqual({ group_id: G1, user_id: "u2", key_version: 2 });
+    expect(await leftAt(w.db, G1, "u2")).toBe(NOW);
+    expect(await keyVersion(w.db, G1)).toBe(2);
+  });
+
   test("the same request with the same Idempotency-Key gets the first reply again and the key version is bumped once", async () => {
     const w = await groupWorld();
     const first = await call(w, "u1", "DELETE", `/v1/groups/${G1}/members/u2`, undefined, "same-key-0001-abcd");
@@ -248,6 +278,38 @@ describe("endExpiredMemberships", () => {
     expect(await leftAt(db, G3, "u2")).toBeNull();
     expect(await leftAt(db, G1, "u2")).toBe(NOW - 5);
     expect(await endExpiredMemberships(db, NOW)).toBe(0);
+  });
+
+  test("a member who renewed between the select and the batch keeps the new membership, and no bump happens", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba1')").run();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u2', 'clerk_u2', 0, 'ba2')").run();
+    await seedGroup(db, G2);
+    await seedMember(db, G2, "u2", { role: "viewer", endsAt: NOW - 1 });
+    // The user accepts a new invite after the cron has selected the expired row and before its batch runs.
+    const renewing: BatchDb = {
+      prepare: (query) => db.prepare(query),
+      batch: async (statements) => {
+        await db.prepare("UPDATE memberships SET starts_at = ?, ends_at = ? WHERE group_id = ? AND user_id = 'u2'").bind(NOW + 1, NOW + DAY, G2).run();
+        return db.batch(statements);
+      },
+    };
+    await endExpiredMemberships(renewing, NOW);
+    expect(await leftAt(db, G2, "u2")).toBeNull();
+    expect(await count(db, "SELECT count(*) AS n FROM memberships WHERE group_id = ? AND user_id = 'u2' AND starts_at = ? AND ends_at = ?", G2, NOW + 1, NOW + DAY)).toBe(1);
+    expect(await keyVersion(db, G2)).toBe(1);
+  });
+
+  test("two overlapping expiry runs end the membership once and bump the key version once", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba1')").run();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u2', 'clerk_u2', 0, 'ba2')").run();
+    await seedGroup(db, G2);
+    await seedMember(db, G2, "u2", { role: "viewer", endsAt: NOW - 1 });
+    const held = holdBatches(db, 2);
+    await Promise.all([endExpiredMemberships(held, NOW), endExpiredMemberships(held, NOW)]);
+    expect(await leftAt(db, G2, "u2")).toBe(NOW - 1);
+    expect(await keyVersion(db, G2)).toBe(2);
   });
 
   test("ends at most MAX_EXPIRED_PER_RUN per run, earliest end date first", async () => {
