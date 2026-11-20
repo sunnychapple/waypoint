@@ -27,7 +27,8 @@ function BackButton() {
 export default function StorageScreen() {
   const colors = useColors();
   const index = useQuery((db) => indexStatus(db, getModel().modelVersion));
-  const bytes = sessionsBytes();
+  const sessionIds = useQuery((db) => db.all<{ id: string }>("SELECT id FROM sessions").map((row) => row.id));
+  const bytes = sessionsBytes(sessionIds);
 
   function confirmRebuild() {
     Alert.alert("Rebuild search?", undefined, [
