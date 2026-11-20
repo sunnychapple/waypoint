@@ -2,7 +2,7 @@ import { NativeModule, requireNativeModule, type EventSubscription } from "expo"
 
 export type MicPermission = "granted" | "denied" | "undetermined";
 export type RecorderState = "idle" | "recording" | "paused";
-export type PauseReason = "none" | "user" | "interruption" | "route_change" | "media_reset";
+export type PauseReason = "none" | "user" | "interruption" | "route_change" | "media_reset" | "write_failed";
 export type StateEvent = { sessionId: string; state: RecorderState; reason: PauseReason; recordedMs: number };
 export type PartEvent = { sessionId: string; index: number; startMs: number; durationMs: number; file: string };
 export type LevelEvent = { level: number };

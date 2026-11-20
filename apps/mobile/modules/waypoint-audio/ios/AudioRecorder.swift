@@ -8,7 +8,7 @@ protocol AudioBufferSink: AnyObject {
   func runEnded()
 }
 
-enum RecorderError: Error { case busy, notRecording, notPaused, micDenied }
+enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, writeFailed }
 
 /// Two serial queues:
 /// - `control` runs start, pause, resume and stop.
@@ -29,6 +29,7 @@ final class AudioRecorder {
   private var timeline: RecordingTimeline? // io
   private var file: AVAudioFile?          // io
   private var lastLevelAt: Int64 = 0      // io
+  private var writeFailed = false         // io: set on the first failed write of a run, so it pauses once
 
   static func now() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
 
@@ -113,6 +114,7 @@ final class AudioRecorder {
       guard var t = timeline, let part = t.startRun(now: Self.now()) else { throw RecorderError.busy }
       timeline = t
       file = try Self.openFile(sessionId: id, index: part.index, format: format)
+      writeFailed = false
       sink?.runStarted(sessionId: id, runStartMs: t.runStartMs ?? 0, format: format)
     }
     input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
@@ -165,7 +167,7 @@ final class AudioRecorder {
 
   private func handle(_ buffer: AVAudioPCMBuffer) {
     io.sync {
-      guard var t = timeline, let id = ioSessionId else { return }
+      guard var t = timeline, let id = ioSessionId, !writeFailed else { return }
       let now = Self.now()
       if let rolled = t.rollIfNeeded(now: now) {
         timeline = t
@@ -173,7 +175,19 @@ final class AudioRecorder {
         emitPart(rolled.closed, sessionId: id)
         file = try? Self.openFile(sessionId: id, index: rolled.opened.index, format: buffer.format)
       }
-      try? file?.write(from: buffer)
+      do {
+        guard let file else { throw RecorderError.writeFailed }
+        try file.write(from: buffer)
+      } catch {
+        // A full disk, or a part file that could not be opened: pause (reason "write_failed") so the screen
+        // does not show a live recording that is not being saved. The pause runs on the control queue.
+        writeFailed = true
+        control.async { [weak self] in
+          guard let self, self.sessionId == id, !self.paused else { return }
+          self.pauseInControl(reason: "write_failed")
+        }
+        return
+      }
       sink?.append(buffer)
       if now - lastLevelAt >= 100, let channels = buffer.floatChannelData {
         lastLevelAt = now

@@ -4,7 +4,7 @@ public class WaypointAudioModule: Module {
   private let recorder = AudioRecorder()
   private let transcriber = LiveTranscriber()
   private let downloadLock = NSLock()
-  private var downloading = false  // downloadLock
+  private var downloads = 0  // downloadLock: downloads running now (a second tap starts a second one)
 
   public func definition() -> ModuleDefinition {
     Name("WaypointAudio")
@@ -29,8 +29,8 @@ public class WaypointAudioModule: Module {
     AsyncFunction("downloadSpeechPack") { () async throws -> [String: Any] in
       guard let locale = await SpeechSetup.chooseLocale() else { return await self.speechStatus() }
       if await SpeechSetup.isInstalled(locale) { return await self.speechStatus() }
-      self.setDownloading(true)
-      defer { self.setDownloading(false) }
+      self.changeDownloads(by: 1)
+      defer { self.changeDownloads(by: -1) }
       try await SpeechSetup.download(locale: locale) { fraction in
         self.sendEvent("onSpeechPack", ["fraction": fraction])
       }
@@ -57,7 +57,7 @@ public class WaypointAudioModule: Module {
     return ["engine": SpeechSetup.engine, "locale": locale?.identifier ?? "", "pack": pack]
   }
 
-  private func isDownloading() -> Bool { downloadLock.withLock { downloading } }
+  private func isDownloading() -> Bool { downloadLock.withLock { downloads > 0 } }
 
-  private func setDownloading(_ value: Bool) { downloadLock.withLock { downloading = value } }
+  private func changeDownloads(by delta: Int) { downloadLock.withLock { downloads += delta } }
 }
