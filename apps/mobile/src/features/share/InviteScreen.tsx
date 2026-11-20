@@ -74,6 +74,11 @@ export default function InviteScreen() {
       <Choices options={ROLES} value={role} onChange={setRole} />
       <Caption>History</Caption>
       <Choices options={HISTORY} value={history} onChange={setHistory} />
+      <Caption>
+        {history === "from_now"
+          ? "They'll see notes started from now on. Older notes, and changes to them, stay with you."
+          : "They'll see every note in this space, older ones too."}
+      </Caption>
       <Caption>Access</Caption>
       <Choices options={ACCESS} value={access} onChange={setAccess} />
       <Caption>The link works once and lasts 7 days.</Caption>
