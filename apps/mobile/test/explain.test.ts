@@ -5,7 +5,7 @@ import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
 import { cleanWord, excerptAround, splitWords } from "../src/core/explain/excerpt.ts";
 import { askLater } from "../src/core/explain/later.ts";
-import { getSent, logSent, settleSent, utf8Length } from "../src/core/explain/sent.ts";
+import { getSent, logSent, settleFailedSent, settleSent, utf8Length } from "../src/core/explain/sent.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 function setup() {
@@ -66,6 +66,13 @@ describe("explanations and sent_log", () => {
     discardIfUnsaved(db, e.id);
     expect(getExplanation(db, e.id)).toBeNull();
   });
+  it("discard keeps a saved explanation", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 0, "osmosis");
+    db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [e.id]);
+    discardIfUnsaved(db, e.id);
+    expect(getExplanation(db, e.id)).toMatchObject({ id: e.id, saved: true });
+  });
   it("a corrupt thread throws", () => {
     const { db, deps } = setup();
     const e = startExplanation(db, deps, "s1", 0, "x");
@@ -81,6 +88,19 @@ describe("explanations and sent_log", () => {
     settleSent(db, "key_1", 1, "standard");
     expect(getSent(db, "key_1")).toMatchObject({ credits: 1, retention: "standard" });
     expect(getSent(db, "nope")).toBeNull();
+  });
+  it("a failed request charges nothing, but 'already finished' keeps the credits of the charged first request", () => {
+    const { db } = setup();
+    logSent(db, { id: "key_1", task: "explain", sessionId: "s1", body: {}, at: 1 });
+    settleFailedSent(db, "key_1", { kind: "offline" });
+    expect(getSent(db, "key_1")).toMatchObject({ credits: 0, retention: null });
+    logSent(db, { id: "key_2", task: "explain", sessionId: "s1", body: {}, at: 2 });
+    settleSent(db, "key_2", 1, "standard");
+    settleFailedSent(db, "key_2", { kind: "already_finished" });
+    expect(getSent(db, "key_2")).toMatchObject({ credits: 1, retention: "standard" });
+    logSent(db, { id: "key_3", task: "explain", sessionId: "s1", body: {}, at: 3 });
+    settleFailedSent(db, "key_3", { kind: "already_finished" });
+    expect(getSent(db, "key_3")).toMatchObject({ credits: null, retention: null });
   });
   it("utf8Length", () => {
     expect(utf8Length("abc")).toBe(3);

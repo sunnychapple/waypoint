@@ -4,8 +4,8 @@ import { classifyFailure, type CloudFailure } from "../core/cloud/failure.ts";
 import { api } from "./api.ts";
 
 // Paid instant tasks (PR 14, 15). Features call these; only src/platform talks to the API client.
-export function streamExplain(request: ExplainRequest, key: string, onDelta: (text: string) => void): Promise<StreamDone> {
-  return api.explain(request, { key, onDelta });
+export function streamExplain(request: ExplainRequest, key: string, onDelta: (text: string) => void, signal: AbortSignal): Promise<StreamDone> {
+  return api.explain(request, { key, onDelta, signal });
 }
 
 export function toFailure(error: unknown): CloudFailure {

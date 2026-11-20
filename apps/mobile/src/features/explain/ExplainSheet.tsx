@@ -25,6 +25,12 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
   const price = priceOf(config, "explain") ?? 1;
   const phase = model.phase;
 
+  // A "Try again" after "already finished" starts a new paid request, so the button says what it costs.
+  function actionLabel(action: FailureAction): string {
+    if (action === "try_again" && phase.kind === "failed" && phase.failure.kind === "already_finished") return `Explain again · ${creditsLabel(price)}`;
+    return ACTION_LABELS[action];
+  }
+
   function act(action: FailureAction): void {
     if (action === "try_again") void model.explain();
     else if (action === "get_credits" && phase.kind === "failed" && phase.failure.kind === "out_of_credits") router.push(`/plans?need=${phase.failure.shortfall}`);
@@ -66,6 +72,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
         <View style={styles.answer}>
           <Body>{phase.text}</Body>
           <CloudLine retention={phase.retention} />
+          {phase.unsaved ? <Caption>Couldn't save this on the iPhone</Caption> : null}
           <PrimaryButton label="Done" onPress={() => router.back()} />
         </View>
       ) : null}
@@ -80,9 +87,9 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
           {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
           {failureCopy(phase.failure).actions.map((action, index) =>
             action === "ask_later" && model.askedLater ? null : index === 0 ? (
-              <PrimaryButton key={action} label={ACTION_LABELS[action]} onPress={() => act(action)} />
+              <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
             ) : (
-              <SecondaryButton key={action} label={ACTION_LABELS[action]} onPress={() => act(action)} />
+              <SecondaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
             ),
           )}
         </View>

@@ -1,3 +1,4 @@
+import type { CloudFailure } from "../cloud/failure.ts";
 import type { SqlDb } from "../db/sql.ts";
 
 export type SentTask = "explain" | "more_detail" | "double_check";
@@ -29,6 +30,13 @@ export function logSent(db: SqlDb, entry: { id: string; task: SentTask; sessionI
 // After the reply: the credits charged (0 when the task failed) and the route's retention when known.
 export function settleSent(db: SqlDb, id: string, credits: number, retention: "standard" | "zero" | null): void {
   db.run("UPDATE sent_log SET credits = ?, retention = ? WHERE id = ?", [credits, retention, id]);
+}
+
+// After a failed request. "request already finished" (409) means an earlier request with this key was charged, so the
+// row keeps the credits it has. Every other failure charged nothing.
+export function settleFailedSent(db: SqlDb, id: string, failure: CloudFailure): void {
+  if (failure.kind === "already_finished") return;
+  settleSent(db, id, 0, null);
 }
 
 export type SentEntry = { id: string; task: string; sessionId: string | null; sent: string; bytes: number; credits: number | null; retention: "standard" | "zero" | null; at: number };
