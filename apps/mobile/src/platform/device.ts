@@ -83,13 +83,17 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
   wait(user);
 }
 
-// Runs the flow unless it is already running. Network trouble leaves the last known status in place.
+// Runs the flow unless it is already running. A failure leaves an approved or waiting status in place; while
+// still checking it shows offline (no reply) or failed (any other error), so the screen never stays on "Setting up".
 function refreshDevice(clerkUserId: string): Promise<void> {
   if (running !== null) return running;
   running = register(clerkUserId)
     .catch((error: unknown) => {
+      // A settled iPhone keeps its status; any other failure replaces the last one shown.
+      if (status === "approved" || status === "waiting") return;
       if (error instanceof ApiCallError && error.status === 429) setStatus("too_many_waiting");
-      else if (error instanceof NetworkError && status === "checking") setStatus("offline");
+      else if (error instanceof NetworkError) setStatus("offline");
+      else setStatus("failed");
     })
     .finally(() => {
       running = null;
