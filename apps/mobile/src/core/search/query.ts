@@ -1,7 +1,7 @@
 import type { SqlDb } from "../db/sql.ts";
 import type { Embedder } from "./indexer.ts";
 import { toFtsQuery } from "./fts.ts";
-import { fuse, quantize, similarity, type StoredVector } from "./vectors.ts";
+import { fuse, hasDirection, quantize, similarity, type StoredVector } from "./vectors.ts";
 
 export type Hit = {
   chunkId: number;
@@ -67,8 +67,9 @@ export async function searchNotes(
   );
 
   const vectorIds: number[] = [];
-  const [queryVector = []] = await embedder.embed([query]);
-  if (queryVector.length > 0) {
+  // Without a query vector (no embedding on this phone, an embed error, or an all-zero vector) keyword hits still count.
+  const queryVector = await embedder.embed([query]).then((vectors) => vectors[0] ?? [], (): number[] => []);
+  if (hasDirection(queryVector)) {
     const q = quantize(queryVector);
     vectorIds.push(
       ...vectorsFor(db, embedder.modelVersion)

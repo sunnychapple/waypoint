@@ -1,6 +1,11 @@
 // Vectors are stored as int8 with one scale per vector, after L2 normalisation.
 export type StoredVector = { scale: number; bytes: Uint8Array };
 
+// False for an empty vector or one of all zeros: neither can be normalised, so neither is stored or searched.
+export function hasDirection(vector: readonly number[]): boolean {
+  return vector.some((v) => v !== 0);
+}
+
 export function quantize(vector: readonly number[]): StoredVector {
   let norm = 0;
   for (const v of vector) norm += v * v;
