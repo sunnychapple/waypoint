@@ -38,10 +38,12 @@ export function removeDeviceRoute(deps: { now: () => number }) {
 
     const markRemoved = db.prepare("UPDATE devices SET removed_at = ? WHERE id = ?").bind(now, target.id);
     const dropPairing = db.prepare("DELETE FROM device_pairings WHERE device_id = ?").bind(target.id);
+    // A removed device gets no more pushes (S1F).
+    const dropPushToken = db.prepare("DELETE FROM push_tokens WHERE user_id = ? AND device_id = ?").bind(user.id, target.id);
 
     if (target.approved_at === null) {
       if ("account" in req) throw new ApiFailure("bad_request", "invalid request");
-      await db.batch([markRemoved, dropPairing]);
+      await db.batch([markRemoved, dropPairing, dropPushToken]);
       return c.json({ removed: target.id, account_id: null });
     }
 
@@ -58,7 +60,7 @@ export function removeDeviceRoute(deps: { now: () => number }) {
     if (remaining.length === 0) {
       // The last device removing itself: nobody would hold a new account key, so nothing is rotated.
       if ("account" in req) throw new ApiFailure("bad_request", "invalid request");
-      await db.batch([markRemoved, bump]);
+      await db.batch([markRemoved, bump, dropPushToken]);
       return c.json({ removed: target.id, account_id: null });
     }
 
@@ -100,6 +102,7 @@ export function removeDeviceRoute(deps: { now: () => number }) {
       ...updates,
       bump,
       db.prepare("DELETE FROM recovery WHERE user_id = ?").bind(user.id),
+      dropPushToken,
     ];
     try {
       await db.batch(statements);

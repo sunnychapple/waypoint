@@ -198,6 +198,12 @@ describe("quote errors", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
+
+  test("GET /v1/jobs/x/events with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/jobs/x/events", {}, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
+  });
 });
 
 describe("explain route through createApp", () => {

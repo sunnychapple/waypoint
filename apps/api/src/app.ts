@@ -9,6 +9,7 @@ import { devicesRoute } from "./devices/register.ts";
 import { memberRoutes } from "./groups/members.ts";
 import { groupRoutes } from "./groups/routes.ts";
 import { groupKeyRoutes } from "./keys/routes.ts";
+import { jobEventsRoute } from "./jobs/events.ts";
 import { jobsRoutes } from "./jobs/routes.ts";
 import { jobWorkflow } from "./jobs/start.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
@@ -23,6 +24,7 @@ import { doubleCheckRoute } from "./tasks/double-check.ts";
 import { explainRoute } from "./tasks/explain.ts";
 import { moreDetailRoute } from "./tasks/more-detail.ts";
 import { quoteRoute } from "./tasks/quote.ts";
+import { syncRoutes } from "./sync/routes.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
 
@@ -57,7 +59,9 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
   app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));
+  app.route("/", jobEventsRoute({ now: deps.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }));
   app.route("/", groupRoutes({ now: deps.now }));
   app.route("/", memberRoutes({ now: deps.now }));
+  app.route("/", syncRoutes({ now: deps.now }));
   return app;
 }
