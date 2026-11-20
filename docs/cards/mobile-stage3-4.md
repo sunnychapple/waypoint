@@ -60,7 +60,7 @@ Merge order: M27b-A, M3b, M27b-B, M27b-C, then (after M15, M16 and M20 from stag
 | 5 | M25a | `made` |
 | 6 | M23 | `overviews` (also holds video overviews, M24) |
 | 7 | M28b | `groups`, `key_versions`, `known_accounts`, `trusted_signers` |
-| 8 | M29a | `space_groups`, `outbox`, `sync_state`, `row_versions` |
+| 8 | M29a | `space_groups`, `outbox`, `sync_state`, `row_versions`, `sync_pending`, `dirty`, `sync_mode`, `captures.blob_id`, sync triggers |
 | 9 | M30b | `links` |
 
 Each migration card changes the first test in `test/migrate.test.ts` to its own version ("a new database ends at version N"), and changes nothing else there.
@@ -4336,9 +4336,14 @@ Branch `pr/m29a-sync-core`. After M28b. No new dependencies. Files, all under `a
 
 Why it looks like this (`docs/architecture.md` flow 4; `docs/security.md` sections 8 and 11, R8):
 - **What syncs.** A space that syncs is mapped to one group (`space_groups`; a personal space gets a personal group when sync is turned on for it, M29b; a shared group gets its own space, M30a). Its sessions, segments, captures (without the file path; the file goes as a locked blob on paid plans), flags and flashcards sync. Reviews, the search index, explanations, research, overviews, made items, jobs, `sent_log` and settings stay on the device (owner question in section 9).
-- **Without touching the existing screens.** SQLite triggers write every insert, update of a shared column, or delete to a `dirty` table; `collectChanges` turns those into one change per row in the `outbox`, already in plaintext JSON; M29b locks and sends them. Changes that arrive are applied with `sync_mode.applying = 1`, so the triggers ignore them and nothing echoes back.
-- **Format.** The plaintext is `SyncChangeSchema` (an upsert of a row's shared columns, a delete, or the whole set of a session's segments for one source, which keeps a long transcript to one change). The room sees only `kind` (the table, `segments`, or `delete_<table>`), the device id, the key version and the size (`docs/security.md` section 16).
-- **Conflicts.** Last writer wins per row, by `(at, device id)` (`row_versions`). The server can drop, delay or replay whole changes (R8); replays are ignored because they are not newer, and the change id inside the plaintext is the POST's Idempotency-Key. A received session always goes into the space this iPhone maps to that group, whatever `space_id` it carries.
+- **Without touching the existing screens.** SQLite triggers write every insert, update of a shared column, or delete to a `dirty` table, but only once some space syncs (`EXISTS (SELECT 1 FROM space_groups)`), so `dirty` stays empty for people who never turn sync on; `collectChanges` turns those into one change per row in the `outbox`, already in plaintext JSON; M29b locks and sends them. Changes that arrive are applied with `sync_mode.applying = 1`, so the triggers ignore them and nothing echoes back.
+- **Format.** The plaintext is `SyncChangeSchema` (an upsert of a row's shared columns, a delete, or one 10-minute piece of a session's segments for one source: `bucket` = `t_start / 600000`, and the piece replaces exactly that range). The room sees only `kind` (the table, `segments`, or `delete_<table>`), the device id, the key version and the size (`docs/security.md` section 16).
+- **Size.** The room takes at most 1,048,576 locked bytes (`apps/api/src/room/store.ts`, `packages/contracts/src/sync.ts`); locking adds 33. A 10-minute piece is about 9 KB of speech (12,000 segments, 1,000 minutes, make 100 pieces under 20 KB each). Any change over `MAX_CHANGE_BYTES` (1,000,000) is not queued and stays on this iPhone, so nothing unsendable sits at the head of the outbox.
+- **Order.** The outbox is sent in `seq` order (`INTEGER PRIMARY KEY`, the order `collectChanges` queued). One run queues spaces, sessions, captures, flags, cards, segments, then deletes, so parents go before children even when every row has the same clock reading and the ids are random.
+- **Conflicts.** Last writer wins per row, by `(at, device id)` (`row_versions`; the larger device id wins a tie). `collectChanges` writes each change it queues to `row_versions` as this device's, so the device's own change pulled back, or a late older change from another device, is "older" and cannot undo a newer local edit. `sync_mode.clock` is the newest time this iPhone has made or applied; its next run is stamped `max(now, clock + 1)`, so an edit made after seeing a change wins over it even on a phone with a slow clock. M29b applies a pulled page with `applyPulled`, which collects first in the same synchronous run, so a local edit not yet collected is compared too. A space's version is keyed by the group id (each iPhone has its own space id). The server can drop, delay or replay whole changes (R8); replays are "older", and the change id inside the plaintext is the POST's Idempotency-Key.
+- **Missing parents.** A segments piece, capture, flag or card whose session has not arrived (the server reordered, or the session was written before this member's `history_from`), or a card whose photo has not, is "deferred": kept in `sync_pending` (newest version per row, at most 2,000 per group, oldest dropped) without marking it seen, and applied when its session or photo is applied. A child of a session this iPhone knows was deleted is "older"; a card whose photo was deleted gets `capture_id` null; a session delete clears what waited for it.
+- **The group's space only.** A received session always goes into the space this iPhone maps to that group, whatever `space_id` it carries. An upsert or delete whose row, or whose session, is in another space on this iPhone is "rejected", so a group can never touch a private session.
+- **Bad changes do not stall a pull.** `applyChange` returns `"applied" | "older" | "deferred" | "rejected"` and does not throw for a bad change: each change runs in a savepoint, and a constraint error (a bad enum, a missing value) undoes only that change and returns "rejected". Other errors (a full disk) still throw.
 - History: the server already sends only changes at or after the member's `history_from` (PR 28); nothing to do here.
 
 `src/core/db/schema.ts`: append to `MIGRATIONS`, exactly (the `UPDATE OF` column lists are the shared columns, so local-only updates such as `indexed_at` or `last_used_at` are not sent):
@@ -4358,8 +4363,10 @@ CREATE TABLE sync_state (
   pulled_at INTEGER
 );
 
+-- Sent in seq order (the order collectChanges queued them: parents before children).
 CREATE TABLE outbox (
-  id TEXT PRIMARY KEY,
+  seq INTEGER PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
   group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -4367,8 +4374,9 @@ CREATE TABLE outbox (
   created_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX outbox_order ON outbox (created_at);
 
+-- The newest write this iPhone knows for each synced row, its own (written by collectChanges) or received.
+-- row_id is the row's id; for segments "<session>:<source>:<10-minute bucket>"; for a space, the group id.
 CREATE TABLE row_versions (
   table_name TEXT NOT NULL,
   row_id TEXT NOT NULL,
@@ -4377,9 +4385,23 @@ CREATE TABLE row_versions (
   PRIMARY KEY (table_name, row_id)
 );
 
+-- Received changes whose session (or a card's capture) has not arrived yet; applied when it does. At most 2,000 per
+-- group (the oldest go first).
+CREATE TABLE sync_pending (
+  group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+  table_name TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  wait_for TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  device_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (group_id, table_name, row_id)
+);
+CREATE INDEX sync_pending_wait ON sync_pending (group_id, wait_for);
+
 -- Filled by the triggers below when this iPhone changes a row (plain inserts: a trigger's OR REPLACE is not reliable
--- under foreign-key actions); emptied by collectChanges, which uses each row's last entry. A deleted row keeps the
--- group it belonged to, found before it was gone.
+-- under foreign-key actions), only once some space syncs; emptied by collectChanges, which uses each row's last entry.
+-- A deleted row keeps the group it belonged to, found before it was gone.
 CREATE TABLE dirty (
   seq INTEGER PRIMARY KEY,
   table_name TEXT NOT NULL,
@@ -4388,59 +4410,64 @@ CREATE TABLE dirty (
   group_id TEXT
 );
 
--- 1 while applyChange writes, so changes that arrive are not sent back.
-CREATE TABLE sync_mode (applying INTEGER NOT NULL CHECK (applying IN (0, 1)));
-INSERT INTO sync_mode (applying) VALUES (0);
+-- applying is 1 while applyChange writes, so changes that arrive are not sent back. clock is the newest change time
+-- this iPhone has made or applied; its next change is stamped later than it (a phone with a slow clock still wins
+-- over what it has already seen).
+CREATE TABLE sync_mode (
+  applying INTEGER NOT NULL CHECK (applying IN (0, 1)),
+  clock INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO sync_mode (applying, clock) VALUES (0, 0);
 
 ALTER TABLE captures ADD COLUMN blob_id TEXT;
 
-CREATE TRIGGER sync_spaces_update AFTER UPDATE OF name ON spaces WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_spaces_update AFTER UPDATE OF name ON spaces WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('spaces', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_insert AFTER INSERT ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_insert AFTER INSERT ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_update AFTER UPDATE OF space_id, kind, title, state, transcript, started_at, ended_at, recorded_ms ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_update AFTER UPDATE OF space_id, kind, title, state, transcript, started_at, ended_at, recorded_ms ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_captures_insert AFTER INSERT ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_insert AFTER INSERT ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_captures_update AFTER UPDATE OF session_id, kind, t, position, duration_ms, found_text, found_lines, blob_id ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_update AFTER UPDATE OF session_id, kind, t, position, duration_ms, found_text, found_lines, blob_id ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_flags_insert AFTER INSERT ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_insert AFTER INSERT ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_flags_update AFTER UPDATE OF session_id, t, question, state ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_update AFTER UPDATE OF session_id, t, question, state ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_cards_insert AFTER INSERT ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_insert AFTER INSERT ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_cards_update AFTER UPDATE OF session_id, kind, front, back, capture_id, t, made_by, created_at, due_at, fsrs ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_update AFTER UPDATE OF session_id, kind, front, back, capture_id, t, made_by, created_at, due_at, fsrs ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', new.id, 0, NULL);
 END;
-CREATE TRIGGER sync_sessions_delete AFTER DELETE ON sessions WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_sessions_delete AFTER DELETE ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', old.id, 1, (SELECT group_id FROM space_groups WHERE space_id = old.space_id));
 END;
-CREATE TRIGGER sync_captures_delete AFTER DELETE ON captures WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_captures_delete AFTER DELETE ON captures WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('captures', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_flags_delete AFTER DELETE ON flags WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_flags_delete AFTER DELETE ON flags WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('flags', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_cards_delete AFTER DELETE ON cards WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
+CREATE TRIGGER sync_cards_delete AFTER DELETE ON cards WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('cards', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
-CREATE TRIGGER sync_segments_insert AFTER INSERT ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source, 0, NULL);
+CREATE TRIGGER sync_segments_insert AFTER INSERT ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source || ':' || (new.t_start / 600000), 0, NULL);
 END;
-CREATE TRIGGER sync_segments_update AFTER UPDATE ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source, 0, NULL);
+CREATE TRIGGER sync_segments_update AFTER UPDATE ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', new.session_id || ':' || new.source || ':' || (new.t_start / 600000), 0, NULL);
 END;
-CREATE TRIGGER sync_segments_delete AFTER DELETE ON segments WHEN (SELECT applying FROM sync_mode) = 0 BEGIN
-  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', old.session_id || ':' || old.source, 0, NULL);
+CREATE TRIGGER sync_segments_delete AFTER DELETE ON segments WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', old.session_id || ':' || old.source || ':' || (old.t_start / 600000), 0, NULL);
 END;
 `,
   },
@@ -4456,6 +4483,7 @@ import type { SqlDb, SqlValue } from "../db/sql.ts";
 // context("change", group id, device id, kind) (docs/security.md section 11). kind is in clear for the room.
 export const SYNC_TABLES = ["spaces", "sessions", "captures", "flags", "cards"] as const;
 export type SyncTable = (typeof SYNC_TABLES)[number];
+type ChildTable = Exclude<SyncTable, "spaces">;
 
 // The columns each table shares. Everything else stays on the device (files, the default space, last-used times,
 // the search index). A capture's file is shared as a locked blob on paid plans (blob_id), never as a path.
@@ -4467,25 +4495,49 @@ export const SYNC_COLUMNS: Record<SyncTable, readonly string[]> = {
   cards: ["id", "session_id", "kind", "front", "back", "capture_id", "t", "made_by", "created_at", "due_at", "fsrs"],
 };
 
+// A transcript is sent in 10-minute pieces (by t_start), each its own row for last-writer-wins, so no change nears
+// the room's limit. The migration's segment triggers use the same number (600000).
+export const SEGMENT_BUCKET_MS = 600_000;
+// The largest plaintext that is queued. Locking adds 33 bytes and the room takes up to 1,048,576; a bigger change
+// (a huge page text, say) stays on this iPhone instead of blocking the outbox.
+export const MAX_CHANGE_BYTES = 1_000_000;
+// Received changes kept while they wait for their session, per group (the oldest go first).
+export const MAX_PENDING = 2_000;
+
 const Value = z.union([z.string(), z.number(), z.null()]);
+const At = z.number().int().min(0).max(4_102_444_800_000);
 export const SyncChangeSchema = z.discriminatedUnion("op", [
-  z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: z.number().int(), op: z.literal("upsert"), table: z.enum(SYNC_TABLES), row: z.record(z.string(), Value) }),
-  z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: z.number().int(), op: z.literal("delete"), table: z.enum(SYNC_TABLES), row_id: z.string().min(1).max(64) }),
+  z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: At, op: z.literal("upsert"), table: z.enum(SYNC_TABLES), row: z.record(z.string(), Value) }),
+  z.strictObject({ v: z.literal(1), id: z.string().min(16).max(64), at: At, op: z.literal("delete"), table: z.enum(SYNC_TABLES), row_id: z.string().min(1).max(64) }),
   z.strictObject({
     v: z.literal(1),
     id: z.string().min(16).max(64),
-    at: z.number().int(),
+    at: At,
     op: z.literal("segments"),
     session_id: z.string().min(1).max(64),
     source: z.enum(["device", "cloud"]),
+    bucket: z.number().int().min(0).max(1_000_000),
     rows: z.array(z.strictObject({ t_start: z.number().int().min(0), t_end: z.number().int().min(0), text: z.string() })).max(20_000),
   }),
 ]);
 export type SyncChange = z.infer<typeof SyncChangeSchema>;
+export type SyncDeps = { now: () => number; newId: () => string; deviceId: string };
+export type ApplyResult = "applied" | "older" | "deferred" | "rejected";
 
 // The room's clear kind for a change (PR 28's ChangeKindSchema: [a-z_]{1,32}).
 export function changeKind(change: SyncChange): string {
   return change.op === "segments" ? "segments" : change.op === "delete" ? `delete_${change.table}` : change.table;
+}
+
+// The row_versions key: a space is the group's one space whatever its id on each iPhone; segments go by piece.
+function rowKey(change: SyncChange, groupId: string): string {
+  if (change.op === "segments") return `${change.session_id}:${change.source}:${change.bucket}`;
+  if (change.op === "delete") return change.row_id;
+  return change.table === "spaces" ? groupId : typeof change.row.id === "string" ? change.row.id : "";
+}
+
+function rowTable(change: SyncChange): string {
+  return change.op === "segments" ? "segments" : change.table;
 }
 
 // The group a row belongs to: through its session's space (or the space itself), when that space syncs.
@@ -4493,9 +4545,7 @@ export function groupOf(db: SqlDb, table: SyncTable | "segments", rowId: string)
   const sql =
     table === "spaces"
       ? "SELECT group_id FROM space_groups WHERE space_id = ?"
-      : table === "sessions"
-        ? "SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?"
-        : "SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?";
+      : "SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?";
   const id = table === "spaces" || table === "sessions" || table === "segments" ? rowId.split(":")[0] ?? rowId : sessionOf(db, table, rowId);
   if (id === null) return null;
   return db.get<{ group_id: string }>(sql, [id])?.group_id ?? null;
@@ -4505,41 +4555,53 @@ function sessionOf(db: SqlDb, table: SyncTable, rowId: string): string | null {
   return db.get<{ session_id: string }>(`SELECT session_id FROM ${table} WHERE id = ?`, [rowId])?.session_id ?? null;
 }
 
-// Turns the rows changed on this iPhone (the dirty table, filled by triggers) into outbox entries, one per row.
-// Rows in spaces that do not sync are dropped.
-export function collectChanges(db: SqlDb, deps: { now: () => number; newId: () => string }): number {
+// Turns the rows changed on this iPhone (the dirty table, filled by triggers) into outbox entries, one per row,
+// parents before children and deletes last. Rows in spaces that do not sync are dropped. Every queued change is
+// also written to row_versions as this device's, so its echo, or an older change from another device, cannot
+// overwrite it. All changes of one run share one time, later than any change this iPhone has made or applied.
+export function collectChanges(db: SqlDb, deps: SyncDeps): number {
   let made = 0;
   db.transaction(() => {
     const dirty = db.all<{ table_name: SyncTable | "segments"; row_id: string; deleted: number; group_id: string | null }>(
-      "SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id) ORDER BY seq",
+      `SELECT table_name, row_id, deleted, group_id FROM dirty WHERE seq IN (SELECT max(seq) FROM dirty GROUP BY table_name, row_id)
+       ORDER BY deleted, CASE table_name WHEN 'spaces' THEN 0 WHEN 'sessions' THEN 1 WHEN 'captures' THEN 2 WHEN 'flags' THEN 3 WHEN 'cards' THEN 4 ELSE 5 END, seq`,
     );
+    const clock = db.get<{ clock: number }>("SELECT clock FROM sync_mode")?.clock ?? 0;
+    const at = Math.max(deps.now(), clock + 1);
     for (const d of dirty) {
       const group = d.deleted === 1 ? d.group_id : groupOf(db, d.table_name, d.row_id);
-      const change = group === null ? null : buildChange(db, d, deps);
-      if (group !== null && change !== null) {
-        db.run("INSERT INTO outbox (id, group_id, kind, body, blob_capture_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
-          change.id,
-          group,
-          changeKind(change),
-          JSON.stringify(change),
-          change.op === "upsert" && change.table === "captures" ? (change.row.id as string) : null,
-          change.at,
-        ]);
-        made += 1;
-      }
+      const change = group === null ? null : buildChange(db, d, deps.newId(), at);
+      if (group === null || change === null) continue;
+      const body = JSON.stringify(change);
+      if (new TextEncoder().encode(body).length > MAX_CHANGE_BYTES) continue;
+      db.run("INSERT INTO outbox (id, group_id, kind, body, blob_capture_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
+        change.id,
+        group,
+        changeKind(change),
+        body,
+        change.op === "upsert" && change.table === "captures" ? d.row_id : null,
+        at,
+      ]);
+      db.run("INSERT OR REPLACE INTO row_versions (table_name, row_id, at, device_id) VALUES (?, ?, ?, ?)", [rowTable(change), rowKey(change, group), at, deps.deviceId]);
+      made += 1;
     }
+    if (dirty.length > 0) db.run("UPDATE sync_mode SET clock = max(clock, ?)", [at]);
     db.run("DELETE FROM dirty");
   });
   return made;
 }
 
-function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id: string; deleted: number }, deps: { now: () => number; newId: () => string }): SyncChange | null {
-  const base = { v: 1 as const, id: deps.newId(), at: deps.now() };
+function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id: string; deleted: number }, id: string, at: number): SyncChange | null {
+  const base = { v: 1 as const, id, at };
   if (d.table_name === "segments") {
-    const [sessionId, source] = d.row_id.split(":");
-    if (sessionId === undefined || (source !== "device" && source !== "cloud")) return null;
-    const rows = db.all<{ t_start: number; t_end: number; text: string }>("SELECT t_start, t_end, text FROM segments WHERE session_id = ? AND source = ? ORDER BY t_start", [sessionId, source]);
-    return { ...base, op: "segments", session_id: sessionId, source, rows };
+    const [sessionId, source, piece] = d.row_id.split(":");
+    const bucket = Number(piece);
+    if (sessionId === undefined || (source !== "device" && source !== "cloud") || !Number.isInteger(bucket) || bucket < 0) return null;
+    const rows = db.all<{ t_start: number; t_end: number; text: string }>(
+      "SELECT t_start, t_end, text FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ? ORDER BY t_start",
+      [sessionId, source, bucket * SEGMENT_BUCKET_MS, (bucket + 1) * SEGMENT_BUCKET_MS],
+    );
+    return { ...base, op: "segments", session_id: sessionId, source, bucket, rows };
   }
   if (d.deleted === 1) return { ...base, op: "delete", table: d.table_name, row_id: d.row_id };
   const columns = SYNC_COLUMNS[d.table_name];
@@ -4553,65 +4615,170 @@ function buildChange(db: SqlDb, d: { table_name: SyncTable | "segments"; row_id:
   return { ...base, op: "upsert", table: d.table_name, row: clean };
 }
 
-// Last writer wins per row, by (at, device id). Returns true when the change is newer than what is stored.
+// Last writer wins per row, by (at, device id). Records the change and moves the clock when it is newer.
 function newer(db: SqlDb, table: string, rowId: string, at: number, deviceId: string): boolean {
   const seen = db.get<{ at: number; device_id: string }>("SELECT at, device_id FROM row_versions WHERE table_name = ? AND row_id = ?", [table, rowId]);
   if (seen !== null && (seen.at > at || (seen.at === at && seen.device_id >= deviceId))) return false;
   db.run("INSERT OR REPLACE INTO row_versions (table_name, row_id, at, device_id) VALUES (?, ?, ?, ?)", [table, rowId, at, deviceId]);
+  db.run("UPDATE sync_mode SET clock = max(clock, ?)", [at]);
   return true;
 }
 
-// Applies one unlocked change from the group's log to this iPhone's tables, without marking anything dirty. A
-// session always goes into the space this iPhone maps to the group. Returns false when it was older or not usable.
-export function applyChange(db: SqlDb, groupId: string, change: SyncChange, deviceId: string): boolean {
+// The space a session, capture, flag or card is in on this iPhone, or null when the row is not here.
+function spaceOf(db: SqlDb, table: ChildTable, id: string): string | null {
+  const sql = table === "sessions" ? "SELECT space_id FROM sessions WHERE id = ?" : `SELECT s.space_id FROM ${table} x JOIN sessions s ON s.id = x.session_id WHERE x.id = ?`;
+  return db.get<{ space_id: string }>(sql, [id])?.space_id ?? null;
+}
+
+// A row that is not here but has a version was deleted.
+function wasDeleted(db: SqlDb, table: ChildTable, id: string): boolean {
+  return db.get("SELECT 1 AS ok FROM row_versions WHERE table_name = ? AND row_id = ?", [table, id]) !== null;
+}
+
+// Applies one unlocked change from the group's log to this iPhone's tables, without marking anything dirty. Never
+// throws for a bad change:
+// - "applied": written; "older": not newer than what this iPhone has (an echo, a replay, a late change, or its
+//   session was deleted);
+// - "deferred": its session (or a card's photo) has not arrived; kept in sync_pending and applied when it does;
+// - "rejected": unusable (unknown group, a row outside the group's space, a value the tables refuse).
+// Everything lands in the space this iPhone maps to the group; nothing outside it is read or changed.
+export function applyChange(db: SqlDb, groupId: string, change: SyncChange, deviceId: string): ApplyResult {
   const space = db.get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId])?.space_id;
-  if (space === undefined) return false;
-  let applied = false;
+  if (space === undefined) return "rejected";
+  let result: ApplyResult = "rejected";
   db.transaction(() => {
     db.run("UPDATE sync_mode SET applying = 1");
-    try {
-      const key = change.op === "segments" ? `${change.session_id}:${change.source}` : change.op === "delete" ? change.row_id : String(change.row.id ?? "");
-      const table = change.op === "segments" ? "segments" : change.table;
-      if (key === "" || !newer(db, table, key, change.at, deviceId)) return;
-      if (change.op === "delete") {
-        if (change.table !== "spaces") db.run(`DELETE FROM ${change.table} WHERE id = ?`, [change.row_id]);
-      } else if (change.op === "segments") {
-        if (db.get("SELECT 1 AS ok FROM sessions WHERE id = ? AND space_id = ?", [change.session_id, space]) === null) return;
-        db.run("DELETE FROM segments WHERE session_id = ? AND source = ?", [change.session_id, change.source]);
-        for (const r of change.rows) {
-          db.run("INSERT OR IGNORE INTO segments (session_id, t_start, t_end, text, source) VALUES (?, ?, ?, ?, ?)", [change.session_id, r.t_start, Math.max(r.t_start, r.t_end), r.text, change.source]);
-        }
-      } else if (change.table === "spaces") {
-        if (typeof change.row.name === "string") db.run("UPDATE spaces SET name = ? WHERE id = ?", [change.row.name.slice(0, 60) || "Shared space", space]);
-      } else {
-        const row: Record<string, string | number | null> = {};
-        for (const c of SYNC_COLUMNS[change.table]) row[c] = change.row[c] ?? null;
-        if (change.table === "sessions") row.space_id = space;
-        const columns = Object.keys(row);
-        const extra = change.table === "captures" ? ", file" : "";
-        const values = columns.map((c) => row[c] ?? null);
-        if (change.table === "captures") values.push("");
-        const updates = columns.filter((c) => c !== "id").map((c) => `${c} = excluded.${c}`).join(", ");
-        db.run(
-          `INSERT INTO ${change.table} (${columns.join(", ")}${extra}) VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT (id) DO UPDATE SET ${updates}`,
-          values,
-        );
-      }
-      applied = true;
-    } finally {
-      db.run("UPDATE sync_mode SET applying = 0");
-    }
+    result = applyOne(db, groupId, space, change, deviceId);
+    db.run("UPDATE sync_mode SET applying = 0");
   });
-  return applied;
+  return result;
+}
+
+// M29b's pull, for one page of unlocked changes: this iPhone's own edits are collected first, in the same
+// synchronous run, so a received change is compared with them and cannot overwrite one that was not yet collected.
+export function applyPulled(db: SqlDb, groupId: string, pulled: readonly { change: SyncChange; deviceId: string }[], deps: SyncDeps): Record<ApplyResult, number> {
+  collectChanges(db, deps);
+  const counts: Record<ApplyResult, number> = { applied: 0, older: 0, deferred: 0, rejected: 0 };
+  for (const p of pulled) counts[applyChange(db, groupId, p.change, p.deviceId)] += 1;
+  return counts;
+}
+
+// One change inside a savepoint: a constraint error (a bad enum, a missing value) undoes only this change.
+function applyOne(db: SqlDb, groupId: string, space: string, change: SyncChange, deviceId: string): ApplyResult {
+  db.exec("SAVEPOINT apply_change");
+  try {
+    const result = write(db, groupId, space, change, deviceId);
+    db.exec("RELEASE apply_change");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK TO apply_change");
+    db.exec("RELEASE apply_change");
+    if (error instanceof Error && /constraint failed/i.test(error.message)) return "rejected";
+    throw error;
+  }
+}
+
+function write(db: SqlDb, groupId: string, space: string, change: SyncChange, deviceId: string): ApplyResult {
+  const table = rowTable(change);
+  const key = rowKey(change, groupId);
+  if (key === "") return "rejected";
+  if (change.op === "delete") {
+    if (change.table === "spaces") return "rejected";
+    const here = spaceOf(db, change.table, key);
+    if (here !== null && here !== space) return "rejected";
+    if (!newer(db, table, key, change.at, deviceId)) return "older";
+    db.run(`DELETE FROM ${change.table} WHERE id = ?`, [key]);
+    if (change.table === "sessions") db.run("DELETE FROM sync_pending WHERE group_id = ? AND wait_for = ?", [groupId, key]);
+    return "applied";
+  }
+  if (change.op === "upsert" && change.table === "spaces") {
+    if (typeof change.row.name !== "string") return "rejected";
+    if (!newer(db, table, key, change.at, deviceId)) return "older";
+    db.run("UPDATE spaces SET name = ? WHERE id = ?", [change.row.name.slice(0, 60) || "Shared space", space]);
+    return "applied";
+  }
+  if (change.op === "upsert" && change.table === "sessions") {
+    const here = spaceOf(db, "sessions", key);
+    if (here !== null && here !== space) return "rejected";
+    if (!newer(db, table, key, change.at, deviceId)) return "older";
+    upsertRow(db, "sessions", { ...change.row, space_id: space });
+    retryPending(db, groupId, space, key);
+    return "applied";
+  }
+  // Segments, captures, flags and cards need their session, in this group's space.
+  const sessionId = change.op === "segments" ? change.session_id : change.row.session_id;
+  if (typeof sessionId !== "string") return "rejected";
+  const parent = spaceOf(db, "sessions", sessionId);
+  if (parent === null) return wasDeleted(db, "sessions", sessionId) ? "older" : defer(db, groupId, change, deviceId, table, key, sessionId);
+  if (parent !== space) return "rejected";
+  if (change.op === "segments") {
+    if (!newer(db, table, key, change.at, deviceId)) return "older";
+    const from = change.bucket * SEGMENT_BUCKET_MS;
+    const to = from + SEGMENT_BUCKET_MS;
+    db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
+    for (const r of change.rows) {
+      if (r.t_start < from || r.t_start >= to) continue;
+      db.run("INSERT OR IGNORE INTO segments (session_id, t_start, t_end, text, source) VALUES (?, ?, ?, ?, ?)", [sessionId, r.t_start, Math.max(r.t_start, r.t_end), r.text, change.source]);
+    }
+    return "applied";
+  }
+  if (change.table === "spaces" || change.table === "sessions") return "rejected";
+  const here = spaceOf(db, change.table, key);
+  if (here !== null && here !== space) return "rejected";
+  const row = { ...change.row };
+  if (change.table === "cards" && typeof row.capture_id === "string") {
+    const photo = spaceOf(db, "captures", row.capture_id);
+    if (photo === null && !wasDeleted(db, "captures", row.capture_id)) return defer(db, groupId, change, deviceId, table, key, row.capture_id);
+    if (photo === null) row.capture_id = null;
+    else if (photo !== space) return "rejected";
+  }
+  if (!newer(db, table, key, change.at, deviceId)) return "older";
+  upsertRow(db, change.table, row);
+  if (change.table === "captures") retryPending(db, groupId, space, key);
+  return "applied";
+}
+
+function upsertRow(db: SqlDb, table: ChildTable, source: Record<string, string | number | null>): void {
+  const columns = [...SYNC_COLUMNS[table]];
+  const values: SqlValue[] = columns.map((c) => source[c] ?? null);
+  if (table === "captures") {
+    columns.push("file");
+    values.push("");
+  }
+  const updates = SYNC_COLUMNS[table]
+    .filter((c) => c !== "id")
+    .map((c) => `${c} = excluded.${c}`)
+    .join(", ");
+  db.run(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) ON CONFLICT (id) DO UPDATE SET ${updates}`, values);
+}
+
+// Keeps the newest waiting version of a row; nothing is marked seen, so it is compared again when it is applied.
+function defer(db: SqlDb, groupId: string, change: SyncChange, deviceId: string, table: string, key: string, waitFor: string): ApplyResult {
+  db.run(
+    `INSERT INTO sync_pending (group_id, table_name, row_id, wait_for, at, device_id, body) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (group_id, table_name, row_id) DO UPDATE SET wait_for = excluded.wait_for, at = excluded.at, device_id = excluded.device_id, body = excluded.body
+     WHERE excluded.at > sync_pending.at OR (excluded.at = sync_pending.at AND excluded.device_id > sync_pending.device_id)`,
+    [groupId, table, key, waitFor, change.at, deviceId, JSON.stringify(change)],
+  );
+  db.run("DELETE FROM sync_pending WHERE rowid IN (SELECT rowid FROM sync_pending WHERE group_id = ? ORDER BY at DESC LIMIT -1 OFFSET ?)", [groupId, MAX_PENDING]);
+  return "deferred";
+}
+
+// Applies what waited for this session or photo (a card may then wait again, for its photo).
+function retryPending(db: SqlDb, groupId: string, space: string, waitFor: string): void {
+  const waiting = db.all<{ body: string; device_id: string }>("SELECT body, device_id FROM sync_pending WHERE group_id = ? AND wait_for = ? ORDER BY at", [groupId, waitFor]);
+  db.run("DELETE FROM sync_pending WHERE group_id = ? AND wait_for = ?", [groupId, waitFor]);
+  for (const p of waiting) {
+    const parsed = SyncChangeSchema.safeParse(JSON.parse(p.body));
+    if (parsed.success) applyOne(db, groupId, space, parsed.data, p.device_id);
+  }
 }
 
 export type Outgoing = { id: string; groupId: string; kind: string; body: string; blobCaptureId: string | null };
 
+// In the order collectChanges queued them.
 export function nextOutgoing(db: SqlDb, limit = 50): Outgoing[] {
-  return db.all<Outgoing>(
-    "SELECT id, group_id AS groupId, kind, body, blob_capture_id AS blobCaptureId FROM outbox ORDER BY created_at, id LIMIT ?",
-    [limit],
-  );
+  return db.all<Outgoing>("SELECT id, group_id AS groupId, kind, body, blob_capture_id AS blobCaptureId FROM outbox ORDER BY seq LIMIT ?", [limit]);
 }
 
 export function sent(db: SqlDb, id: string): void {
@@ -4633,87 +4800,328 @@ export function setLastSeq(db: SqlDb, groupId: string, seq: number, now: number)
 `test/sync.test.ts`, exactly:
 
 ```ts
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
+import { addFlag, addPhoto, finishRecording, savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { createSpace, ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { applyChange, collectChanges, lastSeq, nextOutgoing, sent, setLastSeq, SyncChangeSchema } from "../src/core/sync/changes.ts";
+import { saveCards } from "../src/core/study/cards.ts";
+import {
+  applyChange,
+  applyPulled,
+  collectChanges,
+  lastSeq,
+  MAX_CHANGE_BYTES,
+  MAX_PENDING,
+  nextOutgoing,
+  sent,
+  setLastSeq,
+  type SyncChange,
+  SyncChangeSchema,
+} from "../src/core/sync/changes.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
-function device() {
+const G = "grp_0123456789abcdef";
+
+// Each device has its own ids and device id. random: real UUIDs and a clock that stands still (the phone's case).
+function device(name: string, options: { random?: boolean; synced?: boolean } = {}) {
   const db = createMemoryDb();
   migrate(db);
   let n = 0;
-  const deps = { now: () => 1_000 + n, newId: () => `id_${String(++n).padStart(16, "0")}` };
+  const deps = {
+    now: () => (options.random === true ? 5_000 : 1_000 + n),
+    newId: () => (options.random === true ? randomUUID() : `${name}_${String(++n).padStart(16, "0")}`),
+    deviceId: `dev_${name}`,
+  };
   ensureDefaultSpace(db, deps);
   const space = createSpace(db, deps, "Biology");
-  db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('grp_0123456789abcdef', 'personal', 'owner', 1, 0)");
-  db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, 'grp_0123456789abcdef')", [space.id]);
+  if (options.synced !== false) {
+    db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES (?, 'personal', 'owner', 1, 0)", [G]);
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, ?)", [space.id, G]);
+  }
   db.run("DELETE FROM dirty");
   return { db, deps, space };
 }
-const G = "grp_0123456789abcdef";
+type Device = ReturnType<typeof device>;
+
+// Collects, empties the outbox and returns what it held, in order.
+function send(d: Device): SyncChange[] {
+  collectChanges(d.db, d.deps);
+  const out = nextOutgoing(d.db, 1_000);
+  for (const o of out) sent(d.db, o.id);
+  return out.map((o) => SyncChangeSchema.parse(JSON.parse(o.body)));
+}
+function count(d: Device, table: string): number {
+  return d.db.get<{ n: number }>(`SELECT count(*) AS n FROM ${table}`)?.n ?? -1;
+}
+function title(d: Device, id: string): string | undefined {
+  return d.db.get<{ title: string }>("SELECT title FROM sessions WHERE id = ?", [id])?.title;
+}
+function one<T extends SyncChange["op"]>(changes: SyncChange[], op: T, table?: string): Extract<SyncChange, { op: T }> {
+  const found = changes.find((c) => c.op === op && (table === undefined || ("table" in c && c.table === table)));
+  if (found === undefined) throw new Error(`no ${op} ${table ?? ""}`);
+  return found as Extract<SyncChange, { op: T }>;
+}
 
 describe("collecting changes", () => {
   it("rows in a synced space become one change each; other spaces are ignored", () => {
-    const { db, deps, space } = device();
-    const s = startRecordingSession(db, deps, space.id, true);
-    saveSegment(db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
-    saveSegment(db, s.id, { tStart: 10, tEnd: 20, text: "divide" });
-    const other = startRecordingSession(db, deps, ensureDefaultSpace(db, deps).id, true);
-    saveSegment(db, other.id, { tStart: 0, tEnd: 1, text: "private" });
-    expect(collectChanges(db, deps)).toBe(2);
-    const out = nextOutgoing(db).map((o) => ({ kind: o.kind, body: SyncChangeSchema.parse(JSON.parse(o.body)) }));
-    expect(out.map((o) => o.kind).sort()).toEqual(["segments", "sessions"]);
-    const seg = out.find((o) => o.kind === "segments")?.body;
-    expect(seg?.op === "segments" && seg.rows.map((r) => r.text)).toEqual(["cells", "divide"]);
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    saveSegment(a.db, s.id, { tStart: 10, tEnd: 20, text: "divide" });
+    const other = startRecordingSession(a.db, a.deps, ensureDefaultSpace(a.db, a.deps).id, true);
+    saveSegment(a.db, other.id, { tStart: 0, tEnd: 1, text: "private" });
+    expect(collectChanges(a.db, a.deps)).toBe(2);
+    const out = nextOutgoing(a.db).map((o) => ({ kind: o.kind, body: SyncChangeSchema.parse(JSON.parse(o.body)) }));
+    expect(out.map((o) => o.kind)).toEqual(["sessions", "segments"]);
+    const seg = one(out.map((o) => o.body), "segments");
+    expect(seg.rows.map((r) => r.text)).toEqual(["cells", "divide"]);
     expect(JSON.stringify(out)).not.toContain("private");
-    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM dirty")?.n).toBe(0);
+    expect(count(a, "dirty")).toBe(0);
+  });
+  it("parents go first, in the order queued, with real ids and one clock reading", () => {
+    const a = device("a", { random: true });
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    addFlag(a.db, a.deps, s.id, 5);
+    const photo = addPhoto(a.db, a.deps, s.id, 6, "p.jpg");
+    saveCards(a.db, a.deps, s.id, [{ kind: "term", front: "Mitosis", back: "Division", captureId: photo, t: 6 }], "device_model");
+    finishRecording(a.db, s.id, 9_000, 8_000);
+    expect(send(a).map((c) => (c.op === "segments" ? "segments" : c.table))).toEqual(["sessions", "captures", "flags", "cards", "segments"]);
+  });
+  it("every watched insert, update and delete is queued; local-only columns are not", () => {
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    saveCards(a.db, a.deps, s.id, [{ kind: "term", front: "Mitosis", back: "Division", captureId: null, t: 0 }], "device_model");
+    send(a);
+    addFlag(a.db, a.deps, s.id, 5);
+    expect(send(a).map((c) => c.op === "upsert" && c.table)).toEqual(["flags"]);
+    a.db.run("UPDATE cards SET front = 'Meiosis'");
+    const card = one(send(a), "upsert", "cards");
+    expect(card.row.front).toBe("Meiosis");
+    a.db.run("DELETE FROM cards");
+    expect(send(a).map((c) => c.op === "delete" && c.table)).toEqual(["cards"]);
+    a.db.run("DELETE FROM segments");
+    expect(one(send(a), "segments").rows).toEqual([]);
+    a.db.run("UPDATE sessions SET indexed_at = 5");
+    expect(send(a)).toEqual([]);
   });
   it("a deleted session keeps its group; sent entries leave the outbox", () => {
-    const { db, deps, space } = device();
-    const s = startRecordingSession(db, deps, space.id, true);
-    collectChanges(db, deps);
-    for (const o of nextOutgoing(db)) sent(db, o.id);
-    db.run("DELETE FROM sessions WHERE id = ?", [s.id]);
-    collectChanges(db, deps);
-    const out = nextOutgoing(db);
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    send(a);
+    a.db.run("DELETE FROM sessions WHERE id = ?", [s.id]);
+    collectChanges(a.db, a.deps);
+    const out = nextOutgoing(a.db);
     expect(out).toHaveLength(1);
     expect(out[0]?.kind).toBe("delete_sessions");
     expect(out[0]?.groupId).toBe(G);
   });
   it("a capture names its row for the blob upload", () => {
-    const { db, deps, space } = device();
-    const s = startRecordingSession(db, deps, space.id, true);
-    savePart(db, deps, s.id, { index: 0, startMs: 0, durationMs: 5, file: "a.m4a" });
-    collectChanges(db, deps);
-    expect(nextOutgoing(db).find((o) => o.kind === "captures")?.blobCaptureId).not.toBeNull();
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    savePart(a.db, a.deps, s.id, { index: 0, startMs: 0, durationMs: 5, file: "a.m4a" });
+    collectChanges(a.db, a.deps);
+    expect(nextOutgoing(a.db).find((o) => o.kind === "captures")?.blobCaptureId).not.toBeNull();
+  });
+  it("nothing is recorded while no space syncs", () => {
+    const a = device("a", { synced: false });
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    for (let i = 0; i < 500; i += 1) saveSegment(a.db, s.id, { tStart: i * 10, tEnd: i * 10 + 5, text: "words" });
+    expect(count(a, "dirty")).toBe(0);
+  });
+  it("a long transcript goes in 10-minute pieces under the room's limit; an oversized row stays home", () => {
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    a.db.transaction(() => {
+      for (let i = 0; i < 12_000; i += 1) saveSegment(a.db, s.id, { tStart: i * 5_000, tEnd: i * 5_000 + 4_000, text: "the cell divides into two" });
+    });
+    const out = nextOutgoing((collectChanges(a.db, a.deps), a.db), 1_000);
+    const pieces = out.filter((o) => o.kind === "segments");
+    expect(pieces).toHaveLength(100);
+    expect(Math.max(...pieces.map((o) => new TextEncoder().encode(o.body).length))).toBeLessThan(20_000);
+    for (const o of out) sent(a.db, o.id);
+    addFlag(a.db, a.deps, s.id, 1);
+    a.db.run("UPDATE flags SET question = ?", ["x".repeat(MAX_CHANGE_BYTES + 1)]);
+    addFlag(a.db, a.deps, s.id, 2);
+    expect(send(a).map((c) => c.op === "upsert" && c.row.question)).toEqual([""]);
   });
 });
 
 describe("applying changes", () => {
   it("applies into the group's space, never marks rows dirty, and keeps the newest", () => {
-    const a = device();
-    const b = device();
+    const a = device("a");
+    const b = device("b");
+    expect(a.space.id).not.toBe(b.space.id);
     const s = startRecordingSession(a.db, a.deps, a.space.id, true);
     saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
-    collectChanges(a.db, a.deps);
-    const changes = nextOutgoing(a.db).map((o) => SyncChangeSchema.parse(JSON.parse(o.body)));
-    const session = changes.find((c) => c.op === "upsert");
-    const segments = changes.find((c) => c.op === "segments");
-    if (session === undefined || session.op !== "upsert" || segments === undefined) throw new Error("expected both changes");
-    expect(applyChange(b.db, G, session, "dev_a")).toBe(true);
-    expect(applyChange(b.db, G, segments, "dev_a")).toBe(true);
-    expect(b.db.get<{ space_id: string; title: string }>("SELECT space_id, title FROM sessions WHERE id = ?", [s.id])).toEqual({ space_id: b.space.id, title: "New recording" });
+    const changes = send(a);
+    const session = one(changes, "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    expect(applyChange(b.db, G, one(changes, "segments"), "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT space_id, title FROM sessions WHERE id = ?", [s.id])).toEqual({ space_id: b.space.id, title: "New recording" });
     expect(b.db.get<{ text: string }>("SELECT text FROM segments WHERE session_id = ?", [s.id])?.text).toBe("cells");
-    expect(b.db.get<{ n: number }>("SELECT count(*) AS n FROM dirty")?.n).toBe(0);
-    expect(applyChange(b.db, G, session, "dev_a")).toBe(false);
-    expect(applyChange(b.db, G, { ...session, at: session.at + 5, row: { ...session.row, title: "Mitosis" } }, "dev_a")).toBe(true);
-    expect(b.db.get<{ title: string }>("SELECT title FROM sessions WHERE id = ?", [s.id])?.title).toBe("Mitosis");
-    expect(applyChange(b.db, "grp_unknown_0000000", session, "dev_a")).toBe(false);
+    expect(count(b, "dirty")).toBe(0);
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("older");
+    expect(applyChange(b.db, G, { ...session, at: session.at + 5, row: { ...session.row, title: "Mitosis" } }, "dev_a")).toBe("applied");
+    expect(title(b, s.id)).toBe("Mitosis");
+    expect(applyChange(b.db, "grp_unknown_0000000", session, "dev_a")).toBe("rejected");
+  });
+  it("children that arrive before their session (or a card before its photo) wait, then land", () => {
+    const a = device("a", { random: true });
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    addFlag(a.db, a.deps, s.id, 5);
+    const photo = addPhoto(a.db, a.deps, s.id, 6, "p.jpg");
+    saveCards(a.db, a.deps, s.id, [{ kind: "term", front: "Mitosis", back: "Division", captureId: photo, t: 6 }], "device_model");
+    const changes = send(a).reverse();
+    const results = changes.map((c) => applyChange(b.db, G, c, "dev_a"));
+    expect(results).toEqual(["deferred", "deferred", "deferred", "deferred", "applied"]);
+    expect(b.db.get<{ text: string }>("SELECT text FROM segments WHERE session_id = ?", [s.id])?.text).toBe("cells");
+    expect(count(b, "flags")).toBe(1);
+    expect(b.db.get<{ capture_id: string }>("SELECT capture_id FROM cards")?.capture_id).toBe(photo);
+    expect(count(b, "sync_pending")).toBe(0);
+    expect(changes.map((c) => applyChange(b.db, G, c, "dev_a"))).toEqual(["older", "older", "older", "older", "older"]);
+  });
+  it("children of a deleted session are dropped, not kept waiting", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    addFlag(a.db, a.deps, s.id, 5);
+    const [session, flag] = send(a);
+    if (session === undefined || flag === undefined) throw new Error("expected two changes");
+    applyChange(b.db, G, session, "dev_a");
+    a.db.run("DELETE FROM sessions");
+    expect(applyChange(b.db, G, one(send(a), "delete"), "dev_a")).toBe("applied");
+    expect(count(b, "sessions")).toBe(0);
+    expect(applyChange(b.db, G, flag, "dev_a")).toBe("older");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("older");
+    expect(count(b, "sync_pending")).toBe(0);
+  });
+  it("its own changes coming back do not undo a newer local edit", () => {
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    a.db.run("UPDATE sessions SET title = 'X'");
+    const echo = one(send(a), "upsert", "sessions");
+    a.db.run("UPDATE sessions SET title = 'Y'");
+    const sameTimeFromB = { ...echo, row: { ...echo.row, title: "B" } };
+    const pulled = [{ change: echo, deviceId: "dev_a" }, { change: sameTimeFromB, deviceId: "dev_b" }];
+    expect(applyPulled(a.db, G, pulled, a.deps)).toEqual({ applied: 0, older: 2, deferred: 0, rejected: 0 });
+    expect(title(a, s.id)).toBe("Y");
+    expect(one(send(a), "upsert", "sessions").row.title).toBe("Y");
+  });
+  it("a late older change from another device loses to a newer local edit", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const created = one(send(a), "upsert", "sessions");
+    applyChange(b.db, G, created, "dev_a");
+    b.db.run("UPDATE sessions SET title = 'From B'");
+    const fromB = one(send(b), "upsert", "sessions");
+    a.db.run("UPDATE sessions SET title = 'From A'");
+    const fromA = one(send(a), "upsert", "sessions");
+    expect(applyChange(a.db, G, { ...fromB, at: fromA.at - 1 }, "dev_b")).toBe("older");
+    expect(title(a, s.id)).toBe("From A");
+  });
+  it("equal times go to the larger device id, whatever the order", () => {
+    const x = device("x");
+    const s = startRecordingSession(x.db, x.deps, x.space.id, true);
+    const base = one(send(x), "upsert", "sessions");
+    const fromA = { ...base, at: 50_000, row: { ...base.row, title: "A" } };
+    const fromB = { ...base, at: 50_000, row: { ...base.row, title: "B" } };
+    const c = device("c");
+    const d = device("d");
+    applyChange(c.db, G, fromA, "dev_a");
+    applyChange(c.db, G, fromB, "dev_b");
+    applyChange(d.db, G, fromB, "dev_b");
+    applyChange(d.db, G, fromA, "dev_a");
+    expect([title(c, s.id), title(d, s.id)]).toEqual(["B", "B"]);
+  });
+  it("a bad change is rejected without throwing and leaves nothing behind", () => {
+    const a = device("a");
+    const b = device("b");
+    startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, { ...session, row: { ...session.row, state: "done" } }, "dev_a")).toBe("rejected");
+    expect(applyChange(b.db, G, { ...session, row: { ...session.row, title: null } }, "dev_a")).toBe("rejected");
+    expect(count(b, "sessions")).toBe(0);
+    expect(count(b, "row_versions")).toBe(0);
+    expect(b.db.get<{ applying: number }>("SELECT applying FROM sync_mode")?.applying).toBe(0);
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+  });
+  it("changes cannot reach rows outside the group's space", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    addFlag(a.db, a.deps, s.id, 5);
+    const changes = send(a);
+    for (const c of changes) applyChange(b.db, G, c, "dev_a");
+    const priv = startRecordingSession(b.db, b.deps, ensureDefaultSpace(b.db, b.deps).id, true);
+    addFlag(b.db, b.deps, priv.id, 1);
+    const privFlag = b.db.get<{ id: string }>("SELECT id FROM flags WHERE session_id = ?", [priv.id])?.id ?? "";
+    const flag = one(changes, "upsert", "flags");
+    const later = { ...flag, at: flag.at + 100 };
+    expect(applyChange(b.db, G, { ...later, row: { ...flag.row, id: privFlag, question: "evil" } }, "dev_a")).toBe("rejected");
+    expect(applyChange(b.db, G, { ...later, row: { ...flag.row, session_id: priv.id } }, "dev_a")).toBe("rejected");
+    expect(applyChange(b.db, G, { v: 1, id: "del_000000000000000", at: 99_999, op: "delete", table: "sessions", row_id: priv.id }, "dev_a")).toBe("rejected");
+    const session = one(changes, "upsert", "sessions");
+    expect(applyChange(b.db, G, { ...session, at: session.at + 100, row: { ...session.row, id: priv.id } }, "dev_a")).toBe("rejected");
+    expect(b.db.get("SELECT space_id, title FROM sessions WHERE id = ?", [priv.id])).toEqual({ space_id: ensureDefaultSpace(b.db, b.deps).id, title: "New recording" });
+    expect(b.db.get<{ question: string }>("SELECT question FROM flags WHERE id = ?", [privFlag])?.question).toBe("");
+  });
+  it("a space's name lands on the mapped space, cut to 60 characters", () => {
+    const b = device("b");
+    const change: SyncChange = { v: 1, id: "spc_000000000000000", at: 10, op: "upsert", table: "spaces", row: { id: "someone_elses_space", name: "n".repeat(100), created_at: 1 } };
+    expect(applyChange(b.db, G, change, "dev_a")).toBe("applied");
+    expect(b.db.get<{ name: string }>("SELECT name FROM spaces WHERE id = ?", [b.space.id])?.name).toBe("n".repeat(60));
+    expect(applyChange(b.db, G, { ...change, at: 9, row: { ...change.row, id: "another_space_id", name: "Old" } }, "dev_c")).toBe("older");
+  });
+  it("an edit made after a received change is stamped later, even on a slow clock", () => {
+    const a = device("a");
+    const b = device("b");
+    startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    applyChange(b.db, G, { ...session, at: 900_000 }, "dev_a");
+    b.db.run("UPDATE sessions SET title = 'Later'");
+    expect(one(send(b), "upsert", "sessions").at).toBe(900_001);
+  });
+  it("a transcript piece replaces only its own 10 minutes", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "first" });
+    saveSegment(a.db, s.id, { tStart: 600_000, tEnd: 600_010, text: "second" });
+    const changes = send(a);
+    for (const c of changes) applyChange(b.db, G, c, "dev_a");
+    const second = changes.filter((c) => c.op === "segments")[1];
+    if (second?.op !== "segments") throw new Error("expected two pieces");
+    expect(second.bucket).toBe(1);
+    const stray = { t_start: 5, t_end: 6, text: "stray" };
+    expect(applyChange(b.db, G, { ...second, at: second.at + 1, rows: [stray, { t_start: 600_000, t_end: 600_020, text: "again" }] }, "dev_a")).toBe("applied");
+    expect(b.db.all<{ text: string }>("SELECT text FROM segments ORDER BY t_start").map((r) => r.text)).toEqual(["first", "again"]);
+  });
+  it("a waiting row keeps its newest version; a deleted session clears what waited for it", () => {
+    const b = device("b");
+    const flag = (at: number, question: string): SyncChange => ({ v: 1, id: `flg_${String(at).padStart(16, "0")}`, at, op: "upsert", table: "flags", row: { id: "f1", session_id: "s_late", t: 0, question, state: "open" } });
+    expect(applyChange(b.db, G, flag(10, "new"), "dev_a")).toBe("deferred");
+    expect(applyChange(b.db, G, flag(5, "old"), "dev_a")).toBe("deferred");
+    expect(b.db.get<{ body: string }>("SELECT body FROM sync_pending")?.body).toContain('"new"');
+    expect(applyChange(b.db, G, { v: 1, id: "del_000000000000000", at: 20, op: "delete", table: "sessions", row_id: "s_late" }, "dev_a")).toBe("applied");
+    expect(count(b, "sync_pending")).toBe(0);
+  });
+  it("waiting changes are capped per group", () => {
+    const b = device("b");
+    for (let i = 0; i < MAX_PENDING + 5; i += 1) {
+      const flag: SyncChange = { v: 1, id: `flg_${String(i).padStart(16, "0")}`, at: i, op: "upsert", table: "flags", row: { id: `f${i}`, session_id: "missing_session", t: 0, question: "", state: "open" } };
+      applyChange(b.db, G, flag, "dev_a");
+    }
+    expect(count(b, "sync_pending")).toBe(MAX_PENDING);
+    expect(b.db.get<{ at: number }>("SELECT min(at) AS at FROM sync_pending")?.at).toBe(5);
   });
   it("last seq only moves forward", () => {
-    const { db } = device();
+    const { db } = device("a");
     setLastSeq(db, G, 9, 1);
     setLastSeq(db, G, 4, 2);
     expect(lastSeq(db, G)).toBe(9);
@@ -4723,7 +5131,7 @@ describe("applying changes", () => {
 
 Checks: root `npm install`, `npm run typecheck`, `npm test`.
 
-Not in this PR: locking, sending, receiving, the socket, blobs (M29b).
+Not in this PR: locking, sending, receiving, the socket, blobs (M29b). Known gap (owner question): moving a session out of a synced space is not sent as a delete, so other devices keep it.
 
 ---
 
@@ -4732,12 +5140,12 @@ Not in this PR: locking, sending, receiving, the socket, blobs (M29b).
 Branch `pr/m29b-sync`. After M29a. Dependency: `expo-task-manager` **58.0.13** (published 2026-10-31; SDK 58 asks for `~58.0.13`), for the background task that handles silent `sync` pushes. Files, all under `apps/mobile/`: `package.json`, `app.json` (the `expo-notifications` plugin entry becomes `["expo-notifications", { "enableBackgroundRemoteNotifications": true }]`), `src/platform/sync.ts` (new), `src/core/push/push.ts` and `test/push.test.ts` (`sync` → `{ kind: "sync", groupId }`), `src/platform/push.ts` (one action), `src/app/(tabs)/_layout.tsx` (one hook), `src/features/capture/SpaceScreen.tsx` (the "Sync this space" switch), `src/platform/files.ts` (`blobTempPath`).
 
 Why it looks like this (flow 4; PR 28, PR 29):
-- **Send.** `collectChanges`, then for each outbox entry: `lockContent(user, group, current key version, "change", [group, myDeviceId, kind], body)` → `api.postChange(group, { device_id, key_version, kind, locked_bytes, blob_key }, entry.id)` → `sent(db, id)`. 409 "key version is not current" → `ensureKeys(group, { now: false })` and try again later (nothing is written with a key a removed member knows). A capture whose file exists and whose plan is paid: lock the file (`lockFile`, blob id = a new UUID) into a temporary file, `api.uploadBlob(group, blobId, bytes)`, set the capture's `blob_id` (that update queues the capture again with the id), and the change carries `blob_key = groups/<group>/media/<blob>`. `plan_required` (403 from PR 29 for a free plan) → the capture syncs without its file and the space screen says "Photos and audio sync on paid plans."
-- **Pull.** `api.changes(group, lastSeq)` pages (100 at a time, up to 4 MB) until `changes` is empty; each change: `unlockContent(user, group, "change", [group, change.device_id, change.kind], locked_bytes)` → `SyncChangeSchema.parse(JSON.parse(text))` → `applyChange(db, group, change, change.device_id)`; a change that does not open or parse is skipped (logged nowhere with content); `setLastSeq` after each page. A change whose `kind` does not match its plaintext op is skipped.
+- **Send.** `collectChanges(db, { now: Date.now, newId: randomUUID, deviceId: myDeviceId })`, then for each outbox entry, in `nextOutgoing` order, stopping at the first one that fails (later entries may be its children): `lockContent(user, group, current key version, "change", [group, myDeviceId, kind], body)` → `api.postChange(group, { device_id, key_version, kind, locked_bytes, blob_key }, entry.id)` → `sent(db, id)`. 409 "key version is not current" → `ensureKeys(group, { now: false })` and try again later (nothing is written with a key a removed member knows). A capture whose file exists and whose plan is paid: lock the file (`lockFile`, blob id = a new UUID) into a temporary file, `api.uploadBlob(group, blobId, bytes)`, set the capture's `blob_id` (that update queues the capture again with the id), and the change carries `blob_key = groups/<group>/media/<blob>`. `plan_required` (403 from PR 29 for a free plan) → the capture syncs without its file and the space screen says "Photos and audio sync on paid plans."
+- **Pull.** `api.changes(group, lastSeq)` pages (100 at a time, up to 4 MB) until `changes` is empty. For each page, first unlock and parse every change (the awaits): `unlockContent(user, group, "change", [group, change.device_id, change.kind], locked_bytes)` → `SyncChangeSchema.parse(JSON.parse(text))`; a change that does not open or parse, or whose `kind` does not match `changeKind(change)`, is skipped (logged nowhere with content). Then, with no `await` in between, `applyPulled(db, group, page.map((c) => ({ change, deviceId: c.device_id })), deps)` (it collects this iPhone's edits first, then applies each; it never throws for a bad change: "deferred" and "rejected" are counted, not retried), then `setLastSeq` to the page's last seq. Own changes are not skipped; they come back "older".
 - **Media down.** After a pull, captures with a `blob_id` and an empty `file`: `api.blob(blobId)` → write to a temporary file → `unlockFile` into `sessions/<session>/<capture id>.<ext>` → set `file`. Up to 3 at a time, Wi-Fi or not.
 - **The socket.** While the app is active, one `WebSocket(api.syncSocketUrl(group, myDeviceId), undefined, { headers: { Authorization: `Bearer ${token}` } })` per synced group. Each `{"type":"changed","last_seq":n}` with `n > lastSeq` triggers a pull; after a pull it sends `{"type":"ack","seq":lastSeq}`. Close code 4003 (membership ended) → `refreshGroups()` and no reconnect; 4000 (replaced) → no reconnect; anything else → reconnect after 2, 5, 15, 30 s. Closed when the app goes to the background.
 - **Pushes.** Devices without an open socket get a silent `sync` push at most once a minute (PR 28). `TaskManager.defineTask("waypoint-sync", …)` at module scope and `Notifications.registerTaskAsync("waypoint-sync")` run one send-and-pull for the group in `ref` (iOS gives about 30 s).
-- **Turning sync on** for a space (M29b's switch on `SpaceScreen`, "Sync with my other devices"): `createGroup("personal", space name)` and a `space_groups` row, then every existing row of the space is marked dirty once (`INSERT INTO dirty … SELECT` per table) so it is sent. Turning it off is not offered in this card (the group stays; open question in section 9).
+- **Turning sync on** for a space (M29b's switch on `SpaceScreen`, "Sync with my other devices"): `createGroup("personal", space name)` and a `space_groups` row, then every existing row of the space is marked dirty once (`INSERT INTO dirty … SELECT` per table: the space itself, its sessions, captures, flags and cards by id, and segments as `SELECT DISTINCT 'segments', session_id || ':' || source || ':' || (t_start / 600000), 0` for its sessions) so it is sent; `collectChanges` orders them parents first. Turning it off is not offered in this card (the group stays; open question in section 9).
 
 Checks without Xcode: root `npm install`, `npm run typecheck`, `npm test`, `npm run export:ios -w @waypoint/mobile`.
 
