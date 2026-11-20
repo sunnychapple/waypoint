@@ -168,6 +168,25 @@ export function useRecording(): RecordingModel {
     };
   }, []);
 
+  // The screen can go away while recording without Stop being tapped (the session ended and the app went back to
+  // sign-in). Then the recording is stopped and saved here, so the microphone does not run on with nothing to stop it.
+  useEffect(
+    () => () => {
+      const current = sessionRef.current;
+      if (current === null || stoppingRef.current) return;
+      stoppingRef.current = true;
+      stopRecording().then(
+        (recordedMs) =>
+          writeDb((db) => {
+            if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
+            finishRecording(db, current.id, Date.now(), recordedMs);
+          }),
+        () => undefined, // never started, or already stopped: the next launch's recoverSessions marks it interrupted
+      );
+    },
+    [],
+  );
+
   // Keeps the clock moving while recording.
   useEffect(() => {
     if (recorder !== "recording") return;

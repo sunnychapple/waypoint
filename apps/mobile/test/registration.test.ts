@@ -1,6 +1,6 @@
 import type { DeviceView } from "@waypoint/contracts";
 import { describe, expect, it } from "vitest";
-import { deviceName, planRegistration, statusKey, userIdKey } from "../src/core/device/registration.ts";
+import { accountKeyLost, deviceName, planRegistration, statusKey, userIdKey } from "../src/core/device/registration.ts";
 
 const KEY_A = "A".repeat(87);
 const KEY_B = "B".repeat(87);
@@ -30,6 +30,15 @@ describe("planRegistration", () => {
   });
   it("the account row itself never counts as our device", () => {
     expect(planRegistration([row({ id: "dev_1", kind: "account" })], LOCAL)).toEqual({ kind: "start_over" });
+  });
+});
+
+describe("accountKeyLost", () => {
+  it("only another account key on the server means ours is lost", () => {
+    expect(accountKeyLost([ACCOUNT, row({})], KEY_A)).toBe(false); // ours went through
+    expect(accountKeyLost([], KEY_A)).toBe(false); // ours is still in progress
+    expect(accountKeyLost([ACCOUNT, row({})], KEY_B)).toBe(true); // another device's
+    expect(accountKeyLost([row({ sign_pub: KEY_B })], KEY_A)).toBe(false); // a device row is not the account key
   });
 });
 

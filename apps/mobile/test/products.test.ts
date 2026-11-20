@@ -24,7 +24,8 @@ describe("products", () => {
     expect(sendOutcome({ status: 400, message: "invalid purchase" })).toBe("invalid");
     expect(sendOutcome({ status: 401, message: "device signature required" })).toBe("retry_later");
     expect(sendOutcome({ status: 500, message: "something went wrong" })).toBe("retry_later");
-    for (const outcome of ["granted", "other_account", "refunded"] as const) expect(shouldFinish(outcome)).toBe(true);
+    for (const outcome of ["granted", "refunded"] as const) expect(shouldFinish(outcome)).toBe(true);
+    expect(shouldFinish("other_account")).toBe(false);
     expect(shouldFinish("invalid")).toBe(false);
     expect(shouldFinish("retry_later")).toBe(false);
   });

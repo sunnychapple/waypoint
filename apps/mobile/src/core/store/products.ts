@@ -43,8 +43,10 @@ export function sendOutcome(failure: { status: number; message: string } | null)
   return "retry_later";
 }
 
-// Finish (tell StoreKit we are done) only when the server has decided. "invalid" stays unfinished so it can be looked at
-// (for example a sandbox purchase sent to a production server); "retry_later" is sent again on the next launch.
+// Finish (tell StoreKit we are done) only when the server has decided for this person. "invalid" stays unfinished so it
+// can be looked at (for example a sandbox purchase sent to a production server); "retry_later" is sent again on the
+// next launch. "other_account" stays unfinished too: on a shared iPad it can be another person's purchase whose reply
+// was lost, and it must still reach their account when they sign in here again.
 export function shouldFinish(outcome: SendOutcome): boolean {
-  return outcome === "granted" || outcome === "other_account" || outcome === "refunded";
+  return outcome === "granted" || outcome === "refunded";
 }

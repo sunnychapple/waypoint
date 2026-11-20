@@ -24,6 +24,14 @@ export function planRegistration(devices: DeviceView[], local: LocalKeys | null)
   return local === null ? { kind: "register_waiting" } : { kind: "start_over" };
 }
 
+// After a 409 from registering as the first device: true only when the server holds another account key (another
+// device became the first one), so ours must be dropped. A 409 can also be our own registration, still in progress
+// ("request in progress") or already done; then the list shows our key, or no account row yet, and ours is kept.
+export function accountKeyLost(devices: DeviceView[], accountSignPub: string): boolean {
+  const account = devices.find((d) => d.kind === "account");
+  return account !== undefined && account.sign_pub !== accountSignPub;
+}
+
 // The name the server stores: the model, never the person's name (docs/security.md section 16).
 export function deviceName(modelName: string | null): string {
   const name = (modelName ?? "").trim();
