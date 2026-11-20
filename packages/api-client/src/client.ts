@@ -2,24 +2,41 @@ import {
   ActivityResponseSchema,
   ApiErrorSchema,
   ApplePurchaseResponseSchema,
+  ApproveDeviceRequestSchema,
+  AUDIO_CHUNK_CONTENT_TYPE,
+  AudioChunkResponseSchema,
+  AudioDoneResponseSchema,
   ConfigResponseSchema,
   DeviceListSchema,
   DeviceViewSchema,
   DoubleCheckResponseSchema,
   IDEMPOTENCY_KEY_HEADER,
+  JobResponseSchema,
+  JobViewSchema,
+  KeyIdSchema,
+  PairingViewSchema,
   PushTokenResponseSchema,
+  PutRecoveryRequestSchema,
   QuoteResponseSchema,
+  RecoveryViewSchema,
+  RemoveDeviceRequestSchema,
+  RemoveDeviceResponseSchema,
   StreamDeltaSchema,
   StreamDoneSchema,
   WalletResponseSchema,
   ZeroRetentionResponseSchema,
   type ActivityResponse,
   type ApplePurchaseResponse,
+  type AudioChunkResponse,
+  type AudioDoneResponse,
   type ConfigResponse,
+  type CreateJobRequest,
   type DeviceView,
   type DoubleCheckResponse,
   type ExplainRequest,
   type FollowUpRequest,
+  type JobView,
+  type PairingView,
   type PushTokenRequest,
   type PushTokenResponse,
   type QuoteRequest,
@@ -33,7 +50,7 @@ import { z } from "zod";
 import { ApiCallError, BadReplyError, NetworkError, NotRegisteredError, errorFromBody } from "./errors.ts";
 import { readSse } from "./sse.ts";
 
-export type FetchInit = { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal };
+export type FetchInit = { method: string; headers: Record<string, string>; body?: string | Uint8Array<ArrayBuffer>; signal?: AbortSignal };
 export type FetchLike = (url: string, init: FetchInit) => Promise<Response>;
 
 // Signs one request with a device key (docs/security.md section 7). It makes a new nonce on every call; the
@@ -58,12 +75,15 @@ export const MAX_ATTEMPTS = 3;
 export const BACKOFF_MS = [500, 2000] as const;
 const SKEW_RETRY_MS = 60_000;
 
-type Signing = "none" | "device" | { register: DeviceSigner };
+// "device": this device once approved. register: POST /v1/devices, signed as "new". as: a given signer under its own
+// id (a device still waiting, for its pairing reveal; the account key, for approving itself during recovery).
+type Signing = "none" | "device" | { register: DeviceSigner } | { as: DeviceSigner };
 
 type CallSpec = {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   target: string; // path and query, starting with "/v1/"
-  body?: unknown;
+  body?: unknown; // sent as JSON
+  raw?: { bytes: Uint8Array<ArrayBuffer>; contentType: string }; // sent as is; never signed (only session routes take raw bodies)
   key?: string; // Idempotency-Key; writes get a new one when absent
   token?: boolean; // default true; false only for GET /v1/config
   signing?: Signing;
@@ -73,6 +93,14 @@ type CallSpec = {
 };
 
 const RegisteredSchema = z.strictObject({ device: DeviceViewSchema });
+// PUT /v1/recovery's reply (S3 has no contract for it).
+const RecoverySavedSchema = z.strictObject({ account_device_id: KeyIdSchema, verified_at: z.number().int().nullable() });
+export type RecoverySaved = z.infer<typeof RecoverySavedSchema>;
+export type ApproveDeviceRequest = z.infer<typeof ApproveDeviceRequestSchema>;
+export type RemoveDeviceRequest = z.infer<typeof RemoveDeviceRequestSchema>;
+export type RemoveDeviceResponse = z.infer<typeof RemoveDeviceResponseSchema>;
+export type PutRecoveryRequest = z.infer<typeof PutRecoveryRequestSchema>;
+export type RecoveryView = z.infer<typeof RecoveryViewSchema>;
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 
@@ -91,6 +119,7 @@ export function createApiClient(options: ApiClientOptions) {
     const body = spec.body === undefined ? undefined : JSON.stringify(spec.body);
     const headers: Record<string, string> = { Accept: spec.accept ?? "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (spec.raw !== undefined) headers["Content-Type"] = spec.raw.contentType;
     if (key !== undefined) headers[IDEMPOTENCY_KEY_HEADER] = key;
     if (spec.token !== false) {
       const token = await options.getToken();
@@ -100,9 +129,10 @@ export function createApiClient(options: ApiClientOptions) {
     let signedOffset: number | null = null;
     const signing = spec.signing ?? "none";
     if (signing !== "none") {
-      const signer = signing === "device" ? options.device() : signing.register;
+      if (spec.raw !== undefined) throw new Error("raw bodies are never signed");
+      const signer = signing === "device" ? options.device() : "register" in signing ? signing.register : signing.as;
       if (signer === null) throw new NotRegisteredError();
-      const deviceId = signing === "device" ? signer.id : "new";
+      const deviceId = signing === "device" || "as" in signing ? signer.id : "new";
       signedOffset = clockOffset;
       const timestamp = options.now() + clockOffset;
       const signed = await signer.sign({ method: spec.method, target: spec.target, deviceId, timestamp, body: body ?? "" });
@@ -113,6 +143,7 @@ export function createApiClient(options: ApiClientOptions) {
     }
     const init: FetchInit = { method: spec.method, headers };
     if (body !== undefined) init.body = body;
+    if (spec.raw !== undefined) init.body = spec.raw.bytes;
     if (spec.signal !== undefined) init.signal = spec.signal;
     let reply: Response;
     try {
@@ -165,6 +196,49 @@ export function createApiClient(options: ApiClientOptions) {
     const parsed = schema.safeParse(await reply.json().catch(() => undefined));
     if (!parsed.success) throw new BadReplyError();
     return parsed.data;
+  }
+
+  // A reply that is bytes (a sealed job result, a locked file). A body cut off part way is a NetworkError.
+  async function bytes(spec: CallSpec): Promise<Uint8Array<ArrayBuffer>> {
+    const reply = await send(spec);
+    try {
+      return new Uint8Array(await reply.arrayBuffer());
+    } catch {
+      throw new NetworkError("reply ended early");
+    }
+  }
+
+  // GET /v1/jobs/:id/events: one "state" event per change (PR 21). Resolves when the server ends the stream (the job
+  // finished, or the stream reached its 10-minute limit); the caller opens a new one if the job is still running.
+  async function jobEvents(id: string, onState: (job: JobView) => void, signal?: AbortSignal): Promise<void> {
+    const spec: CallSpec = { method: "GET", target: `/v1/jobs/${encodeURIComponent(id)}/events`, retry: false, accept: "text/event-stream" };
+    if (signal !== undefined) spec.signal = signal;
+    const reply = await send(spec);
+    if (reply.body === null) throw new NetworkError("stream ended early");
+    let bad = false;
+    try {
+      await readSse(reply.body, ({ event, data }) => {
+        if (event !== "state") return true;
+        let value: unknown;
+        try {
+          value = JSON.parse(data);
+        } catch {
+          bad = true;
+          return false;
+        }
+        const job = JobViewSchema.safeParse(value);
+        if (!job.success) {
+          bad = true;
+          return false;
+        }
+        onState(job.data);
+        return true;
+      });
+    } catch (error) {
+      if (signal?.aborted === true) throw error;
+      throw new NetworkError("stream ended early");
+    }
+    if (bad) throw new BadReplyError();
   }
 
   // A streamed task: "delta" events, then one "done" or one "error" (packages/contracts instant.ts).
@@ -243,6 +317,44 @@ export function createApiClient(options: ApiClientOptions) {
       json({ method: "PUT", target: "/v1/settings/zero-retention", body: { enabled }, retry: true }, ZeroRetentionResponseSchema),
     activity: (before?: string): Promise<ActivityResponse> =>
       json({ method: "GET", target: before === undefined ? "/v1/activity" : `/v1/activity?before=${encodeURIComponent(before)}`, retry: true }, ActivityResponseSchema),
+    // Devices and recovery (M27b; docs/security.md sections 8, 12 and 13).
+    pairing: (deviceId: string): Promise<PairingView> =>
+      json({ method: "GET", target: `/v1/devices/${encodeURIComponent(deviceId)}/pairing`, retry: true }, PairingViewSchema),
+    sendPairingNonce: (deviceId: string, nonce: string): Promise<PairingView> =>
+      json({ method: "POST", target: `/v1/devices/${encodeURIComponent(deviceId)}/pairing`, body: { nonce }, signing: "device", retry: true }, PairingViewSchema),
+    revealPairing: (deviceId: string, nonce: string, signer: DeviceSigner): Promise<PairingView> =>
+      json(
+        { method: "POST", target: `/v1/devices/${encodeURIComponent(deviceId)}/pairing/reveal`, body: { nonce }, signing: { as: signer }, retry: true },
+        PairingViewSchema,
+      ),
+    approveDevice: async (deviceId: string, request: ApproveDeviceRequest, signer?: DeviceSigner): Promise<DeviceView> =>
+      (
+        await json(
+          { method: "POST", target: `/v1/devices/${encodeURIComponent(deviceId)}/approve`, body: request, signing: signer === undefined ? "device" : { as: signer }, retry: true },
+          RegisteredSchema,
+        )
+      ).device,
+    removeDevice: (deviceId: string, request: RemoveDeviceRequest): Promise<RemoveDeviceResponse> =>
+      json({ method: "DELETE", target: `/v1/devices/${encodeURIComponent(deviceId)}`, body: request, signing: "device", retry: true }, RemoveDeviceResponseSchema),
+    recovery: (): Promise<RecoveryView> => json({ method: "GET", target: "/v1/recovery", retry: true }, RecoveryViewSchema),
+    putRecovery: (request: PutRecoveryRequest): Promise<RecoverySaved> =>
+      json({ method: "PUT", target: "/v1/recovery", body: request, signing: "device", retry: true }, RecoverySavedSchema),
+    // Jobs (PR 20, 21, 23). key: one per thing the person asked for, kept for "Try again" after Out of credits.
+    createJob: async (request: CreateJobRequest, key: string): Promise<JobView> =>
+      (await json({ method: "POST", target: "/v1/jobs", body: request, key, signing: "device", retry: true }, JobResponseSchema)).job,
+    job: async (id: string): Promise<JobView> => (await json({ method: "GET", target: `/v1/jobs/${encodeURIComponent(id)}`, retry: true }, JobResponseSchema)).job,
+    jobEvents,
+    jobResult: (id: string): Promise<Uint8Array<ArrayBuffer>> =>
+      bytes({ method: "GET", target: `/v1/jobs/${encodeURIComponent(id)}/result`, signing: "device", retry: true, accept: "application/octet-stream" }),
+    deleteJob: async (id: string): Promise<JobView> =>
+      (await json({ method: "DELETE", target: `/v1/jobs/${encodeURIComponent(id)}`, signing: "device", retry: true }, JobResponseSchema)).job,
+    uploadAudio: (id: string, n: number, audio: Uint8Array<ArrayBuffer>): Promise<AudioChunkResponse> =>
+      json(
+        { method: "PUT", target: `/v1/jobs/${encodeURIComponent(id)}/audio/${n}`, raw: { bytes: audio, contentType: AUDIO_CHUNK_CONTENT_TYPE }, retry: true },
+        AudioChunkResponseSchema,
+      ),
+    audioDone: (id: string, chunks: number): Promise<AudioDoneResponse> =>
+      json({ method: "POST", target: `/v1/jobs/${encodeURIComponent(id)}/audio/done`, body: { chunks }, retry: true }, AudioDoneResponseSchema),
     clockOffset: (): number => clockOffset,
   };
 }

@@ -8,7 +8,7 @@ const PURCHASE = { transaction_id: "2000000000000001", product: "pack", credits:
 const DONE = { credits: 1, tier: "light", retention: "standard", offer_research: false };
 const header = (sent: { init: { headers: Record<string, string> } }, name: string): string | undefined => sent.init.headers[name];
 
-async function verifySent(sent: { url: string; init: { method: string; headers: Record<string, string>; body?: string } }, publicKey: Uint8Array): Promise<boolean> {
+async function verifySent(sent: { url: string; init: { method: string; headers: Record<string, string>; body?: string | Uint8Array } }, publicKey: Uint8Array): Promise<boolean> {
   const h = sent.init.headers;
   const input = requestSigningInput({
     method: sent.init.method,
@@ -16,7 +16,7 @@ async function verifySent(sent: { url: string; init: { method: string; headers: 
     deviceId: h["Waypoint-Device"] ?? "",
     timestamp: Number(h["Waypoint-Timestamp"]),
     nonce: h["Waypoint-Nonce"] ?? "",
-    bodySha256: await bodySha256(utf8(sent.init.body ?? "")),
+    bodySha256: await bodySha256(utf8(typeof sent.init.body === "string" ? sent.init.body : "")),
   });
   return verifyP256(publicKey, fromBase64Url(h["Waypoint-Signature"] ?? ""), input);
 }
