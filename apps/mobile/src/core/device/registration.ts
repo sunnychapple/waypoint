@@ -30,7 +30,7 @@ export function deviceName(modelName: string | null): string {
   return name === "" ? "iPhone" : name.slice(0, 64);
 }
 
-export type DeviceStatus = "checking" | "approved" | "waiting" | "too_many_waiting" | "offline" | "signed_out";
+export type DeviceStatus = "checking" | "approved" | "waiting" | "too_many_waiting" | "offline" | "failed" | "signed_out";
 
 // Settings keys. The server user id is kept per Clerk user so the app can sign offline.
 export const userIdKey = (clerkUserId: string): string => `server_user_id:${clerkUserId}`;
