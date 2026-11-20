@@ -193,12 +193,14 @@ function restore(clerkUserId: string): void {
 
 // Called once in (tabs)/_layout.tsx.
 export function useDeviceRegistration(): void {
-  const { isSignedIn, userId: clerkUserId } = useAuth();
+  const { isLoaded, isSignedIn, userId: clerkUserId } = useAuth();
   useEffect(() => {
     accountKeyProblem = false; // a sign-out or a switch to another person: nothing carries over
     if (isSignedIn !== true || clerkUserId === null || clerkUserId === undefined) {
       setDeviceSigner(null);
-      if (userId !== null) writeDb((db) => deleteSetting(db, LAST_USER_KEY)); // a headless push does not sync a signed-out person
+      // A headless push does not sync a signed-out person, including one whose session ended while the app was closed.
+      // Not while Clerk is still loading (isSignedIn undefined).
+      if (userId !== null || (isLoaded && isSignedIn === false)) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
       userId = null;
       clerkId = null;
       setStatus("signed_out");
@@ -212,7 +214,7 @@ export function useDeviceRegistration(): void {
       if (state === "active" && status !== "approved") void refreshDevice(clerkUserId);
     });
     return () => sub.remove();
-  }, [isSignedIn, clerkUserId]);
+  }, [isLoaded, isSignedIn, clerkUserId]);
 }
 
 export function useDeviceStatus(): DeviceStatus {
