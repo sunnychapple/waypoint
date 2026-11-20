@@ -992,6 +992,16 @@ Why this order: S1G is three lines and blocks every mobile stage 2 card, so it g
 | M-f | M15 (M17, M10b, M10c) | M15 |
 | M-g | M16 (M15) | M16 |
 | M-h | M21 (M12, M16) | M21 |
+| M-i | M27b-A (M27a), M3b (M3) — `docs/cards/mobile-stage3-4.md`; M27b brought forward (open question 46) | M27b-A, M3b |
+| M-j | M27b-B (M27b-A, M3b) | M27b-B |
+| M-k | M27b-C (M27b-B, M20) | M27b-C |
+| M-l | M34 (M3b, M15, M20) | M34 |
+| M-m | M18 (M34), M19 (M34, M16), M25a (M34) | M18, M19, M25a |
+| M-n | M22a spike (Xcode; not merged); M22b (M22a) | M22b |
+| M-o | M23 (M22b, M25a), M24a (M23), M24b (M24a), M25b (M25a) | M23, M24a, M24b, M25b |
+| M-p | M3c (M3b), M28a (M27b-A), V1 (PR 30) | M3c, M28a, V1 |
+| M-q | M28b (M28a, M3c, M27b-C, M23), M29a (M28b), M29b (M29a) | M28b, M29a, M29b |
+| M-r | M30a (M29b), M30b (M30a, V1); M2a spike (Xcode, from 2026-11-25; not merged) | M30a, M30b |
 
 Merge order for the whole stage: M3, M13, M26a, M26b, M27a, M14, M17, M15, M16, M20, M21 (M20 can be built as soon as M27a is merged, but merges in this order). M17 merges before M15 because Explain's "Get credits" opens the Plans route. After stage 2: M18 (PR 20, 23) and M19 (PR 20, 24) are written in full once those are merged; stage 3 (M22 to M25) after PR 22B and 25; stage 4 after S1C, S1D, S2, S3, S1F and PR 27 to 30. If the owner pulls M27b's recovery key forward (open question 46), it goes right after M27a.
 
