@@ -202,4 +202,23 @@ CREATE TABLE made (
 CREATE INDEX made_session ON made (session_id, created_at);
 `,
   },
+  {
+    version: 6,
+    sql: `
+CREATE TABLE overviews (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('audio', 'video')),
+  title TEXT NOT NULL,
+  script TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'script' CHECK (state IN ('script', 'rendering', 'ready', 'failed', 'no_voices')),
+  file TEXT,
+  duration_ms INTEGER CHECK (duration_ms >= 0),
+  line_starts TEXT NOT NULL DEFAULT '[]',
+  voices TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX overviews_session ON overviews (session_id, created_at);
+`,
+  },
 ];

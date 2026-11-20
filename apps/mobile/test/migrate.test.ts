@@ -6,11 +6,11 @@ const version = (db: ReturnType<typeof createMemoryDb>) =>
   db.get<{ user_version: number }>("PRAGMA user_version")?.user_version;
 
 describe("migrate", () => {
-  it("a new database ends at version 5, and a second run changes nothing", () => {
+  it("a new database ends at version 6, and a second run changes nothing", () => {
     const db = createMemoryDb();
-    expect(migrate(db)).toBe(5);
-    expect(migrate(db)).toBe(5);
-    expect(version(db)).toBe(5);
+    expect(migrate(db)).toBe(6);
+    expect(migrate(db)).toBe(6);
+    expect(version(db)).toBe(6);
   });
 
   it("a user_version above the latest migration throws", () => {
