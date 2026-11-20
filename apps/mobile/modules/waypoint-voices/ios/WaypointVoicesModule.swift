@@ -8,12 +8,12 @@ public class WaypointVoicesModule: Module {
     Name("WaypointVoices")
 
     AsyncFunction("renderScript") { (lines: [[String: String]], outPath: String, language: String) async throws -> [String: Any] in
-      let outURL = try Self.documentsURL(for: outPath)
-      let parsed = try lines.map { line -> ScriptRenderer.Line in
-        guard let voice = line["voice"], voice == "A" || voice == "B", let text = line["text"] else { throw VoiceError.badInput }
-        return ScriptRenderer.Line(voice: voice, text: text)
-      }
       do {
+        let outURL = try Self.documentsURL(for: outPath)
+        let parsed = try lines.map { line -> ScriptRenderer.Line in
+          guard let voice = line["voice"], voice == "A" || voice == "B", let text = line["text"] else { throw VoiceError.badInput }
+          return ScriptRenderer.Line(voice: voice, text: text)
+        }
         let result = try await self.renderer.render(lines: parsed, outURL: outURL, language: language)
         return ["durationMs": result.durationMs, "lineStartsMs": result.lineStartsMs, "voices": result.voices]
       } catch let error as VoiceError {

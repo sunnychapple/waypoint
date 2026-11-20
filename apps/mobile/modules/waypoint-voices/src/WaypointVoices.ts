@@ -1,7 +1,7 @@
 import { requireNativeModule } from "expo";
 
 // On-device voices (M22b). Errors carry error.code: "no_voices" (fewer than two voices for any language),
-// "busy" (a render is running), "cancelled", "write_failed".
+// "busy" (a render is running), "cancelled", "write_failed", "bad_input" (no lines, or a line that is not voice A or B with text).
 export type ScriptLineIn = { voice: "A" | "B"; text: string };
 export type Rendered = { durationMs: number; lineStartsMs: number[]; voices: string };
 

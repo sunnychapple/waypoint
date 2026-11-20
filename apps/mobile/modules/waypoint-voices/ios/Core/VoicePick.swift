@@ -15,7 +15,9 @@ public struct VoiceInfo: Equatable, Sendable {
 public enum VoicePick {
   // Two different voices for hosts A and B: same language as wanted (else the same base language, else en-US), best
   // quality first, and a female and a male voice when both exist. nil when no voice fits.
-  public static func hosts(from voices: [VoiceInfo], language: String) -> (a: VoiceInfo, b: VoiceInfo)? {
+  public static func hosts(from installed: [VoiceInfo], language: String) -> (a: VoiceInfo, b: VoiceInfo)? {
+    // Only the speech voices (compact, enhanced, premium); novelty voices such as com.apple.eloquence.* are left out.
+    let voices = installed.filter { $0.identifier.hasPrefix("com.apple.voice.") || $0.identifier.hasPrefix("com.apple.ttsbundle.") }
     let base = language.split(separator: "-").first.map(String.init) ?? language
     let candidates = [
       voices.filter { $0.language == language },

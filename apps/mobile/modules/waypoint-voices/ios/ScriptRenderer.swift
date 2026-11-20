@@ -34,11 +34,22 @@ final class ScriptRenderer {
   private let stateLock = NSLock()
   private var rendering = false // stateLock
   private var cancelled = false // stateLock
+  private var generation = 0 // stateLock; counts renders, so a finished render cannot clear a newer one's claim
+  private var waiting: LineWait? // stateLock; the line being spoken now
+
+  // One line being spoken. Resumed once, by finish(). Fields are guarded by stateLock.
+  private final class LineWait {
+    let continuation: CheckedContinuation<[AVAudioPCMBuffer], Error>
+    var chunks: [AVAudioPCMBuffer] = []
+    var done = false
+    var deadlines = 0 // counts the arms of the deadline; only the latest one may fail the line
+    init(_ continuation: CheckedContinuation<[AVAudioPCMBuffer], Error>) { self.continuation = continuation }
+  }
 
   func render(lines: [Line], outURL: URL, language: String) async throws -> RenderResult {
     guard !lines.isEmpty else { throw VoiceError.badInput }
-    try claim()
-    defer { release() }
+    let token = try claim()
+    defer { release(token) }
 
     let voices = AVSpeechSynthesisVoice.speechVoices().map(Self.info)
     guard let pair = VoicePick.hosts(from: voices, language: language),
@@ -63,10 +74,16 @@ final class ScriptRenderer {
     }
   }
 
-  // Stops the speaking and makes the running render end with "cancelled" at its next check.
+  // Stops the speaking, ends the line being spoken with "cancelled" (it does not wait for the synthesizer to call back)
+  // and frees the renderer for a new render.
   func cancel() {
-    stateLock.withLock { cancelled = true }
+    let line = stateLock.withLock { () -> LineWait? in
+      cancelled = true
+      rendering = false
+      return waiting
+    }
     synthesizer.stopSpeaking(at: .immediate)
+    if let line { finish(line, error: VoiceError.cancelled) }
   }
 
   // Writes the lines and the pauses between them; returns each line's length in milliseconds. The file is closed on return.
@@ -88,29 +105,60 @@ final class ScriptRenderer {
   }
 
   // The line's audio as buffers in the common format. Each buffer arrives through the write callback; a zero-length one ends it.
+  // The line also ends with cancelled (from cancel()) or writeFailed (no buffer for 10 seconds), so it cannot hang.
   private func speak(_ text: String, voice: AVSpeechSynthesisVoice, format: AVAudioFormat) async throws -> [AVAudioPCMBuffer] {
     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
     let utterance = AVSpeechUtterance(string: text)
     utterance.voice = voice
     utterance.rate = AVSpeechUtteranceDefaultSpeechRate
     return try await withCheckedThrowingContinuation { continuation in
-      var chunks: [AVAudioPCMBuffer] = []
-      var finished = false
+      let line = LineWait(continuation)
+      stateLock.withLock { waiting = line }
+      armDeadline(line)
       synthesizer.write(utterance) { buffer in
-        guard !finished, let pcm = buffer as? AVAudioPCMBuffer else { return }
+        guard let pcm = buffer as? AVAudioPCMBuffer else { return }
         if self.isCancelled() {
-          finished = true
-          continuation.resume(throwing: VoiceError.cancelled)
+          self.finish(line, error: VoiceError.cancelled)
         } else if pcm.frameLength == 0 {
-          finished = true
-          continuation.resume(returning: chunks)
+          self.finish(line)
         } else if let converted = Self.convert(pcm, to: format) {
-          chunks.append(converted)
+          self.add(converted, to: line)
         } else {
-          finished = true
-          continuation.resume(throwing: VoiceError.writeFailed)
+          self.finish(line, error: VoiceError.writeFailed)
         }
       }
+    }
+  }
+
+  // Ends a line once: with its buffers, or with the error. Later calls do nothing.
+  private func finish(_ line: LineWait, error: Error? = nil) {
+    let chunks = stateLock.withLock { () -> [AVAudioPCMBuffer]? in
+      guard !line.done else { return nil }
+      line.done = true
+      if waiting === line { waiting = nil }
+      return line.chunks
+    }
+    guard let chunks else { return }
+    if let error { line.continuation.resume(throwing: error) } else { line.continuation.resume(returning: chunks) }
+  }
+
+  private func add(_ chunk: AVAudioPCMBuffer, to line: LineWait) {
+    stateLock.withLock { if !line.done { line.chunks.append(chunk) } }
+    armDeadline(line)
+  }
+
+  // Each buffer, and the start of the line, sets a 10-second deadline. A deadline that passes with no newer one fails the line.
+  private func armDeadline(_ line: LineWait) {
+    let arm = stateLock.withLock { () -> Int? in
+      guard !line.done else { return nil }
+      line.deadlines += 1
+      return line.deadlines
+    }
+    guard let mine = arm else { return }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
+      guard let self else { return }
+      let expired = self.stateLock.withLock { !line.done && line.deadlines == mine }
+      if expired { self.finish(line, error: VoiceError.writeFailed) }
     }
   }
 
@@ -154,15 +202,17 @@ final class ScriptRenderer {
     return VoiceInfo(identifier: voice.identifier, language: voice.language, quality: voice.quality.rawValue, gender: gender)
   }
 
-  private func claim() throws {
+  private func claim() throws -> Int {
     try stateLock.withLock {
       if rendering { throw VoiceError.busy }
       rendering = true
       cancelled = false
+      generation += 1
+      return generation
     }
   }
 
-  private func release() { stateLock.withLock { rendering = false } }
+  private func release(_ token: Int) { stateLock.withLock { if generation == token { rendering = false } } }
 
   private func isCancelled() -> Bool { stateLock.withLock { cancelled } }
 
