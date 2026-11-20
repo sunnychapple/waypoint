@@ -114,16 +114,18 @@ export function jobView(job: JobRow, now: number): JobView {
   };
 }
 
-// DELETE /v1/jobs/:id. A queued or running job is stopped (stop terminates its Workflow instance; errors ignored)
-// and its hold released: nothing is charged, and one usage event says "cancelled". A finished job keeps what it was
-// charged. Either way the result, the locked input and any uploaded audio are deleted.
+// DELETE /v1/jobs/:id. A queued or running job has its hold released, and only then is it stopped (stop terminates
+// its Workflow instance; errors ignored): nothing is charged, and one usage event says "cancelled". A job whose hold
+// was already settled is not stopped, so its Workflow still marks it succeeded; it keeps what it was charged, like a
+// finished job. Either way the result, the locked input and any uploaded audio are deleted.
 export async function cancelJob(deps: JobDeps, job: JobRow, stop: () => Promise<void>): Promise<void> {
   const now = deps.now();
   if (job.state === "queued" || job.state === "running") {
-    await stop().catch(() => undefined);
     const ids = jobWalletIds(job.user_id, job.command_key);
     const released = await deps.wallet.apply({ type: "release", id: ids.release, hold_id: ids.hold });
     if (released.ok) {
+      // Released first: a Workflow about to settle now finds no hold, deletes its result and fails.
+      await stop().catch(() => undefined);
       const { meta } = await deps.db
         .prepare("UPDATE jobs SET state = 'cancelled', spent = 0, finished_at = ? WHERE id = ? AND state IN ('queued', 'running')")
         .bind(now, job.id)

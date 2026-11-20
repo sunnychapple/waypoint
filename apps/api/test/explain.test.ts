@@ -432,3 +432,21 @@ describe("POST /v1/tasks/explain: a repeated key after a failed stream", () => {
     expect(made.events).toHaveLength(eventsBefore);
   });
 });
+
+describe("POST /v1/tasks/explain: the app goes away", () => {
+  test("the app drops the stream after the first delta: the work is handed to waitUntil, settles at 1 credit and sends its usage event", async () => {
+    const made = makeTaskEnv();
+    const waiting: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => void waiting.push(p), passThroughOnException: () => undefined, props: {} };
+    const init = { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": KEY }, body: JSON.stringify(BODY) };
+    const res = await setup().request("/v1/tasks/explain", init, made.env, ctx);
+    const reader = res.body?.getReader();
+    if (reader === undefined) throw new Error("expected a body");
+    await reader.read();
+    await reader.cancel();
+    expect(waiting).toHaveLength(1);
+    await Promise.all(waiting);
+    expect(made.store.read()).toMatchObject({ monthly: 9, holds: [] });
+    expect(made.events).toMatchObject([{ id: HOLD_ID, outcome: "ok", credits: 1 }]);
+  });
+});

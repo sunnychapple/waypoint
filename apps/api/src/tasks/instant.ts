@@ -194,26 +194,42 @@ export async function streamTask(
   }
 
   return streamSSE(c, async (sse) => {
-    let result: StreamResult | null = null;
-    try {
-      result = await readModelStream(stream, (text) => sse.writeSSE({ event: "delta", data: JSON.stringify({ text }) }));
-    } catch {
-      result = null;
-    }
-    if (result === null || result.chars === 0) {
-      await finishTask(c, held, "model_failed", result ?? NO_TOKENS, now());
-      await sse.writeSSE({ event: "error", data: JSON.stringify(apiError("internal", "model failed")) });
-      return;
-    }
-    const charged = await finishTask(c, held, "ok", result, now());
-    const done: StreamDone = {
-      credits: charged,
-      tier: held.tier,
-      retention: held.retention,
-      offer_research: held.offerResearch,
-    };
-    await sse.writeSSE({ event: "done", data: JSON.stringify(done) });
+    const work = (async () => {
+      let result: StreamResult | null = null;
+      try {
+        result = await readModelStream(stream, (text) => sse.writeSSE({ event: "delta", data: JSON.stringify({ text }) }));
+      } catch {
+        result = null;
+      }
+      if (result === null || result.chars === 0) {
+        await finishTask(c, held, "model_failed", result ?? NO_TOKENS, now());
+        await sse.writeSSE({ event: "error", data: JSON.stringify(apiError("internal", "model failed")) });
+        return;
+      }
+      const charged = await finishTask(c, held, "ok", result, now());
+      const done: StreamDone = {
+        credits: charged,
+        tier: held.tier,
+        retention: held.retention,
+        offer_research: held.offerResearch,
+      };
+      await sse.writeSSE({ event: "done", data: JSON.stringify(done) });
+    })();
+    keepAlive(c, work);
+    await work;
   });
+}
+
+// workerd stops a request's remaining work when its client goes away, so an answer whose app dropped the connection
+// would never settle or send its usage event (the hold stays open until the wallet's alarm releases it). waitUntil
+// keeps the Worker running until `work` ends: the model is read to the end (writes to a closed stream are dropped)
+// and the answer is settled like any other. Tests that pass no ExecutionContext simply await `work`.
+function keepAlive(c: Context<AppEnv>, work: Promise<void>): void {
+  try {
+    c.executionCtx.waitUntil(work);
+  } catch {
+    // Hono throws when there is no ExecutionContext, which happens only in tests.
+  }
 }
 
 // Runs the model without streaming and returns the whole answer. If the call fails or the answer
