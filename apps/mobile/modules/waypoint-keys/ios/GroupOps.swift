@@ -63,7 +63,8 @@ extension KeysOps {
   }
 
   // Wraps the held keys for each recipient that is trusted (docs/security.md section 6): an account row whose sign
-  // key is the person's known account key, or a device whose certificate verifies under it. Others are refused.
+  // key is the person's known account key and whose own certificate verifies under it, or a device whose certificate
+  // verifies under it. Others are refused.
   static func wrapGroupKeys(userId: String, groupId: String, keyVersions: [Int], recipients: [[String: String]], knownAccounts: [String: String]) throws -> [String: Any] {
     let stored = try identity(userId)
     let signer = try IdentityStore.signingKey(stored)
@@ -81,7 +82,7 @@ extension KeysOps {
       else { throw KeysError.badInput }
       let trusted: Bool
       switch kind {
-      case "account": trusted = knownAccounts[personId] == signPub
+      case "account": trusted = GroupKeys.trustedAccount(id: id, userId: personId, signPub: signPub, boxPub: boxPub, cert: cert, knownAccounts: knownAccounts)
       case "device": trusted = GroupKeys.trusted(GroupKeys.Signer(id: id, userId: personId, signPub: signPub, boxPub: boxPub, cert: cert), knownAccounts: knownAccounts)
       default: throw KeysError.badInput
       }

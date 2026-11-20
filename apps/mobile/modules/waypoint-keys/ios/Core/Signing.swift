@@ -69,3 +69,25 @@ public enum DeviceCertificate {
     return verifyP256(key, signature: sig, message: message)
   }
 }
+
+// The account key's signature over its own row (docs/security.md section 6, "Account certificate"). Without it, a
+// server could list a person's known account sign_pub next to a box_pub of its own and receive group keys.
+public enum AccountCertificate {
+  public static func input(userId: String, accountId: String, signPub: String, boxPub: String) throws -> Data {
+    _ = try PublicKeys.raw(signPub)
+    _ = try PublicKeys.raw(boxPub)
+    return try context("account-cert", [try checkId(userId), try checkId(accountId), signPub, boxPub])
+  }
+
+  public static func sign(_ accountKey: some SigningKey, userId: String, accountId: String, boxPub: String) throws -> String {
+    Base64URL.encode(try accountKey.sign(try input(userId: userId, accountId: accountId, signPub: accountKey.publicKeyText, boxPub: boxPub)))
+  }
+
+  // Verified under the row's own sign_pub; the caller separately checks that sign_pub is the person's known account key.
+  public static func verify(cert: String, userId: String, accountId: String, signPub: String, boxPub: String) -> Bool {
+    guard let key = try? PublicKeys.signing(signPub), let sig = try? Base64URL.decode(cert),
+      let message = try? input(userId: userId, accountId: accountId, signPub: signPub, boxPub: boxPub)
+    else { return false }
+    return verifyP256(key, signature: sig, message: message)
+  }
+}
