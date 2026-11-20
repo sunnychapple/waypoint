@@ -23,6 +23,7 @@ import { linkRefused, revokeLink } from "../../platform/links.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
+import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 
 // One session: its title, when and where it was saved, and what to do with it.
@@ -155,7 +156,7 @@ export default function SessionScreen() {
         <Caption>Couldn't write down this recording.</Caption>
       ) : null}
 
-      {playable ? <RecordingPlayer parts={playParts} seek={seek} /> : null}
+      {playable ? <RecordingPlayer parts={playParts} seek={seek} onSeekDone={() => setSeek(null)} /> : null}
 
       {second !== null ? (
         <View style={styles.switchRow}>
@@ -197,7 +198,7 @@ export default function SessionScreen() {
               accessibilityRole="button"
               accessibilityLabel={`Play from ${formatOffset(segment.tStart)}`}
               hitSlop={12}
-              disabled={!playable}
+              disabled={!playable || getRecorderStatus().state !== "idle"}
               onPress={() => setSeek({ ms: segment.tStart })}
             >
               <Text style={[styles.time, { color: playable ? colors.accent : colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
