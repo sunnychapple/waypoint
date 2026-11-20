@@ -458,6 +458,8 @@ test("rejects a bad jobs.retention; jobs.bytes_sent defaults to 0", () => {
   );
   db.prepare("INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j2', 'u1', 'research', 'queued', 5, 1)").run();
   assert.equal(db.prepare("SELECT bytes_sent FROM jobs WHERE id = 'j2'").get().bytes_sent, 0);
+});
+
 test("an invite inserted without history_from reads back 0", () => {
   const db = freshDb();
   seedGroupAndDevice(db);
