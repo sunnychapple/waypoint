@@ -9,11 +9,12 @@ import { listSegments } from "../../core/capture/segments.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import type { SqlDb } from "../../core/db/sql.ts";
 import { getSpace } from "../../core/db/spaces.ts";
+import { researchForSession } from "../../core/research/research.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
-import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -30,6 +31,7 @@ export default function SessionScreen() {
       spaceName: getSpace(db, session.spaceId)?.name ?? "",
       pages: session.kind === "pages" ? listPages(db, id) : [],
       segments: session.kind === "recording" ? listSegments(db, id) : [],
+      research: researchForSession(db, id),
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
@@ -40,7 +42,7 @@ export default function SessionScreen() {
   useEffect(() => setShowSecond(view === "second"), [view]);
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, second } = data;
+  const { session, spaceName, pages, segments, research, second } = data;
   const offset = -new Date().getTimezoneOffset();
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
@@ -172,7 +174,22 @@ export default function SessionScreen() {
         ) : null}
         <PrimaryButton label="Flashcards" icon="square.stack.3d.up" onPress={() => router.push(`/study/make?sessionId=${id}`)} />
         <SecondaryButton label="Quiz me" icon="checklist" onPress={() => router.push(`/study/quiz?sessionId=${id}`)} />
+        <SecondaryButton label="Research the web" icon="globe" onPress={() => router.push(`/research/new?sessionId=${id}`)} />
       </View>
+
+      {research.length > 0 ? (
+        <View style={styles.actions}>
+          <Caption>RESEARCH</Caption>
+          {research.map((item) => (
+            <Row
+              key={item.id}
+              title={item.question}
+              right={<Caption>{dateLine(item.createdAt, offset)}</Caption>}
+              onPress={() => router.push(`/research/${encodeURIComponent(item.id)}`)}
+            />
+          ))}
+        </View>
+      ) : null}
     </Screen>
   );
 }
