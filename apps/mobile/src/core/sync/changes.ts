@@ -212,6 +212,8 @@ function synced(db: SqlDb, spaceId: string): boolean {
 }
 
 // When this iPhone's person joined the group, for an invite "from now"; 0 for "everything" (and for the group's owner).
+// A group or membership row that is missing reads as 0 (everything): this fails open, which is safe because the server
+// already sends a member only changes written after their history_from; this check only drops what the server cannot.
 function historyFrom(db: SqlDb, groupId: string): number {
   return db.get<{ history_from: number }>("SELECT history_from FROM groups WHERE id = ?", [groupId])?.history_from ?? 0;
 }

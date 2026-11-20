@@ -420,6 +420,23 @@ describe("applying changes", () => {
     saveSegment(a.db, old.id, { tStart: 0, tEnd: 10, text: "before" });
     expect(send(a).map((c) => applyChange(b.db, G, c, "dev_a"))).toEqual(["applied", "applied"]);
   });
+  it("a child that arrives before its session: dropped for a from-now member (the card relies on the log order), kept waiting for everything", () => {
+    const a = device("a");
+    const b = device("b");
+    const c = device("c");
+    const later = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, later.id, { tStart: 0, tEnd: 10, text: "after" });
+    const changes = send(a);
+    const child = changes.find((x) => x.op === "segments");
+    if (child === undefined) throw new Error("no segments");
+    b.db.run("UPDATE groups SET history_from = ? WHERE id = ?", [later.startedAt - 1, G]);
+    expect(applyChange(b.db, G, child, "dev_a")).toBe("older");
+    expect(count(b, "sync_pending")).toBe(0);
+    expect(applyChange(c.db, G, child, "dev_a")).toBe("deferred");
+    expect(count(c, "sync_pending")).toBe(1);
+    expect(applyChange(c.db, G, one(changes, "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(count(c, "segments")).toBe(1);
+  });
   it("children of a deleted session are dropped, not kept waiting", () => {
     const a = device("a");
     const b = device("b");
