@@ -1,6 +1,6 @@
-# Owner decisions 1: D1 to D10
+# Owner decisions 1: D1a to D10
 
-The owner answered open questions 7 (the extension added in hardening 4), 29 (its extension), and 52 to 56 (`docs/build-plan.md`, "Open questions"). This file turns the answers into cards. Every block was written against `main` at `a999643` and checked on a copy of it (see "Order"). Question 53 needs no code: `docs/architecture.md` section 1 and `docs/security.md` are corrected in the pull request that adds this file.
+The owner answered open questions 7 (the extension added in hardening 4), 29 (its extension), and 52 to 56 (`docs/build-plan.md`, "Open questions"). This file turns the answers into cards. Every block was written against `main` at `3c90a85` and checked on a copy of it (see "Order"). Question 53 needs no code: `docs/architecture.md` section 1 and `docs/security.md` are corrected in the pull request that adds this file. Review fixes from PR #138 are folded in (D1 was split into D1a and D1b).
 
 Server cards follow `AGENTS.md` and the server card rules in `docs/cards/hardening-1.md`, "Server hardening cards". App cards follow `docs/cards/mobile-stage3-4.md`, section 1 ("What these cards add to the rules").
 
@@ -8,10 +8,10 @@ Server cards follow `AGENTS.md` and the server card rules in `docs/cards/hardeni
 
 | Question | Owner's answer | Cards |
 |---|---|---|
-| 7 (extended) | On Clerk `user.deleted`, release that billing account's Own it and Plus purchase rows, so a later account can claim them once: the entitlement only, no credits, no monthly reset. Packs stay with the deleted account. | D1 |
+| 7 (extended) | On Clerk `user.deleted`, release that billing account's Own it and Plus purchase rows, so a later account can claim them once: the entitlement only, no credits, no monthly reset. Packs stay with the deleted account. Default (owner may say otherwise): a Plus renewal after the claim gives the new account its monthly credits, because the person paid for that renewal. | D1a, D1b |
 | 29 (extended) | A per-user rate limit on `POST /v1/jobs`: a `ratelimits` binding like `LINK_VIEWS`, 30 a minute, answering 429. | D2 |
 | 52 | One notes database per Clerk user (`waypoint-<clerk user id>.db`), opened after sign-in and closed on sign-out. Nothing is deleted; each person sees only their own notes. A short design first (below). | D6, D7 |
-| 53 | Keep notes in the iPhone backup. Correct architecture section 1 and `docs/security.md`: notes live on the device and in the person's own iPhone backup (encrypted by Apple; end to end with Advanced Data Protection). | none (docs, done) |
+| 53 | Keep notes in the iPhone backup. Correct architecture section 1 and `docs/security.md`: notes live on the device and in the person's own iPhone backup (encrypted by Apple; end to end with Advanced Data Protection). | none (docs, in this pull request) |
 | 54 | Play a session's own audio from the session screen with `expo-audio`; tapping a transcript line jumps to it. | D9 |
 | 55 | A per-user daily byte cap on changes and links (200 MB a day), the hourly cleanup deleting expired links' R2 objects, and a way to buy more with credits from the existing wallet: when the cap is hit, the app shows a sheet ("You've synced 200 MB today. Add 1 GB more for today for N credits"). The price is one named constant, 100 credits per extra 1 GB for the day, to be confirmed (open question 57). | D3, D4, D5, D8 |
 | 56 | "When adding someone you can decide what they can see, history or from there." The invite keeps its "From now" / "Everything so far" choice. A "from now" member's iPhone drops (does not defer) a change to a note started before they joined; an "everything" member gets all. | D10 |
@@ -20,9 +20,9 @@ Server cards follow `AGENTS.md` and the server card rules in `docs/cards/hardeni
 
 **Today.** `platform/db.ts` opens one SQLite file, `waypoint.db` in `Documents/SQLite`, for whoever is signed in. Signing out keeps it (board K1), so the next person who signs in on the same iPhone or iPad sees the first person's notes. The device keys are already per person (the keys module stores them by server user id), and so are the device settings (`statusKey(user)`, `userIdKey(clerkId)`, `knownDevicesKey(user)`).
 
-**After D6.** The notes of each person live in `Documents/SQLite/waypoint-<clerk user id>.db`. The sign-in gate (`useGate` in `platform/auth.tsx`) opens that file as soon as Clerk says who is signed in, during the same render, before any screen reads notes, and closes it when Clerk says nobody is signed in (after a sign-out, or a session that ended while the app was closed). Nothing is deleted: the next time that person signs in, their file opens again. Someone else gets their own file, which starts with the default space, like a new install. The Clerk id of the person whose notes are open is kept in the Keychain (`waypoint.db_user`, readable after the first unlock) and deleted on sign-out. It replaces `waypoint.signed_in_before`: "signed in before" now means "a person's notes are remembered", which is what the offline grace in `decideGate` needs.
+**After D6.** The notes of each person live in `Documents/SQLite/waypoint-<clerk user id>.db`. The sign-in gate (`useGate` in `platform/auth.tsx`) opens that file as soon as Clerk says who is signed in, during the same render, before any screen reads notes. Sign-out (`useSignOut`) closes it right after Clerk's sign-out and waits until the Keychain no longer names the person; the gate also closes it whenever Clerk says nobody is signed in (a session that ended elsewhere or expired). Which of these happens is a pure function, `notesStep`, tested in `src/core`. Nothing is deleted: the next time that person signs in, their file opens again. Someone else gets their own file, which starts with the default space, like a new install. The Clerk id of the person whose notes are open is kept in the Keychain (`waypoint.db_user`, readable after the first unlock). It replaces `waypoint.signed_in_before`: "signed in before" now means "a person's notes are remembered", which is what the offline grace in `decideGate` needs.
 
-**The file that exists today.** The first person to sign in after the update takes it over. Before opening their own file, the app checks for `waypoint.db`: if it exists and their own file does not, it opens it once, folds its write-ahead log in (`PRAGMA wal_checkpoint(TRUNCATE)`), closes it and renames it to their name. It is never copied, so the notes exist once. In practice the person who was signed in when the update arrived is still signed in, so they keep their notes. If a different person signs in first after the update, they get the old file: that is the situation question 52 describes today, and it happens at most once.
+**The file that exists today.** Before opening a person's own file for the first time, the app looks at `waypoint.db`. It takes it over only if it is theirs or nobody's: the file's settings record every Clerk id that signed in with it (`server_user_id:<clerk id>`, written by device registration), and `legacyIsTheirs` (pure, tested) says yes when that list holds the person or is empty. Then the app folds the write-ahead log in (`PRAGMA wal_checkpoint(TRUNCATE)`), closes the file and renames it to their name. It is never copied, so the notes exist once. If the file records only other people, it stays untouched until one of them signs in, and this person starts with a new file. If the old file cannot be read or renamed, this person also starts with a new file and the old one stays as it is (nothing is logged: the app has no log, and `AGENTS.md` forbids `console.log`). If the old file records two people (a shared iPad today), the first of them to sign in gets it, which is no worse than today.
 
 **Audio, page photos and overviews.** They stay where they are: `Documents/sessions/<session id>/…` and `Documents/overviews/<id>.m4a|.mp4`. Every id is a random UUID, so two people's files never collide, and only a person's own database names their files, so no screen can show another person's. Moving the files into a folder per person would change the paths that three native modules write (`waypoint-audio`, `waypoint-pages`, `waypoint-video`/`waypoint-voices`) for no gain in privacy against someone who can already open the app as themselves. The one place that adds up the whole folder is the storage screen (below).
 
@@ -30,60 +30,61 @@ Server cards follow `AGENTS.md` and the server card rules in `docs/cards/hardeni
 
 **The storage screen.** "Recordings and pages" adds up the sizes of the open person's session folders only (D7), not the whole `sessions` folder.
 
-**Background work at sign-out.** The tabs and their hooks unmount when the gate turns to sign-in, so the loops stop. A loop that is between two awaits when the file closes gets an error on its next read ("nobody is signed in") and stops; nothing is written to the next person's file, because a write for a session that is not in that file fails its foreign key. A screen on its way out keeps showing what it showed (`useQuery` does not open anything while nobody is signed in).
+**Background work at sign-out.** The tabs and their hooks unmount when the gate turns to sign-in, so the loops stop. A loop that holds the closed file gets an error on its next read or write and stops. Work that awaits and then writes through `writeDb` (which opens whoever's notes are open now) could write into the next person's notes, so it reads `dbGeneration()` (a counter that every open and close moves) before it awaits and writes only if it has not moved: D6 does this in the indexer, D8 in the sync-limit handling and the purchase. Other loops write rows of a session, which fail their foreign key in another person's file. A screen on its way out keeps showing what it showed (`useQuery` does not open anything while nobody is signed in). The `LAST_USER_KEY` write in `platform/device.ts` runs only while notes are open.
 
 **Not changed.** Device registration, keys, pairing and recovery are already per person. Signing out never deletes anything (K1). There is no switch-person menu and no kid or parent mode: a person signs out and the other signs in.
 
 ## Design: buying more sync for today (question 55)
 
-D3 counts the bytes of every locked change (`POST /v1/groups/:id/changes`) and every shared link's data (`POST /v1/links`) against a daily budget per person in a new D1 table, `sync_days (user_id, day, bytes, extra_bytes)`, where `day` is the UTC day. One SQL statement checks and counts, so two requests at once cannot both pass. Over the budget, the reply is 429 `rate_limited` with the message `daily sync limit reached` and `retry_after` = the seconds until 00:00 UTC. Nothing is stored for that request: `idempotent()` does not store a reply with `Retry-After` (H9), so the same request goes through after the person buys more. Media files are not counted: they have their own 3 GB cap.
+D3 counts the bytes of every locked change (`POST /v1/groups/:id/changes`) and every shared link's data (`POST /v1/links`, counted once its row exists) against a daily budget per person in a new D1 table, `sync_days (user_id, day, bytes)`, where `day` is the UTC day. The budget is `SYNC_DAILY_BYTES` plus the extras bought for that day, one row each in `sync_extras (user_id, key, day, bytes)` (same migration). One SQL statement checks and counts, so two requests at once cannot both pass. Over the budget, the reply is 429 `rate_limited` with the message `daily sync limit reached` and `retry_after` = the seconds until 00:00 UTC. Nothing is stored for that request: `idempotent()` does not store a reply with `Retry-After` (H9), so the same request goes through after the person buys more. Media files are not counted: they have their own 3 GB cap.
 
-D5 adds `POST /v1/sync/extra { credits }`, signed and idempotent. It spends through the Wallet Durable Object the way an instant task does: a hold of `SYNC_EXTRA_CREDITS` with id `sync_extra:<user id>:<Idempotency-Key>`, then `extra_bytes += SYNC_EXTRA_BYTES` for today's row, then a settle at the full price (ids `sync_extra_settle:…`, and `sync_extra_release:…` if the D1 write fails). There is no new wallet command and no App Store product. `credits` in the body is the price the app showed: any other number gets 409 "price changed" and nothing is held. 402 and its shortfall work as for any task, so the app's Out of credits path applies.
+D5 adds `POST /v1/sync/extra { credits }`, signed and idempotent. It spends through the Wallet Durable Object the way an instant task does: a hold of `SYNC_EXTRA_CREDITS` with id `sync_extra:<user id>:<Idempotency-Key>`, then one `sync_extras` row whose primary key is (user, Idempotency-Key), then a settle at the full price (ids `sync_extra_settle:…`, and `sync_extra_release:…` if the D1 write fails). The row's key makes the grant idempotent: the same request never adds its gigabyte twice. If the settle fails after the row was written, the same request sent again (its hold still open) settles it then. There is no new wallet command and no App Store product. `credits` in the body is the price the app showed: any other number gets 409 "price changed" and nothing is held. 402 and its shortfall work as for any task, so the app's Out of credits path applies.
 
-D8 is the app. When a send gets the limit, the app stops sending until the time the server gave (pulls go on), the space screen says so with "Add more for today", and that button opens the sheet. Making a shared link that hits the limit opens the sheet directly. The sheet says "You've synced 200 MB today" (more once extra was bought), offers "Add 1 GB · 100 credits", and on success sends what waited.
+D8 is the app. When a send gets the limit, the app stops sending until the time the server gave (pulls go on), the space screen says so with "Add more for today", and that button opens the sheet. Making a shared link that hits the limit opens the sheet directly. The sheet says "You've synced 200 MB today", offers "Add 1 GB · 100 credits", and on success sends what waited.
 
 ## Order
 
 | Card | Branch | Area | Merge after |
 |---|---|---|---|
-| D1 | `feat/d1-release-purchases` | API: a deleted account's Own it and Plus can be claimed once (question 7). Migration `0010` | `main` at `a999643` or later |
-| D2 | `feat/d2-job-rate-limit` | API: 30 new jobs a minute per person (question 29) | `main` at `a999643` or later |
-| D3 | `feat/d3-sync-budget` | API and contracts: the daily byte budget on changes and links (question 55). Migration `0011` | D1 (migration number, and both edit `db/d1/test/schema.test.mjs`) |
-| D4 | `feat/d4-cleanup-links` | API: the hourly cleanup deletes expired links and old day counts | D3 (the `sync_days` table) |
-| D5 | `feat/d5-sync-extra` | API, contracts and API client: `POST /v1/sync/extra` | D3 (both edit `packages/contracts/src/sync.ts`) |
-| D6 | `feat/d6-notes-per-person` | App: one notes database per person (question 52) | `main` at `a999643` or later |
-| D7 | `feat/d7-storage-per-person` | App: the storage screen counts only your recordings | `main` at `a999643` or later |
-| D8 | `feat/d8-sync-limit-sheet` | App: the sync limit sheet (question 55) | D5 (the API client method), D6 (both edit `apps/mobile/src/platform/sync.ts`) |
-| D9 | `feat/d9-play-recording` | App: play a recording from the session screen (question 54) | `main` at `a999643` or later |
-| D10 | `fix/d10-history-from-now` | App: "from now" members drop changes to older notes (question 56) | `main` at `a999643` or later |
+| D1a | `feat/d1a-release-purchases` | API: a deleted account's Own it and Plus can be claimed once (question 7). Migration `0010` | `main` at `3c90a85` or later |
+| D1b | `feat/d1b-claimed-purchases` | API: no take-back on refund and no yearly top-ups for a claimed row | D1a (the column and the claim) |
+| D2 | `feat/d2-job-rate-limit` | API: 30 new jobs a minute per person (question 29) | `main` at `3c90a85` or later |
+| D3 | `feat/d3-sync-budget` | API and contracts: the daily byte budget on changes and links (question 55). Migration `0011` | D1a (migration number, and both edit `db/d1/test/schema.test.mjs`) |
+| D4 | `feat/d4-cleanup-links` | API: the hourly cleanup deletes expired links and old day counts | D3 (the two tables) |
+| D5 | `feat/d5-sync-extra` | API, contracts and API client: `POST /v1/sync/extra` | D3 (`sync_extras`; both edit `packages/contracts/src/sync.ts`) |
+| D6 | `feat/d6-notes-per-person` | App: one notes database per person (question 52) | `main` at `3c90a85` or later |
+| D7 | `feat/d7-storage-per-person` | App: the storage screen counts only your recordings | `main` at `3c90a85` or later |
+| D8 | `feat/d8-sync-limit-sheet` | App: the sync limit sheet (question 55) | D5 (the API client method), D6 (`dbGeneration`; both edit `apps/mobile/src/platform/sync.ts`) |
+| D9 | `feat/d9-play-recording` | App: play a recording from the session screen (question 54) | `main` at `3c90a85` or later |
+| D10 | `fix/d10-history-from-now` | App: "from now" members drop changes to older notes (question 56) | `main` at `3c90a85` or later |
 
-D1, D2, D6, D7, D9 and D10 touch different files and can be built at the same time. D3 waits for D1, D4 and D5 for D3, D8 for D5 and D6. Every card's blocks are written against `main` at `a999643`; a card that merges after another one finds the lines it changes unchanged, because no two cards change the same lines (in the shared files the second card adds its lines next to the first card's, as each card says).
+D1a, D2, D6, D7, D9 and D10 touch different files and can be built at the same time. D1b and D3 wait for D1a, D4 and D5 for D3, D8 for D5 and D6. Every card's blocks are written against `main` at `3c90a85`; a card that merges after another one finds the lines it changes unchanged, because no two cards change the same lines (in the shared files the second card adds its lines next to the first card's, as each card says).
 
-Every block was applied, card by card in the order above, to a copy of `main` at `a999643` (after `npm install`) and checked there:
+Every block was applied, card by card in the order above, to a copy of `main` at `3c90a85` (after `npm install`) and checked there:
 
 - `npm run typecheck`: exit 0.
-- `npm test`: api 1,042 = 1,019 + 23, mobile 464 = 449 + 15, api-client 49 = 48 + 1, d1-schema 57 = 56 + 1; the other packages unchanged.
+- `npm test`: api 1,046 = 1,019 + 27, mobile 468 = 449 + 19, api-client 49 = 48 + 1, d1-schema 59 = 56 + 3; the other packages unchanged.
 - `npm run bundle -w @waypoint/api`: the dry run passes.
 - `npm run export:ios -w @waypoint/mobile`: exports.
 - No card changes Swift, so `npm run test:swift -w @waypoint/mobile` is unchanged.
 
-Then each card's source changes were removed and its tests kept: every new test that checks new behaviour failed on the code without them. The tests that pass either way are marked as guards in their cards (D1: the pack and "account still exists" tests; D3: none; D10: the "everything" test).
+Then each card's source changes were removed and its tests kept: every new test that checks new behaviour failed on the code without them. The tests that pass either way are marked as guards in their cards (D1a: the pack, "account still exists" and "never existed" tests; D10: the "everything" test).
 
 ---
 
-## D1 · API: a deleted account's Own it and Plus can be claimed once
+## D1a · API: a deleted account's Own it and Plus can be claimed once
 
-Branch `feat/d1-release-purchases`. From `main` at `a999643`. No dependency. Migration `0010_purchases_released.sql` (merge before D3, which adds `0011`). Files, and no others:
+Branch `feat/d1a-release-purchases`. From `main` at `3c90a85`. No dependency. Migration `0010_purchases_released.sql` (merge before D3, which adds `0011`). Files, and no others:
 
 - `db/d1/migrations/0010_purchases_released.sql` (new), `db/d1/test/schema.test.mjs`
 - `apps/api/src/webhooks/clerk.ts`, `apps/api/test/clerk-webhook.test.ts`
 - `apps/api/src/apple/purchases.ts`, `apps/api/src/apple/route.ts`, `apps/api/test/apple-purchase.test.ts`
-- `apps/api/src/apple/notifications.ts`, `apps/api/test/apple-notices.test.ts`
-- `apps/api/src/apple/allowance.ts`, `apps/api/test/allowance.test.ts`
 
-**Why.** Someone who deletes their account and signs up again can never restore Own it or a running Plus: the purchase rows keep the old billing account (409 "purchase belongs to another account"). The owner's decision (open question 7): on `user.deleted`, that account's Own it and Plus rows are released, and the next account to send one of those transactions claims them once. It gets the entitlement only. The credits (Own it's 2,000) and the monthly reset (Plus) went to the deleted account's wallet when the transaction was first recorded, so the claim gives no credits, no reset, and nothing can be taken back from the new wallet later. Packs are not released. A Plus renewal after the claim is a new transaction paid by the person, so it resets the new account's monthly credits as any renewal does.
+**Why.** Someone who deletes their account and signs up again can never restore Own it or a running Plus: the purchase rows keep the old billing account (409 "purchase belongs to another account"). The owner's decision (open question 7): on `user.deleted`, that account's Own it and Plus rows are released, and the next account to send one of those transactions claims them once. It gets the entitlement only. The credits (Own it's 2,000) and the monthly reset (Plus) went to the deleted account's wallet when the transaction was first recorded, so the claim gives no credits and no reset (D1b makes sure nothing is taken back from the new wallet later either). Packs are not released.
 
-A released row stays claimable only while no account with its billing account exists. So a release that happened while the user row was somehow still there cannot be claimed by someone else, and a claimed row belongs to the claiming account like any other row.
+Default, unless the owner says otherwise: a Plus renewal after the claim is a new transaction the person paid for, so it resets the new account's monthly credits as any renewal does.
+
+A released row can be claimed only while no account with its billing account exists, so a release that happened while the user row was somehow still there cannot be claimed by someone else, and a claimed row belongs to the claiming account like any other row. Two accounts claiming at the same moment cannot both win: the claim is one `UPDATE` that moves only rows whose account is gone, and the ownership check runs after it.
 
 ### 1. The migration
 
@@ -93,7 +94,12 @@ A released row stays claimable only while no account with its billing account ex
 -- Own it and Plus rows of an account that was deleted (Clerk user.deleted, open question 7). The next account to send
 -- such a transaction claims its rows once: the entitlement only, never the credits or the monthly reset it already gave.
 ALTER TABLE purchases ADD COLUMN released_at INTEGER;
+-- Accounts deleted before this migration: their rows are released now (0: the time is not known).
+UPDATE purchases SET released_at = 0
+  WHERE kind IN ('non_consumable', 'subscription') AND billing_account_id NOT IN (SELECT billing_account_id FROM users);
 ```
+
+The `UPDATE` releases the rows of accounts deleted before this ships (`released_at` 0: the time is not known).
 
 `db/d1/test/schema.test.mjs`:
 
@@ -107,6 +113,33 @@ ALTER TABLE purchases ADD COLUMN released_at INTEGER;
 
 ```js
   purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER", released_at: "INTEGER?" },
+```
+
+- Add at the end of the file, exactly:
+
+```js
+
+test("0010 releases the Own it and Plus rows of accounts already deleted, and nothing else", () => {
+  const names = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
+  const at = names.indexOf("0010_purchases_released.sql");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const sql of migrations.slice(0, at)) db.exec(sql);
+  seedUser(db);
+  const insert = db.prepare(
+    "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES (?, ?, ?, 'p', ?, 'active', 1)",
+  );
+  insert.run("t_gone_own", "t_gone_own", "ba_gone", "non_consumable");
+  insert.run("t_gone_plus", "t_gone_plus", "ba_gone", "subscription");
+  insert.run("t_gone_pack", "t_gone_pack", "ba_gone", "consumable");
+  insert.run("t_live_own", "t_live_own", "ba_1", "non_consumable");
+  for (const sql of migrations.slice(at)) db.exec(sql);
+  const rows = db.prepare("SELECT transaction_id, released_at FROM purchases ORDER BY transaction_id").all();
+  assert.deepEqual(
+    rows.map((r) => [r.transaction_id, r.released_at]),
+    [["t_gone_own", 0], ["t_gone_pack", null], ["t_gone_plus", 0], ["t_live_own", null]],
+  );
+});
 ```
 
 ### 2. `user.deleted` releases the rows
@@ -165,24 +198,25 @@ type PurchaseRow = { billing_account_id: string; status: "active" | "refunded" |
 
 ```ts
   if (txn.inAppOwnershipType === "PURCHASED") {
-    // A subscription or purchase belongs to the account that recorded it first, renewals included. Rows released by a
-    // deleted account (released_at, open question 7) belong to no one: this account claims them below.
-    const owner = await db
+    // Rows released by a deleted account (released_at, open question 7) are claimed first, in one statement that moves
+    // only rows whose account is gone: of two accounts claiming at once, the second finds them owned and moves nothing.
+    await db
       .prepare(
-        `SELECT 1 AS found FROM purchases p WHERE p.original_id = ? AND p.billing_account_id <> ?
-           AND (p.released_at IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.billing_account_id = p.billing_account_id)) LIMIT 1`,
+        `UPDATE purchases SET billing_account_id = ? WHERE original_id = ? AND billing_account_id <> ? AND released_at IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM users u WHERE u.billing_account_id = purchases.billing_account_id)`,
       )
+      .bind(account.billing_account_id, txn.originalTransactionId, account.billing_account_id)
+      .run();
+    // Then, as before: a subscription or purchase belongs to the account that recorded it first, renewals included.
+    const owner = await db
+      .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND billing_account_id <> ? LIMIT 1")
       .bind(txn.originalTransactionId, account.billing_account_id)
       .first<{ found: number }>();
     if (owner !== null) return { ok: false, reason: "other_account" };
-    await db
-      .prepare("UPDATE purchases SET billing_account_id = ? WHERE original_id = ? AND billing_account_id <> ?")
-      .bind(account.billing_account_id, txn.originalTransactionId, account.billing_account_id)
-      .run();
   }
 ```
 
-  After the owner check passes, every row of this subscription or purchase with another billing account is a released row of a deleted account, so the `UPDATE` claims exactly those.
+  The ownership check reads the rows after the claim, so it sees whoever won, before anything is granted.
 
 - Replace `.prepare("SELECT billing_account_id, status FROM purchases WHERE transaction_id = ?")` with, exactly:
 
@@ -199,26 +233,103 @@ type PurchaseRow = { billing_account_id: string; status: "active" | "refunded" |
 
 ### 4. The app's token of a deleted account
 
-**Why.** The app sets each purchase's `appAccountToken` to the user id (M14). The deleted account's id is in every one of its transactions, so the route refused them with 409 before `applyTransaction` could see the released rows.
+**Why.** The app sets each purchase's `appAccountToken` to the user id (M14). The deleted account's id is in every one of its transactions, so the route refused them with 409 before `applyTransaction` could see the released rows. A token that names no account is let through only when rows of that purchase were released.
 
-`apps/api/src/apple/route.ts`: replace the `if (` block that throws `"purchase belongs to another account"` for another `appAccountToken` with, exactly:
+`apps/api/src/apple/route.ts`:
+
+- After the line `import { idempotent } from "../idempotency.ts";`, add exactly:
 
 ```ts
-    // Another person's token is refused while that account exists. A deleted account's token is let through:
-    // applyTransaction then claims the rows it released (open question 7), or refuses rows it never released.
+import type { Db } from "../storage.ts";
+```
+
+- After the line `export type ApplePurchaseDeps = { now: () => number; rootSha256: string };`, add exactly:
+
+```ts
+
+// True when the account named by `token` no longer exists and rows of this purchase were released (open question 7).
+async function releasedByDeletedAccount(db: Db, originalId: string, token: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS found FROM purchases WHERE original_id = ? AND released_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users WHERE id = ?) LIMIT 1")
+    .bind(originalId, token)
+    .first<{ found: number }>();
+  return row !== null;
+}
+```
+
+- Replace the `if (` block that throws `"purchase belongs to another account"` for another `appAccountToken` with, exactly:
+
+```ts
+    // Another person's token is refused, unless that account is gone and released this purchase (open question 7):
+    // then applyTransaction decides who may claim it.
     if (
       txn.inAppOwnershipType === "PURCHASED" &&
       txn.appAccountToken !== undefined &&
       txn.appAccountToken.toLowerCase() !== user.id.toLowerCase() &&
-      (await c.env.DB.prepare("SELECT 1 AS found FROM users WHERE id = ?").bind(txn.appAccountToken.toLowerCase()).first<{ found: number }>()) !== null
+      !(await releasedByDeletedAccount(c.env.DB, txn.originalTransactionId, txn.appAccountToken.toLowerCase()))
     ) {
       throw new ApiFailure("conflict", "purchase belongs to another account");
     }
 ```
 
-`apps/api/test/apple-purchase.test.ts`: add at the end of the file, exactly:
+`apps/api/test/apple-purchase.test.ts`:
+
+- Replace these import lines:
 
 ```ts
+import { addMonths } from "../src/apple/products.ts";
+import { applePurchaseRoute } from "../src/apple/route.ts";
+```
+
+  with exactly:
+
+```ts
+import { addMonths, appleProduct } from "../src/apple/products.ts";
+import { applyTransaction, type PurchaseOutcome } from "../src/apple/purchases.ts";
+import { applePurchaseRoute } from "../src/apple/route.ts";
+import { AppleTransactionSchema } from "../src/apple/transaction.ts";
+```
+
+- Replace the line `import type { Db } from "../src/storage.ts";` with exactly:
+
+```ts
+import type { Db, DbStatement } from "../src/storage.ts";
+```
+
+- Add at the end of the file, exactly:
+
+```ts
+
+// A Db that runs `between` right after the first statement it is given, before handing back that statement's result:
+// another request lands in the middle of this one.
+function interrupted(inner: Db, between: () => Promise<void>): Db {
+  let done = false;
+  const once = async (): Promise<void> => {
+    if (done) return;
+    done = true;
+    await between();
+  };
+  const wrap = (statement: DbStatement): DbStatement => ({
+    bind: (...values: unknown[]) => wrap(statement.bind(...values)),
+    first: async <T,>() => {
+      const result = await statement.first<T>();
+      await once();
+      return result;
+    },
+    all: async <T,>() => {
+      const result = await statement.all<T>();
+      await once();
+      return result;
+    },
+    run: async () => {
+      const result = await statement.run();
+      await once();
+      return result;
+    },
+  });
+  return { prepare: (query: string) => wrap(inner.prepare(query)) };
+}
+
 // What Clerk's user.deleted does to an account's purchases (apps/api/src/webhooks/clerk.ts).
 async function deleteAccount(id: string): Promise<void> {
   await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ? AND kind IN ('non_consumable', 'subscription')").bind(NOW, id).run();
@@ -262,6 +373,30 @@ describe("POST /v1/purchases/apple: purchases of a deleted account", () => {
     expect(walletFor(C).read().monthly).toBe(2000);
   });
 
+  test("two accounts claiming at once: the claim that lands second gets other_account and no entitlement", async () => {
+    const fields = { transactionId: "2000000000000090", originalTransactionId: "2000000000000090", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A };
+    expect((await send(await jwsFor(fields), { user: userA })).status).toBe(200);
+    await deleteAccount(A);
+    await addUser(C);
+    await addUser(D);
+    const txn = AppleTransactionSchema.parse(transaction(fields));
+    const product = appleProduct("waypoint.own_it");
+    if (product === undefined) throw new Error("unknown product");
+    const claim = (id: string, on: Db) => applyTransaction(on, WALLET.get(id), { user_id: id, billing_account_id: id }, txn, product, NOW);
+    const second: PurchaseOutcome[] = [];
+    // D's first statement runs, then C's whole claim, then the rest of D's.
+    const first = await claim(D, interrupted(db, async () => void second.push(await claim(C, db))));
+    expect(first).toMatchObject({ ok: true, credits: 0 });
+    expect(second).toEqual([{ ok: false, reason: "other_account" }]);
+    expect(await countRows("SELECT COUNT(*) AS n FROM entitlements WHERE user_id = ?", C)).toBe(0);
+    expect(await countRows("SELECT COUNT(*) AS n FROM purchases WHERE billing_account_id = ?", D)).toBe(1);
+  });
+
+  test("a token of an account that never existed, for a purchase nobody released, gets 409", async () => {
+    const own = await jwsFor({ transactionId: "2000000000000095", originalTransactionId: "2000000000000095", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: C });
+    await expectError(await send(own, { user: userB }), 409, "conflict", "purchase belongs to another account");
+  });
+
   test("a pack stays with the deleted account: the next account gets 409 and no credits", async () => {
     const pack = await jwsFor({ transactionId: "2000000000000070", originalTransactionId: "2000000000000070", appAccountToken: A });
     expect((await send(pack, { user: userA })).status).toBe(200);
@@ -280,11 +415,31 @@ describe("POST /v1/purchases/apple: purchases of a deleted account", () => {
 });
 ```
 
-The last two tests are guards: they pass on `main` too, and must keep passing.
+The two-claims test runs one claim inside the other: the second account's first statement, then the first account's whole claim, then the rest of the second's. With an ownership check before the claim (both checks pass, then both move the rows) it fails. The pack, "never existed" and "account still exists" tests are guards: they pass on `main` too, and must keep passing.
 
-### 5. Nothing is taken back, and no yearly top-ups, for a claimed row
+### Checks
 
-**Why.** A refund of a claimed Own it would claw 2,000 credits back from the new wallet, which never got them; a refund of a claimed Plus period would reset the new account's monthly credits for a period that gave it none. The hourly yearly top-up would give a claimed yearly Plus 2,000 credits a month, which the decision rules out ("no monthly reset").
+Root `npm install`, `npm run typecheck`, `npm test` (api 1,026 = 1,019 + 7; d1-schema 57 = 56 + 1, two lines changed), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
+
+### Not in this PR
+
+- Refunds and yearly top-ups of a claimed row (D1b).
+- Cleaning up a deleted account's groups, room data and R2 objects (the rest of open question 7).
+- Apple notices for a released row before it is claimed: `findAccount` finds no account (the user row is gone), so they are dropped as today; after the claim they find the new account.
+- Moving the deleted account's packs or credits. They stay with its wallet (the money record), as decided.
+
+---
+
+## D1b · API: no take-back and no yearly top-ups for a claimed row
+
+Branch `feat/d1b-claimed-purchases`. From `main` at `3c90a85`, **after D1a is merged** (the `released_at` column and the claim). No migration. Files, and no others:
+
+- `apps/api/src/apple/notifications.ts`, `apps/api/test/apple-notices.test.ts`
+- `apps/api/src/apple/allowance.ts`, `apps/api/test/allowance.test.ts`
+
+**Why.** A row claimed under D1a gave the new wallet nothing. A refund of a claimed Own it would claw 2,000 credits back from the new wallet, which never got them; a refund of a claimed Plus period would reset the new account's monthly credits for a period that gave it none. The hourly yearly top-up would give a claimed yearly Plus 2,000 credits a month, which the decision rules out ("no monthly reset"). A renewal after the claim is a new row with `released_at` NULL, so it is refunded and topped up as usual.
+
+### 1. Refunds
 
 `apps/api/src/apple/notifications.ts`, in `applyNotice`, in the `refund`/`revoke` branch:
 
@@ -325,6 +480,8 @@ The last two tests are guards: they pass on `main` too, and must keep passing.
   });
 ```
 
+### 2. Yearly top-ups
+
 `apps/api/src/apple/allowance.ts`:
 
 - Replace the comment line `// with an open Plus entitlement from a purchase are topped up. Returns how many resets were applied.` with, exactly:
@@ -358,19 +515,17 @@ The last two tests are guards: they pass on `main` too, and must keep passing.
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (api 1,026 = 1,019 + 7; d1-schema 56, two lines changed), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
+Root `npm install`, `npm run typecheck`, `npm test` (api + 2), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
 
 ### Not in this PR
 
-- Cleaning up a deleted account's groups, room data and R2 objects (the rest of open question 7).
-- Apple notices for a released row before it is claimed: `findAccount` finds no account (the user row is gone), so they are dropped as today; after the claim they find the new account.
-- Moving the deleted account's packs or credits. They stay with its wallet (the money record), as decided.
+- Lapse notices of a claimed Plus: they reset monthly credits to 0 as for any lapse, which takes nothing the claimed period gave.
 
 ---
 
 ## D2 · API: at most 30 new jobs a minute per person
 
-Branch `feat/d2-job-rate-limit`. From `main` at `a999643`. No dependency, no migration. Files, and no others:
+Branch `feat/d2-job-rate-limit`. From `main` at `3c90a85`. No dependency, no migration. Files, and no others:
 
 - `apps/api/wrangler.jsonc`, `apps/api/src/env.ts`
 - `apps/api/src/jobs/routes.ts`, `apps/api/test/helpers/jobs.ts`, `apps/api/test/jobs.test.ts`
@@ -464,7 +619,7 @@ The namespace id `1003` must be unique in the Cloudflare account, like `1001` an
 
 ## D3 · API: a daily byte budget on changes and links
 
-Branch `feat/d3-sync-budget`. From `main` at `a999643`, **after D1 is merged** (migration `0011` follows D1's `0010`, and both edit `db/d1/test/schema.test.mjs`, different lines). Migration `0011_sync_days.sql`. Files, and no others:
+Branch `feat/d3-sync-budget`. From `main` at `3c90a85`, **after D1a is merged** (migration `0011` follows D1a's `0010`, and both edit `db/d1/test/schema.test.mjs`, different lines). Migration `0011_sync_days.sql`. Files, and no others:
 
 - `db/d1/migrations/0011_sync_days.sql` (new), `db/d1/test/schema.test.mjs`
 - `packages/contracts/src/sync.ts`
@@ -472,21 +627,29 @@ Branch `feat/d3-sync-budget`. From `main` at `a999643`, **after D1 is merged** (
 - `apps/api/src/sync/routes.ts`, `apps/api/test/sync.test.ts`
 - `apps/api/src/links/routes.ts`, `apps/api/test/links.test.ts`
 
-**Why.** Changes have no per-person byte budget (only media has the 3 GB cap), and links are unlimited at up to 4 MiB each, so one account can fill R2 and the group rooms (open question 55). The owner's decision: 200 MB a day per person on changes and links together, counted per UTC day. D5 lets a person buy more for the day; this card only adds the budget and its 429.
+**Why.** Changes have no per-person byte budget (only media has the 3 GB cap), and links are unlimited at up to 4 MiB each, so one account can fill R2 and the group rooms (open question 55). The owner's decision: 200 MB a day per person on changes and links together, counted per UTC day. D5 lets a person buy more for the day, one `sync_extras` row per purchase; this card creates that table (so the budget can include it) and adds the budget and its 429. Nothing writes `sync_extras` until D5.
 
-### 1. The table
+### 1. The tables
 
 `db/d1/migrations/0011_sync_days.sql` (new), exactly:
 
 ```sql
 -- Bytes of locked changes and shared-link data each person sent per UTC day (day = Unix ms / 86,400,000, rounded
--- down), against their daily budget (open question 55), and the extra bytes they bought for that day. Sizes only.
+-- down), against their daily budget (open question 55). Sizes only.
 CREATE TABLE sync_days (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   day INTEGER NOT NULL,
   bytes INTEGER NOT NULL DEFAULT 0,
-  extra_bytes INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, day)
+);
+-- Extra bytes bought for a day (POST /v1/sync/extra, card D5), one row per purchase. The key is the purchase's
+-- Idempotency-Key, so a purchase that runs again can never add its bytes twice.
+CREATE TABLE sync_extras (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  bytes INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
 );
 ```
 
@@ -495,25 +658,36 @@ CREATE TABLE sync_days (
 - In `EXPECTED`, after the `apple_notifications` line, add exactly:
 
 ```js
-  sync_days: ["user_id", "day", "bytes", "extra_bytes"],
+  sync_days: ["user_id", "day", "bytes"],
+  sync_extras: ["user_id", "key", "day", "bytes"],
 ```
 
 - In `EXPECTED_TYPES`, after the `apple_notifications` line, add exactly:
 
 ```js
-  sync_days: { user_id: "TEXT", day: "INTEGER", bytes: "INTEGER", extra_bytes: "INTEGER" },
+  sync_days: { user_id: "TEXT", day: "INTEGER", bytes: "INTEGER" },
+  sync_extras: { user_id: "TEXT", key: "TEXT", day: "INTEGER", bytes: "INTEGER" },
 ```
 
-- Add at the end of the file, exactly:
+- Add at the end of the file (after D1a's test), exactly:
 
 ```js
 
-test("deleting a user deletes their sync_days rows", () => {
+test("deleting a user deletes their sync_days and sync_extras rows", () => {
   const db = freshDb();
   seedUser(db);
   db.exec("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u1', 20000, 10)");
+  db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)");
   db.prepare("DELETE FROM users WHERE id = 'u1'").run();
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_days"), 0);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_extras"), 0);
+});
+
+test("a purchase's key can add a sync_extras row only once per user", () => {
+  const db = freshDb();
+  seedUser(db);
+  db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)");
+  assert.throws(() => db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)"), /UNIQUE constraint failed/);
 });
 ```
 
@@ -547,15 +721,16 @@ export function utcDay(now: number): number {
 }
 
 // Counts `bytes` (locked change bytes or shared-link data) against the person's budget for today: SYNC_DAILY_BYTES
-// plus any extra bought for today (sync_days.extra_bytes). One statement checks and counts, so two requests at once
-// cannot both pass the limit. Over it: nothing is counted, and 429 says how many seconds remain until 00:00 UTC.
+// plus the extra bought for today (sync_extras). One statement checks and counts, so two requests at once cannot both
+// pass the limit. Over it: nothing is counted, and 429 says how many seconds remain until 00:00 UTC.
 export async function spendSyncBytes(db: Db, userId: string, bytes: number, now: number): Promise<void> {
   const day = utcDay(now);
   const counted = await db
     .prepare(
-      `INSERT INTO sync_days (user_id, day, bytes, extra_bytes) VALUES (?, ?, ?, 0)
+      `INSERT INTO sync_days (user_id, day, bytes) VALUES (?, ?, ?)
        ON CONFLICT (user_id, day) DO UPDATE SET bytes = sync_days.bytes + excluded.bytes
-       WHERE sync_days.bytes + excluded.bytes <= ? + sync_days.extra_bytes`,
+       WHERE sync_days.bytes + excluded.bytes <= ? +
+         (SELECT COALESCE(SUM(e.bytes), 0) FROM sync_extras e WHERE e.user_id = sync_days.user_id AND e.day = sync_days.day)`,
     )
     .bind(userId, day, bytes, SYNC_DAILY_BYTES)
     .run();
@@ -628,7 +803,8 @@ describe("spendSyncBytes", () => {
 
   test("extra bytes bought for today raise today's budget only", async () => {
     const db = await makeDb();
-    await db.prepare("INSERT INTO sync_days (user_id, day, bytes, extra_bytes) VALUES ('u1', 20400, ?, 500)").bind(SYNC_DAILY_BYTES).run();
+    await db.prepare("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u1', 20400, ?)").bind(SYNC_DAILY_BYTES).run();
+    await db.prepare("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k_today', 20400, 300), ('u1', 'k_today2', 20400, 200), ('u1', 'k_old', 20399, 900)").run();
     await spendSyncBytes(db, "u1", 500, NOW);
     await expect(spendSyncBytes(db, "u1", 1, NOW)).rejects.toThrow(SYNC_DAILY_LIMIT_MESSAGE);
   });
@@ -653,7 +829,7 @@ import { spendSyncBytes } from "./budget.ts";
       await spendSyncBytes(db, user.id, bytes.length, now);
 ```
 
-`apps/api/src/links/routes.ts`:
+`apps/api/src/links/routes.ts`: a link is counted once its row exists, so a request refused for a taken id is not counted.
 
 - After the line `import type { FetchLike } from "../push/apns.ts";`, add exactly:
 
@@ -661,10 +837,16 @@ import { spendSyncBytes } from "./budget.ts";
 import { spendSyncBytes } from "../sync/budget.ts";
 ```
 
-- In the `POST /v1/links` handler, right after the `try { data = fromBase64Url(req.data); … } catch { … }` block and before `const passcodeHash = …`, add exactly:
+- In the `POST /v1/links` handler, after the `try { await db.prepare("INSERT INTO links …") … } catch (error) { … "link id taken" … }` block and before `const bucket: LinkBucket = c.env.BUCKET;`, add exactly:
 
 ```ts
-      await spendSyncBytes(db, user.id, data.length, now);
+      // Counted once the link exists (open question 55); over the day's budget, the row goes again and nothing is stored.
+      try {
+        await spendSyncBytes(db, user.id, data.length, now);
+      } catch (error) {
+        await db.prepare("DELETE FROM links WHERE id = ?").bind(req.id).run();
+        throw error;
+      }
 ```
 
 `apps/api/test/sync.test.ts`:
@@ -713,16 +895,25 @@ import { LinkRevokedSchema, LinkViewSchema, SYNC_DAILY_BYTES } from "@waypoint/c
     expect(await rowOf(rig, LINK)).toBeNull();
     expect(rig.mem.state.puts).toBe(0);
   });
+
+  test("a link id that is taken gets 409 and its bytes are not counted", async () => {
+    const rig = await makeRig();
+    const data = toBase64Url(await lockedFor(LINK));
+    expect((await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, data))).status).toBe(201);
+    expect((await signed(rig, "u2", "POST", "/v1/links", createBody(LINK, data))).status).toBe(409);
+    const row = await rig.db.prepare("SELECT bytes FROM sync_days WHERE user_id = 'u2'").first<{ bytes: number }>();
+    expect(row?.bytes).toBe((await lockedFor(LINK)).length);
+  });
 ```
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (api + 7: five in `sync-budget.test.ts`, one each in `sync.test.ts` and `links.test.ts`; d1-schema + 1), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
+Root `npm install`, `npm run typecheck`, `npm test` (api + 8: five in `sync-budget.test.ts`, one in `sync.test.ts`, two in `links.test.ts`; d1-schema + 2), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
 
 ### Not in this PR
 
 - Buying more for the day (D5) and the app's sheet (D8).
-- Deleting old `sync_days` rows (D4).
+- Deleting old `sync_days` and `sync_extras` rows (D4).
 - Media uploads: they keep the 3 GB cap and are not counted here.
 - A change counted whose room append then fails is counted anyway; its retry counts again (at most 1 MiB each).
 
@@ -730,11 +921,11 @@ Root `npm install`, `npm run typecheck`, `npm test` (api + 7: five in `sync-budg
 
 ## D4 · API: the hourly cleanup deletes expired links and old day counts
 
-Branch `feat/d4-cleanup-links`. From `main` at `a999643`, **after D3 is merged** (it needs `sync_days` and `utcDay`). No migration. Files, and no others:
+Branch `feat/d4-cleanup-links`. From `main` at `3c90a85`, **after D3 is merged** (it needs `sync_days`, `sync_extras` and `utcDay`). No migration. Files, and no others:
 
 - `apps/api/src/cleanup.ts`, `apps/api/test/cleanup.test.ts`
 
-**Why.** A shared link that expires keeps its locked data in R2 (`links/{id}/data`) for ever; only a revoke deletes it (open question 55). The viewer refuses an expired link already, so the object is dead weight. The cleanup now deletes the object and the row of every link whose `expires_at` has passed. The viewer and the app answer a link that is gone exactly as they answer an expired one: the viewer shows "This link doesn't work anymore" for any 404, and the app's turn-off treats a 404 as already off (`platform/links.ts`, `revokeLink`). The cleanup still never lists `links/`: it deletes the keys of the rows it found. It also deletes D3's daily counts older than yesterday.
+**Why.** A shared link that expires keeps its locked data in R2 (`links/{id}/data`) for ever; only a revoke deletes it (open question 55). The viewer refuses an expired link already, so the object is dead weight. The cleanup now deletes the object and the row of every link whose `expires_at` has passed. The viewer and the app answer a link that is gone exactly as they answer an expired one: the viewer shows "This link doesn't work anymore" for any 404, and the app's turn-off treats a 404 as already off (`platform/links.ts`, `revokeLink`). The cleanup still never lists `links/`: it deletes the keys of the rows it found. It also deletes D3's daily counts and D5's extras older than yesterday.
 
 ### 1. The cleanup
 
@@ -794,6 +985,7 @@ async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number>
   waiting_devices: number;
   expired_links: number;
   sync_days: number;
+  sync_extras: number;
 }> {
 ```
 
@@ -801,8 +993,10 @@ async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number>
 
 ```ts
   const expiredLinks = await deleteExpiredLinks(env, now);
-  // Daily sync counts (open question 55) are needed for today only; yesterday's is kept for a request that crossed 00:00 UTC.
+  // Daily sync counts and extras (open question 55) are needed for today only; yesterday's are kept for a request that
+  // crossed 00:00 UTC.
   const syncDays = await env.DB.prepare("DELETE FROM sync_days WHERE day < ?").bind(utcDay(now) - 1).run();
+  const syncExtras = await env.DB.prepare("DELETE FROM sync_extras WHERE day < ?").bind(utcDay(now) - 1).run();
 ```
 
 - In the returned object, after `waiting_devices: waitingDevices.meta.changes,`, add exactly:
@@ -810,6 +1004,7 @@ async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number>
 ```ts
     expired_links: expiredLinks,
     sync_days: syncDays.meta.changes,
+    sync_extras: syncExtras.meta.changes,
 ```
 
 ### 2. Tests
@@ -819,7 +1014,7 @@ async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number>
 - In the test `"request_nonces 1 ms past expiry are deleted, one expiring at now kept; the counts cover each kind"`, replace the `expect(counts).toEqual({ … });` line with, exactly:
 
 ```ts
-    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1, pending_blobs: 0, waiting_devices: 0, expired_links: 0, sync_days: 0 });
+    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1, pending_blobs: 0, waiting_devices: 0, expired_links: 0, sync_days: 0, sync_extras: 0 });
 ```
 
 - In `describe("cleanup")`, after the last test, add exactly:
@@ -863,16 +1058,20 @@ async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number>
     expect(await db.prepare("SELECT COUNT(*) AS n FROM links").first<{ n: number }>()).toEqual({ n: 0 });
   });
 
-  test("sync_days rows older than yesterday (UTC) are deleted; yesterday's and today's are kept", async () => {
+  test("sync_days and sync_extras rows older than yesterday (UTC) are deleted; yesterday's and today's are kept", async () => {
     const db = createTestDb();
     await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'u1')").run();
     const today = Math.floor(NOW / DAY);
     for (const day of [today - 2, today - 1, today]) {
       await db.prepare("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u1', ?, 1)").bind(day).run();
+      await db.prepare("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', ?, ?, 1)").bind(`key-${day}`, day).run();
     }
-    expect((await cleanup({ DB: db, BUCKET: fakeBucket([]).bucket }, NOW)).sync_days).toBe(1);
+    const counts = await cleanup({ DB: db, BUCKET: fakeBucket([]).bucket }, NOW);
+    expect([counts.sync_days, counts.sync_extras]).toEqual([1, 1]);
     const rows = await db.prepare("SELECT day FROM sync_days ORDER BY day").all<{ day: number }>();
     expect(rows.results).toEqual([{ day: today - 1 }, { day: today }]);
+    const extras = await db.prepare("SELECT day FROM sync_extras ORDER BY day").all<{ day: number }>();
+    expect(extras.results).toEqual([{ day: today - 1 }, { day: today }]);
   });
 ```
 
@@ -889,13 +1088,13 @@ Root `npm install`, `npm run typecheck`, `npm test` (api + 3, one test line chan
 
 ## D5 · API: buy more sync for today with credits
 
-Branch `feat/d5-sync-extra`. From `main` at `a999643`, **after D3 is merged** (D3 creates `sync_days` and `utcDay`, and both cards add to the end of `packages/contracts/src/sync.ts`: this card's block goes after D3's). No migration. Files, and no others:
+Branch `feat/d5-sync-extra`. From `main` at `3c90a85`, **after D3 is merged** (D3 creates `sync_extras` and `utcDay`, and both cards add to the end of `packages/contracts/src/sync.ts`: this card's block goes after D3's). No migration. Files, and no others:
 
 - `packages/contracts/src/sync.ts`
 - `apps/api/src/sync/extra.ts` (new), `apps/api/src/app.ts`, `apps/api/test/sync-extra.test.ts` (new)
 - `packages/api-client/src/client.ts`, `packages/api-client/test/groups-sync.test.ts`
 
-**Why.** The owner wants people to be able to buy more than the daily budget (open question 55), with the credit wallet they already have rather than a new App Store product. `POST /v1/sync/extra` spends `SYNC_EXTRA_CREDITS` (100, to be confirmed: open question 57) for `SYNC_EXTRA_BYTES` (1 GB) more for the rest of the current UTC day. It uses the wallet's existing spend path, the one every instant task uses: a hold, the work, a settle at the full price. Its command ids come from the user id and the Idempotency-Key and are never random, so a retry never pays twice. The route is signed, because it spends credits (`docs/security.md` section 15), and `idempotent()`.
+**Why.** The owner wants people to be able to buy more than the daily budget (open question 55), with the credit wallet they already have rather than a new App Store product. `POST /v1/sync/extra` spends `SYNC_EXTRA_CREDITS` (100, to be confirmed: open question 57) for `SYNC_EXTRA_BYTES` (1 GB) more for the rest of the current UTC day. It uses the wallet's existing spend path, the one every instant task uses: a hold, the work, a settle at the full price. Its command ids come from the user id and the Idempotency-Key and are never random, so a retry never pays twice. The gigabyte is one `sync_extras` row whose primary key is (user, Idempotency-Key), so a retry never adds it twice either. The route is signed, because it spends credits (`docs/security.md` section 15), and `idempotent()`.
 
 ### 1. The contract
 
@@ -932,7 +1131,9 @@ const HOLD_MS = 60_000;
 
 // POST /v1/sync/extra (open question 55): more sync for the rest of today (UTC), paid in credits. The wallet runs it
 // like a task: hold the price, add the bytes, settle. If the bytes cannot be added, the hold is released and nothing is
-// charged. Signed (it spends credits) and idempotent; the wallet ids come from the user id and the Idempotency-Key.
+// charged. Signed (it spends credits) and idempotent; the wallet ids come from the user id and the Idempotency-Key, and
+// the bytes are one sync_extras row under that key, so a request that runs again (a settle that failed, a lost reply
+// while the hold is still open) never adds them twice.
 export function syncExtraRoute(deps: { now: () => number }) {
   return new Hono<AppEnv>().post("/v1/sync/extra", requireDeviceSignature(deps), idempotent(deps), async (c) => {
     const user = c.get("user");
@@ -953,31 +1154,33 @@ export function syncExtraRoute(deps: { now: () => number }) {
     });
     if (!held.ok) {
       if ("shortfall" in held) throw new InsufficientCredits(held.shortfall);
-      if (held.reason === "hold_closed") throw new ApiFailure("conflict", "request already finished");
-      if (held.reason === "hold_in_progress") throw new ApiFailure("conflict", "request in progress", 1);
-      throw new ApiFailure("internal", "something went wrong");
+      // This request ran before and added its bytes, but its settle failed while the hold stayed open: settle it now.
+      const added = await c.env.DB.prepare("SELECT 1 AS found FROM sync_extras WHERE user_id = ? AND key = ?").bind(user.id, key).first<{ found: number }>();
+      if (held.reason !== "hold_in_progress" || added === null) {
+        if (held.reason === "hold_closed") throw new ApiFailure("conflict", "request already finished");
+        if (held.reason === "hold_in_progress") throw new ApiFailure("conflict", "request in progress", 1);
+        throw new ApiFailure("internal", "something went wrong");
+      }
     }
-    let row: { extra_bytes: number } | null;
+    const day = utcDay(now);
+    let row: { bytes: number } | null;
     try {
-      row = await c.env.DB.prepare(
-        `INSERT INTO sync_days (user_id, day, bytes, extra_bytes) VALUES (?, ?, 0, ?)
-         ON CONFLICT (user_id, day) DO UPDATE SET extra_bytes = sync_days.extra_bytes + excluded.extra_bytes
-         RETURNING extra_bytes`,
-      )
-        .bind(user.id, utcDay(now), SYNC_EXTRA_BYTES)
-        .first<{ extra_bytes: number }>();
+      await c.env.DB.prepare("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, key) DO NOTHING")
+        .bind(user.id, key, day, SYNC_EXTRA_BYTES)
+        .run();
+      row = await c.env.DB.prepare("SELECT SUM(bytes) AS bytes FROM sync_extras WHERE user_id = ? AND day = ?").bind(user.id, day).first<{ bytes: number }>();
     } catch (error) {
       await wallet.apply({ type: "release", id: `sync_extra_release:${user.id}:${key}`, hold_id: holdId }).catch(() => undefined);
       throw error;
     }
     await wallet.apply({ type: "settle", id: `sync_extra_settle:${user.id}:${key}`, hold_id: holdId, actual: SYNC_EXTRA_CREDITS });
-    const reply: SyncExtraResponse = { credits: SYNC_EXTRA_CREDITS, extra_bytes: row?.extra_bytes ?? SYNC_EXTRA_BYTES };
+    const reply: SyncExtraResponse = { credits: SYNC_EXTRA_CREDITS, extra_bytes: row?.bytes ?? SYNC_EXTRA_BYTES };
     return c.json(reply);
   });
 }
 ```
 
-What each wallet answer means: a shortfall is 402 with the shortfall (the app's Out of credits path). `hold_in_progress` (the same request still running) is 409 "request in progress" with `retry_after` 1, which the API client waits for and retries. `hold_closed` (the hold was settled or released already, and the stored reply is gone) is 409 "request already finished". If the D1 write fails, the hold is released and nothing is charged. If the settle itself fails after the bytes were added, the hold's alarm releases it a minute later: the person gets that gigabyte free. That needs a Durable Object failure in the middle of one request, so it is accepted rather than made into a two-phase write.
+What each wallet answer means: a shortfall is 402 with the shortfall (the app's Out of credits path). `hold_in_progress` means the same request ran before and its hold is still open. If that run already wrote its `sync_extras` row, its settle failed (a Durable Object error after the D1 write), so this run settles it: one gigabyte, charged once. Otherwise the first run is still going, and the reply is 409 "request in progress" with `retry_after` 1, which the API client waits for and retries. `hold_closed` (the hold was settled or released already, and the stored reply is gone) is 409 "request already finished". If the D1 write fails, the hold is released and nothing is charged. If a failed settle is never retried, the hold's alarm releases it a minute later and that gigabyte was free; that needs a Durable Object failure and an app that gives up, so it is accepted.
 
 `apps/api/src/app.ts`:
 
@@ -1016,8 +1219,9 @@ const DAY = Math.floor(NOW / 86_400_000);
 const PATH = "/v1/sync/extra";
 const U1: SessionUser = { id: "u1", clerk_id: "clerk_u1", plan: "free", billing_account_id: "ba_u1", zero_retention: false };
 
-// u1 with an approved phone and a wallet holding `purchased` credits; every wallet command is recorded.
-async function world(purchased: number) {
+// u1 with an approved phone and a wallet holding `purchased` credits; every wallet command is recorded. failSettles:
+// how many settles throw before they reach the wallet (a Durable Object call that fails).
+async function world(purchased: number, failSettles = 0) {
   const db = createTestDb();
   await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'ba_u1')").run();
   const phone: TestDevice = await makeTestDevice("dev_phone");
@@ -1025,6 +1229,7 @@ async function world(purchased: number) {
   const store = createWalletStore(createTestStore());
   if (purchased > 0) store.apply({ type: "grant", id: "seed", bucket: "purchased", credits: purchased, ref: "test" }, NOW);
   const commands: Command[] = [];
+  let settlesToFail = failSettles;
   const env = {
     DB: db,
     WALLET: {
@@ -1032,6 +1237,10 @@ async function world(purchased: number) {
       get: (_name: string) => ({
         apply: async (command: Command) => {
           commands.push(command);
+          if (command.type === "settle" && settlesToFail > 0) {
+            settlesToFail -= 1;
+            throw new Error("wallet unavailable");
+          }
           return store.apply(command, NOW);
         },
       }),
@@ -1070,8 +1279,17 @@ describe("POST /v1/sync/extra", () => {
     const second = await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-bbbbbbbbbb");
     expect(SyncExtraResponseSchema.parse(await second.json()).extra_bytes).toBe(2 * SYNC_EXTRA_BYTES);
     expect(w.store.read().purchased).toBe(50);
-    const row = await w.db.prepare("SELECT extra_bytes FROM sync_days WHERE user_id = 'u1' AND day = ?").bind(DAY).first<{ extra_bytes: number }>();
-    expect(row?.extra_bytes).toBe(2 * SYNC_EXTRA_BYTES);
+    const row = await w.db.prepare("SELECT SUM(bytes) AS bytes FROM sync_extras WHERE user_id = 'u1' AND day = ?").bind(DAY).first<{ bytes: number }>();
+    expect(row?.bytes).toBe(2 * SYNC_EXTRA_BYTES);
+  });
+
+  test("a settle that fails, then the same request again while its hold is open: 1 GB added once, 100 credits charged once", async () => {
+    const w = await world(250, 1);
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    const retry = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(retry.status).toBe(200);
+    expect(SyncExtraResponseSchema.parse(await retry.json()).extra_bytes).toBe(SYNC_EXTRA_BYTES);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
   });
 
   test("not enough credits: 402 with the shortfall, nothing added", async () => {
@@ -1145,7 +1363,7 @@ describe("POST /v1/sync/extra", () => {
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (api + 5, api-client + 1), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
+Root `npm install`, `npm run typecheck`, `npm test` (api + 6, api-client + 1), `npm run bundle -w @waypoint/api`. Paste the last lines of each.
 
 ### Not in this PR
 
@@ -1157,20 +1375,24 @@ Root `npm install`, `npm run typecheck`, `npm test` (api + 5, api-client + 1), `
 
 ## D6 · App: one notes database per person
 
-Branch `feat/d6-notes-per-person`. From `main` at `a999643`. No dependency, no new package (`expo-secure-store`, `expo-file-system` and `expo-sqlite` are in the app). Files, and no others:
+Branch `feat/d6-notes-per-person`. From `main` at `3c90a85`. No dependency, no new package (`expo-secure-store`, `expo-file-system` and `expo-sqlite` are in the app). Files, and no others:
 
 - `apps/mobile/src/core/db/users.ts` (new), `apps/mobile/test/user-db.test.ts` (new)
 - `apps/mobile/src/platform/db.ts`
 - `apps/mobile/src/platform/auth.tsx`
 - `apps/mobile/src/platform/sync.ts`
+- `apps/mobile/src/platform/device.ts`
+- `apps/mobile/src/platform/indexer.ts`
 
-**Why.** Open question 52, decided: each person who signs in on an iPhone or iPad gets their own notes database, opened after sign-in and closed on sign-out, and nothing is deleted. Read "Design: one notes database per person" at the top of this file first: it explains where the file lives, how the existing `waypoint.db` is taken over, why media files do not move, and what silent pushes do.
+**Why.** Open question 52, decided: each person who signs in on an iPhone or iPad gets their own notes database, opened after sign-in and closed on sign-out, and nothing is deleted. Read "Design: one notes database per person" at the top of this file first: it explains where the file lives, when the existing `waypoint.db` is taken over, why media files do not move, and what silent pushes and background work do.
 
-### 1. The file name
+### 1. The decisions, as pure functions
 
 `apps/mobile/src/core/db/users.ts` (new), exactly:
 
 ```ts
+import { userIdKey } from "../device/registration.ts";
+
 // One notes database per person on this iPhone (open question 52), named after their Clerk user id. Clerk ids are
 // "user_" and letters and digits; anything else is refused, so a name can never reach outside the database folder.
 export const LEGACY_DB_NAME = "waypoint.db";
@@ -1179,13 +1401,36 @@ export function userDbName(clerkUserId: string): string {
   if (!/^[A-Za-z0-9_]{1,64}$/.test(clerkUserId)) throw new Error("not a Clerk user id");
   return `waypoint-${clerkUserId}.db`;
 }
+
+// The Clerk ids a database's settings record as having signed in with it (the userIdKey rows device.ts writes).
+export function clerkIdsIn(settingKeys: readonly string[]): string[] {
+  const prefix = userIdKey("");
+  return settingKeys.filter((key) => key.startsWith(prefix) && key.length > prefix.length).map((key) => key.slice(prefix.length));
+}
+
+// Whether the one database the app kept before (waypoint.db) becomes this person's: when it records them, or records
+// nobody. Someone else's stays where it is until one of the people it records signs in.
+export function legacyIsTheirs(recorded: readonly string[], clerkUserId: string): boolean {
+  return recorded.length === 0 || recorded.includes(clerkUserId);
+}
+
+// What the sign-in gate does with the notes: open the signed-in person's, close them once Clerk says nobody is signed
+// in, and leave them as they are while Clerk is still loading (offline, the person signed in last is opened on use).
+export type NotesStep = { kind: "open"; user: string } | { kind: "close" } | { kind: "keep" };
+
+export function notesStep(input: { clerkLoaded: boolean; clerkSignedIn: boolean | undefined; clerkUserId: string | null | undefined }): NotesStep {
+  if (!input.clerkLoaded) return { kind: "keep" };
+  if (input.clerkSignedIn === true && typeof input.clerkUserId === "string" && input.clerkUserId !== "") return { kind: "open", user: input.clerkUserId };
+  if (input.clerkSignedIn === false) return { kind: "close" };
+  return { kind: "keep" };
+}
 ```
 
 `apps/mobile/test/user-db.test.ts` (new), exactly:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { LEGACY_DB_NAME, userDbName } from "../src/core/db/users.ts";
+import { clerkIdsIn, LEGACY_DB_NAME, legacyIsTheirs, notesStep, userDbName } from "../src/core/db/users.ts";
 
 describe("userDbName", () => {
   it("names a person's database after their Clerk user id", () => {
@@ -1200,6 +1445,33 @@ describe("userDbName", () => {
     for (const bad of ["", "../user_1", "user/1", "user.1", "a".repeat(65)]) {
       expect(() => userDbName(bad)).toThrow("not a Clerk user id");
     }
+  });
+});
+
+describe("taking over the old database", () => {
+  it("reads the Clerk ids from the server_user_id settings and nothing else", () => {
+    expect(clerkIdsIn(["server_user_id:user_a", "device_status:u1", "server_user_id:", "server_user_id:user_b"])).toEqual(["user_a", "user_b"]);
+  });
+
+  it("is theirs when it records them, or nobody; not when it records only someone else", () => {
+    expect(legacyIsTheirs(["user_a", "user_b"], "user_b")).toBe(true);
+    expect(legacyIsTheirs([], "user_b")).toBe(true);
+    expect(legacyIsTheirs(["user_a"], "user_b")).toBe(false);
+  });
+});
+
+describe("notesStep", () => {
+  it("opens the signed-in person's notes once Clerk has loaded", () => {
+    expect(notesStep({ clerkLoaded: true, clerkSignedIn: true, clerkUserId: "user_a" })).toEqual({ kind: "open", user: "user_a" });
+  });
+
+  it("closes them when Clerk says nobody is signed in", () => {
+    expect(notesStep({ clerkLoaded: true, clerkSignedIn: false, clerkUserId: null })).toEqual({ kind: "close" });
+  });
+
+  it("leaves them while Clerk is loading, or signed in without an id yet", () => {
+    expect(notesStep({ clerkLoaded: false, clerkSignedIn: undefined, clerkUserId: undefined })).toEqual({ kind: "keep" });
+    expect(notesStep({ clerkLoaded: true, clerkSignedIn: true, clerkUserId: null })).toEqual({ kind: "keep" });
   });
 });
 ```
@@ -1219,7 +1491,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
 import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
-import { LEGACY_DB_NAME, userDbName } from "../core/db/users.ts";
+import { LEGACY_DB_NAME, clerkIdsIn, legacyIsTheirs, userDbName } from "../core/db/users.ts";
+import { userIdKey } from "../core/device/registration.ts";
 
 function openDeviceDb(name: string): { db: SqlDb; close: () => void } {
   const db = openDatabaseSync(name);
@@ -1247,6 +1520,15 @@ const KEYCHAIN = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
 let open: { user: string; db: SqlDb; close: () => void } | null = null;
 // The Keychain value once read: a Clerk user id, null for nobody, undefined before the first read.
 let stored: string | null | undefined;
+// The Keychain delete of the last sign-out, awaited by the next one.
+let forgetting: Promise<void> = Promise.resolve();
+// Counts every open and close. Work that awaits between reading and writing notes compares it before writing, so it
+// never writes into the notes of someone who signed in meanwhile.
+let generation = 0;
+
+export function dbGeneration(): number {
+  return generation;
+}
 
 // The person whose notes this iPhone opens: the one signed in, or signed in last. null when nobody is.
 export function dbUser(): string | null {
@@ -1260,19 +1542,29 @@ export function dbUser(): string | null {
   return stored;
 }
 
-// Before this change the app kept one database, waypoint.db, for everyone. The first person to sign in afterwards takes
-// it over: it is renamed to their name, never copied, after its write-ahead log is folded in. expo-sqlite keeps its
-// files in Documents/SQLite on iOS.
-function adoptLegacyDb(name: string): void {
+// Before this change the app kept one database, waypoint.db, for everyone. A person who signs in takes it over when it
+// is theirs or nobody's (legacyIsTheirs): it is renamed to their name, never copied, after its write-ahead log is folded
+// in. Someone else's is left untouched. If it cannot be read or renamed, this person starts with a new file and it stays
+// for its owner (nothing is logged: the app has no log). expo-sqlite keeps its files in Documents/SQLite on iOS.
+function adoptLegacyDb(clerkUserId: string, name: string): void {
   const legacy = new File(Paths.document, "SQLite", LEGACY_DB_NAME);
   if (!legacy.exists || new File(Paths.document, "SQLite", name).exists) return;
-  const old = openDatabaseSync(LEGACY_DB_NAME);
-  old.execSync("PRAGMA wal_checkpoint(TRUNCATE)");
-  old.closeSync();
-  legacy.rename(name);
-  for (const suffix of ["-wal", "-shm"]) {
-    const leftover = new File(Paths.document, "SQLite", `${LEGACY_DB_NAME}${suffix}`);
-    if (leftover.exists) leftover.delete();
+  try {
+    const old = openDatabaseSync(LEGACY_DB_NAME);
+    try {
+      const keys = old.getAllSync<{ key: string }>("SELECT key FROM settings WHERE key LIKE ?", [`${userIdKey("")}%`]).map((row) => row.key);
+      if (!legacyIsTheirs(clerkIdsIn(keys), clerkUserId)) return;
+      old.execSync("PRAGMA wal_checkpoint(TRUNCATE)");
+    } finally {
+      old.closeSync();
+    }
+    legacy.rename(name);
+    for (const suffix of ["-wal", "-shm"]) {
+      const leftover = new File(Paths.document, "SQLite", `${LEGACY_DB_NAME}${suffix}`);
+      if (leftover.exists) leftover.delete();
+    }
+  } catch {
+    // A new file for this person; the old one stays as it is.
   }
 }
 
@@ -1283,11 +1575,12 @@ export function openUserDb(clerkUserId: string): SqlDb {
   open?.close();
   open = null;
   const name = userDbName(clerkUserId);
-  adoptLegacyDb(name);
+  adoptLegacyDb(clerkUserId, name);
   const { db, close } = openDeviceDb(name);
   migrate(db);
   ensureDefaultSpace(db, { now: Date.now, newId: randomUUID });
   open = { user: clerkUserId, db, close };
+  generation += 1;
   if (stored !== clerkUserId) {
     stored = clerkUserId;
     try {
@@ -1301,15 +1594,17 @@ export function openUserDb(clerkUserId: string): SqlDb {
 }
 
 // Signed out (or Clerk found the session gone): this person's notes are closed and nothing is deleted. They open again
-// when this person signs in; anyone else who signs in gets their own.
-export function closeUserDb(): void {
+// when this person signs in; anyone else who signs in gets their own. Resolves once the Keychain no longer names them.
+export async function closeUserDb(): Promise<void> {
   open?.close();
   open = null;
+  generation += 1;
+  version += 1;
   if (stored !== null) {
     stored = null;
-    SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN).catch(() => undefined);
+    forgetting = SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN).catch(() => undefined);
   }
-  version += 1;
+  await forgetting;
 }
 
 // The open person's notes, opened first for the person signed in last (a silent push with no screen). Throws when
@@ -1322,7 +1617,7 @@ export function getDb(): SqlDb {
 }
 ```
 
-  `version` is declared below these functions; they only run after the module has loaded, so that is fine. `openUserDb` is called during a render (section 3), so it never calls the `useQuery` listeners: it only bumps `version`, and every component that renders afterwards reads the newly opened notes.
+  `version` is declared below these functions; they only run after the module has loaded, so that is fine. `openUserDb` is called during a render (section 3), so it never calls the `useQuery` listeners: it only bumps `version`, and every component that renders afterwards reads the newly opened notes. `dbGeneration` is what work that awaits compares before it writes (section 5, and D8).
 
 - In `useQuery`, replace the first line of `getSnapshot`'s body, `if (cache.current === null || cache.current.version !== version || cache.current.key !== key) {`, with exactly:
 
@@ -1332,7 +1627,7 @@ export function getDb(): SqlDb {
     if (cache.current === null || cache.current.version !== version || cache.current.key !== key) {
 ```
 
-### 3. The gate decides whose notes are open
+### 3. The gate and sign-out
 
 `apps/mobile/src/platform/auth.tsx`:
 
@@ -1352,20 +1647,22 @@ const SIGNED_IN_BEFORE = "waypoint.signed_in_before";
 ```ts
 import { useSignInWithApple } from "@clerk/expo/apple";
 import { REQUIRE_SIGN_IN, decideGate, type Gate } from "../core/auth/gate.ts";
+import { notesStep } from "../core/db/users.ts";
 import { closeUserDb, dbUser, openUserDb } from "./db.ts";
 
 const publishableKey: string = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 ```
 
-- Replace the whole `useGate` function with, exactly:
+- Replace the whole `useGate` function with, exactly (the comment above it is new):
 
-```ts
+```tsx
 // Also decides whose notes are open (open question 52): the person Clerk says is signed in, opened here, before any
 // screen reads them. Before Clerk has loaded (offline), the person signed in last time ("signed in before"). When Clerk
 // says nobody is signed in, their notes are closed; nothing is deleted.
 export function useGate(): Gate {
   const { isLoaded, isSignedIn, userId } = useAuth();
-  if (isLoaded && isSignedIn === true && typeof userId === "string") openUserDb(userId);
+  const notes = notesStep({ clerkLoaded: isLoaded, clerkSignedIn: isSignedIn, clerkUserId: userId });
+  if (notes.kind === "open") openUserDb(notes.user);
   const signedInBefore = dbUser() !== null;
   const [waitedMs, setWaitedMs] = useState(0);
   const started = useRef(Date.now());
@@ -1376,27 +1673,29 @@ export function useGate(): Gate {
     const timer = setInterval(() => setWaitedMs(Date.now() - started.current), 500);
     return () => clearInterval(timer);
   }, [waiting]);
+  // A backstop for a session that ended without useSignOut (it expired, or was ended elsewhere).
   useEffect(() => {
-    if (isLoaded && isSignedIn === false) closeUserDb();
-  }, [isLoaded, isSignedIn]);
+    if (notes.kind === "close") void closeUserDb();
+  }, [notes.kind]);
   return gate;
 }
 ```
 
 - Replace the comment above `useSignOut` and the function with, exactly:
 
-```ts
-// Signing out never deletes notes (K1: "Signing out doesn't delete your notes."). The gate closes them once Clerk says
-// this person is signed out, and they open again when this person signs in.
+```tsx
+// Signing out never deletes notes (K1: "Signing out doesn't delete your notes."). They are closed right after Clerk's
+// sign-out, and the Keychain stops naming this person before this resolves; they open again when this person signs in.
 export function useSignOut(): () => Promise<void> {
   const { signOut } = useAuth();
   return async () => {
     await signOut();
+    await closeUserDb();
   };
 }
 ```
 
-The old Keychain item `waypoint.signed_in_before` is no longer read or written; it is harmless and is left alone. After the update, the first launch reads no `waypoint.db_user` yet, so if Clerk cannot load (offline) the gate waits up to 15 s and then shows sign-in, as on a new phone; once Clerk loads, the person's notes open (and take over `waypoint.db`).
+The old Keychain item `waypoint.signed_in_before` is no longer read or written; it is harmless and is left alone. After the update, the first launch reads no `waypoint.db_user` yet, so if Clerk cannot load (offline) the gate waits up to 15 s and then shows sign-in, as on a new phone; once Clerk loads, the person's notes open (and take over `waypoint.db` if it is theirs).
 
 ### 4. A silent push with nobody signed in
 
@@ -1421,11 +1720,65 @@ TaskManager.defineTask(SYNC_TASK, async ({ data, error }) => {
 });
 ```
 
-`platform/device.ts` is not changed. Its sign-out branch deletes `LAST_USER_KEY` from the person's own database; it runs only while the tabs are mounted, which is before the gate closes the database.
+### 5. No writes into the wrong person's notes
+
+`apps/mobile/src/platform/device.ts`:
+
+- Replace the line `import { getDb, writeDb } from "./db.ts";` with exactly:
+
+```ts
+import { dbUser, getDb, writeDb } from "./db.ts";
+```
+
+- In `useDeviceRegistration`, replace the line `if (userId !== null || (isLoaded && isSignedIn === false)) writeDb((db) => deleteSetting(db, LAST_USER_KEY));` with exactly:
+
+```ts
+      // Only while that person's notes are still open (open question 52: sign-out closes them).
+      if (dbUser() !== null && (userId !== null || (isLoaded && isSignedIn === false))) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
+```
+
+`apps/mobile/src/platform/indexer.ts`:
+
+- Replace the line `import { getDb, writeDb } from "./db.ts";` with exactly:
+
+```ts
+import { dbGeneration, getDb, writeDb } from "./db.ts";
+```
+
+- Replace the line `let staleChecked = false;` with exactly:
+
+```ts
+// The notes (dbGeneration) whose stale vectors were marked: once per launch and per person who signs in.
+let staleChecked = -1;
+```
+
+- In `tick`, replace these lines:
+
+```ts
+    const db = getDb();
+    if (!staleChecked) {
+      writeDb((d) => markStale(d, model.modelVersion));
+      staleChecked = true;
+    }
+    for (const sessionId of sessionsToIndex(db, SESSIONS_PER_TICK)) {
+```
+
+  with exactly:
+
+```ts
+    const db = getDb();
+    const generation = dbGeneration();
+    if (staleChecked !== generation) {
+      writeDb((d) => markStale(d, model.modelVersion));
+      staleChecked = generation;
+    }
+    for (const sessionId of sessionsToIndex(db, SESSIONS_PER_TICK)) {
+      if (dbGeneration() !== generation) return; // signed out or another person meanwhile: stop
+```
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (mobile + 3), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each.
+Root `npm install`, `npm run typecheck`, `npm test` (mobile + 8), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each.
 
 ### Device check
 
@@ -1434,9 +1787,10 @@ On the iPhone (or the simulator), in this order:
 1. Install a build of `main` before this card, sign in as A, make a recording and a page set. Install this card's build over it (do not delete the app). A is still signed in and sees both, and `Documents/SQLite` (Xcode › Devices › the app's container) holds `waypoint-<A's Clerk id>.db` and no `waypoint.db`.
 2. Settings › Sign out. Sign in as B (another email). B sees an empty Home (the default space only), no recordings, no search results for A's words, and Settings › Storage counts only B's (after D7).
 3. B records something. Sign out, sign in as A: A's notes are all there and B's recording is not.
-4. With A signed in and a synced space, sign out, then from another device change a note in that space: no notes open on this iPhone (the silent push does nothing). Sign in as A: the change arrives.
-5. With B signed in, change a note in A's synced space from another device: nothing appears for B. Sign in as A: it arrives.
-6. Turn on airplane mode, force-quit, open the app: A (signed in last) gets in after the offline wait and sees their notes.
+4. Repeat step 1 on a fresh install, but after installing this card's build sign out first and sign in as B: B gets a new, empty file and `waypoint.db` is still there. Sign out, sign in as A: A's notes are back and `waypoint.db` is gone.
+5. With A signed in and a synced space, sign out, then from another device change a note in that space: no notes open on this iPhone (the silent push does nothing). Sign in as A: the change arrives.
+6. With B signed in, change a note in A's synced space from another device: nothing appears for B. Sign in as A: it arrives.
+7. Turn on airplane mode, force-quit, open the app: A (signed in last) gets in after the offline wait and sees their notes.
 
 ### Not in this PR
 
@@ -1444,12 +1798,13 @@ On the iPhone (or the simulator), in this order:
 - Moving media into a folder per person (see the design: not needed).
 - Removing a signed-out person's push token, or hiding their alert pushes from the next person.
 - A "switch person" menu, or a kid or parent mode.
+- A generation check in the other loops (transcription, page reading, overviews, jobs): their writes are rows of one session, which fail their foreign key in another person's file.
 
 ---
 
 ## D7 · App: the storage screen counts only your recordings
 
-Branch `feat/d7-storage-per-person`. From `main` at `a999643`. No dependency. Files, and no others:
+Branch `feat/d7-storage-per-person`. From `main` at `3c90a85`. No dependency. Files, and no others:
 
 - `apps/mobile/src/platform/files.ts`
 - `apps/mobile/src/features/settings/StorageScreen.tsx`
@@ -1496,7 +1851,7 @@ Make a recording and a page set, open Settings › Storage & search: "Recordings
 
 ## D8 · App: the sync limit sheet
 
-Branch `feat/d8-sync-limit-sheet`. From `main` at `a999643`, **after D5 and D6 are merged** (D5 adds `api.buySyncExtra` and the contract constants; D6 also edits `apps/mobile/src/platform/sync.ts`, other lines). No new package. Files, and no others:
+Branch `feat/d8-sync-limit-sheet`. From `main` at `3c90a85`, **after D5 and D6 are merged** (D5 adds `api.buySyncExtra` and the contract constants; D6 adds `dbGeneration` and also edits `apps/mobile/src/platform/sync.ts`, other lines). No new package. Files, and no others:
 
 - `apps/mobile/src/core/sync/limit.ts` (new), `apps/mobile/test/sync-limit.test.ts` (new)
 - `apps/mobile/src/platform/sync.ts`
@@ -1511,7 +1866,8 @@ What the app does:
 - A send that gets the limit stores the time sync may start again (the reply's `retry_after`: the next 00:00 UTC) in the setting `sync_limit_until`. Until then `runOnce` does not send; it still pulls, so other people's changes keep arriving. Changes made meanwhile wait in the outbox, as they do offline.
 - The space screen of a synced space shows "Today's sync is used up. Changes wait on this iPhone." and an "Add more for today" button that opens the sheet. The sheet does not open by itself from a background send: it could appear over a recording.
 - Making a shared link that gets the limit opens the sheet at once.
-- The sheet's "Add 1 GB · 100 credits" calls `POST /v1/sync/extra` with the price it showed. On success it clears the pause, remembers what was bought today (so the title can say "You've synced 1.2 GB today" next time) and sends what waited. Out of credits shows the shortfall and "Get credits" (the Plans screen); the same Idempotency-Key is kept for the retry, so one purchase is never paid twice. "Wait" closes the sheet.
+- The sheet's "Add 1 GB · 100 credits" calls `POST /v1/sync/extra` with the price it showed. On success it clears the pause and sends what waited. Out of credits shows the shortfall and "Get credits" (the Plans screen); the same Idempotency-Key is kept for the retry, so one purchase is never paid twice. "Wait" closes the sheet. The title always says "You've synced 200 MB today".
+- Each of these reads `dbGeneration()` (D6) before its request and writes the setting only if no one signed out or in meanwhile.
 
 ### 1. The rules and the words
 
@@ -1521,13 +1877,10 @@ What the app does:
 import { SYNC_DAILY_BYTES, SYNC_DAILY_LIMIT_MESSAGE, SYNC_EXTRA_BYTES, SYNC_EXTRA_CREDITS } from "@waypoint/contracts";
 import { bytesLabel } from "../settings/format.ts";
 
-const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
-// Settings for the daily sync budget (open question 55). SYNC_LIMIT_KEY: while today's budget is used up, the time
-// (Unix ms) sending may start again. SYNC_EXTRA_KEY: "<UTC day>:<bytes>", the extra bought for that day.
+// While today's sync budget is used up (open question 55): the time (Unix ms) sending may start again.
 export const SYNC_LIMIT_KEY = "sync_limit_until";
-export const SYNC_EXTRA_KEY = "sync_extra";
 
 // The server's 429 when today's budget is used up (POST /v1/groups/:id/changes, POST /v1/links).
 export function isSyncLimit(status: number, message: string): boolean {
@@ -1544,24 +1897,11 @@ export function sendingPaused(stored: string | null, now: number): boolean {
   return stored !== null && Number(stored) > now;
 }
 
-// The SYNC_EXTRA_KEY value for what the server said is bought today.
-export function extraValue(now: number, bytes: number): string {
-  return `${Math.floor(now / DAY_MS)}:${bytes}`;
-}
-
-// The extra bought for today, from SYNC_EXTRA_KEY: 0 when nothing is stored or it was for another day.
-export function extraToday(stored: string | null, now: number): number {
-  const [day, bytes] = (stored ?? "").split(":");
-  if (Number(day) !== Math.floor(now / DAY_MS)) return 0;
-  const n = Number(bytes);
-  return Number.isSafeInteger(n) && n > 0 ? n : 0;
-}
-
 // The sheet's words. `againAt` is when sync starts again, as the screen shows a time.
-export function syncLimitCopy(extraBytes: number, againAt: string): { title: string; body: string; buy: string } {
+export function syncLimitCopy(againAt: string): { title: string; body: string; buy: string } {
   const extra = `${SYNC_EXTRA_BYTES / 1_000_000_000} GB`;
   return {
-    title: `You've synced ${bytesLabel(SYNC_DAILY_BYTES + extraBytes)} today`,
+    title: `You've synced ${bytesLabel(SYNC_DAILY_BYTES)} today`,
     body: `Add ${extra} more for today for ${SYNC_EXTRA_CREDITS} credits, or wait until ${againAt}, when sync starts again. Your notes stay on this iPhone meanwhile.`,
     buy: `Add ${extra} · ${SYNC_EXTRA_CREDITS} credits`,
   };
@@ -1572,7 +1912,7 @@ export function syncLimitCopy(extraBytes: number, againAt: string): { title: str
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { extraToday, extraValue, isSyncLimit, limitUntil, sendingPaused, syncLimitCopy } from "../src/core/sync/limit.ts";
+import { isSyncLimit, limitUntil, sendingPaused, syncLimitCopy } from "../src/core/sync/limit.ts";
 
 const DAY = 86_400_000;
 const NOW = 20_400 * DAY + 18 * 3_600_000;
@@ -1595,28 +1935,19 @@ describe("the daily sync limit", () => {
     expect(sendingPaused(null, NOW)).toBe(false);
   });
 
-  it("reads back today's extra, and 0 on another UTC day or for nothing stored", () => {
-    const stored = extraValue(NOW, 1_000_000_000);
-    expect(extraToday(stored, NOW)).toBe(1_000_000_000);
-    expect(extraToday(stored, 20_401 * DAY)).toBe(0);
-    expect(extraToday(null, NOW)).toBe(0);
-    expect(extraToday("junk", NOW)).toBe(0);
-  });
-
   it("says what was synced today and what more costs", () => {
-    expect(syncLimitCopy(0, "7:00 PM")).toEqual({
+    expect(syncLimitCopy("7:00 PM")).toEqual({
       title: "You've synced 200 MB today",
       body: "Add 1 GB more for today for 100 credits, or wait until 7:00 PM, when sync starts again. Your notes stay on this iPhone meanwhile.",
       buy: "Add 1 GB · 100 credits",
     });
-    expect(syncLimitCopy(1_000_000_000, "7:00 PM").title).toBe("You've synced 1.2 GB today");
   });
 });
 ```
 
 ### 2. Pausing, and buying more
 
-`apps/mobile/src/platform/sync.ts`:
+`apps/mobile/src/platform/sync.ts` (as D6 left it):
 
 - Replace these two lines:
 
@@ -1636,12 +1967,13 @@ import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 - After the line `} from "../core/sync/rules.ts";`, add exactly:
 
 ```ts
-import { SYNC_EXTRA_KEY, SYNC_LIMIT_KEY, extraValue, isSyncLimit, limitUntil, sendingPaused } from "../core/sync/limit.ts";
+import { SYNC_LIMIT_KEY, isSyncLimit, limitUntil, sendingPaused } from "../core/sync/limit.ts";
 ```
 
-- Replace these two lines:
+- Replace these three lines (the first is D6's):
 
 ```ts
+import { dbUser, getDb, writeDb } from "./db.ts";
 import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 ```
@@ -1649,9 +1981,16 @@ import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
   with exactly:
 
 ```ts
+import { dbGeneration, dbUser, getDb, writeDb } from "./db.ts";
 import { currentUserId, requireApprovedDevice, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 import { toFailure } from "./tasks.ts";
+```
+
+- In `runOnce`, after the line `if (pull) pullQueued.delete(groupId);`, add exactly:
+
+```ts
+  const generation = dbGeneration();
 ```
 
 - In `runOnce`, replace the line `await sendPending(user, group, keys.deviceId);` with exactly:
@@ -1661,14 +2000,21 @@ import { toFailure } from "./tasks.ts";
     if (!sendingPaused(getSetting(getDb(), SYNC_LIMIT_KEY), Date.now())) await sendPending(user, group, keys.deviceId);
 ```
 
+- In `runOnce`, replace both lines `await afterFailure(groupId, error);` with exactly:
+
+```ts
+    await afterFailure(groupId, error, generation);
+```
+
 - Before the comment `// The group's key moved on (a member was removed): take the new key now; the outbox waits for it.` (above `afterFailure`), add exactly:
 
 ```ts
 // True when `error` says today's sync is used up (open question 55). Sending then waits until the time the server gave,
-// and the space screen offers more (the sync-limit sheet). The share screen calls this for a link, too.
-export function syncLimitHit(error: unknown): boolean {
+// and the space screen offers more (the sync-limit sheet). The share screen calls this for a link, too. `generation` is
+// dbGeneration() from before the request: if someone else's notes are open by now, nothing is written.
+export function syncLimitHit(error: unknown, generation: number): boolean {
   if (!(error instanceof ApiCallError && isSyncLimit(error.status, error.message))) return false;
-  writeDb((db) => setSetting(db, SYNC_LIMIT_KEY, String(limitUntil(Date.now(), error.retryAfter))));
+  if (dbGeneration() === generation) writeDb((db) => setSetting(db, SYNC_LIMIT_KEY, String(limitUntil(Date.now(), error.retryAfter))));
   return true;
 }
 
@@ -1681,13 +2027,12 @@ let extraKey: string | null = null;
 export async function buyMoreSync(): Promise<CloudFailure | null> {
   if (!requireApprovedDevice()) return { kind: "device" };
   extraKey ??= randomUUID();
+  const generation = dbGeneration();
   try {
-    const reply = await api.buySyncExtra(SYNC_EXTRA_CREDITS, extraKey);
+    await api.buySyncExtra(SYNC_EXTRA_CREDITS, extraKey);
     extraKey = null;
-    writeDb((db) => {
-      deleteSetting(db, SYNC_LIMIT_KEY);
-      setSetting(db, SYNC_EXTRA_KEY, extraValue(Date.now(), reply.extra_bytes));
-    });
+    if (dbGeneration() !== generation) return null; // signed out meanwhile: the next sign-in finds the limit again
+    writeDb((db) => deleteSetting(db, SYNC_LIMIT_KEY));
     for (const groupId of syncedGroupIds(getDb())) void syncNow(groupId);
     return null;
   } catch (error) {
@@ -1699,10 +2044,11 @@ export async function buyMoreSync(): Promise<CloudFailure | null> {
 
 ```
 
-- In `afterFailure`, add as its first line, exactly:
+- Replace the first line of `afterFailure`, `async function afterFailure(groupId: string, error: unknown): Promise<void> {`, with these two lines, exactly:
 
 ```ts
-  if (syncLimitHit(error)) return;
+async function afterFailure(groupId: string, error: unknown, generation: number): Promise<void> {
+  if (syncLimitHit(error, generation)) return;
 ```
 
 ### 3. The sheet
@@ -1726,17 +2072,16 @@ import { useState } from "react";
 import { router } from "expo-router";
 import { failureCopy, type CloudFailure } from "../../core/cloud/failure.ts";
 import { getSetting } from "../../core/db/settings.ts";
-import { SYNC_EXTRA_KEY, SYNC_LIMIT_KEY, extraToday, syncLimitCopy } from "../../core/sync/limit.ts";
-import { useMinuteNow, useQuery } from "../../platform/db.ts";
+import { SYNC_LIMIT_KEY, syncLimitCopy } from "../../core/sync/limit.ts";
+import { useQuery } from "../../platform/db.ts";
 import { buyMoreSync } from "../../platform/sync.ts";
 import { Body, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 
 // Today's sync is used up (open question 55): add more for today with credits, or wait until it starts again.
 export default function SyncLimitScreen() {
-  const now = useMinuteNow();
-  const stored = useQuery((db) => ({ until: getSetting(db, SYNC_LIMIT_KEY), extra: getSetting(db, SYNC_EXTRA_KEY) }));
-  const againAt = stored.until === null ? "tomorrow" : new Date(Number(stored.until)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  const copy = syncLimitCopy(extraToday(stored.extra, now), againAt);
+  const until = useQuery((db) => getSetting(db, SYNC_LIMIT_KEY));
+  const againAt = until === null ? "tomorrow" : new Date(Number(until)).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const copy = syncLimitCopy(againAt);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
 
@@ -1820,23 +2165,35 @@ import { Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { router, useLocalSearchParams } from "expo-router";
 ```
 
+- Replace the line `import { useQuery } from "../../platform/db.ts";` with exactly:
+
+```ts
+import { dbGeneration, useQuery } from "../../platform/db.ts";
+```
+
 - After the line `import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";`, add exactly:
 
 ```ts
 import { syncLimitHit } from "../../platform/sync.ts";
 ```
 
-- In the function that makes the link, replace the line `setError(linkFailureText(failure, "make"));` with exactly:
+- In the function that makes the link, after the line `setBusy(true);` (the one just above `try { setMade(await createLink(…`), add exactly:
+
+```ts
+    const generation = dbGeneration();
+```
+
+- In the same function, replace the line `setError(linkFailureText(failure, "make"));` with exactly:
 
 ```ts
       // Today's sync is used up (open question 55): the sheet offers more for today.
-      if (syncLimitHit(failure)) router.push("/sync-limit");
+      if (syncLimitHit(failure, generation)) router.push("/sync-limit");
       else setError(linkFailureText(failure, "make"));
 ```
 
 ### Checks
 
-Root `npm install`, `npm run typecheck`, `npm test` (mobile + 5), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each. `test/boundaries.test.ts` passes: `SyncLimitScreen` is in `features/capture` and `ShareSessionScreen` opens it by its route, not by an import.
+Root `npm install`, `npm run typecheck`, `npm test` (mobile + 4), `npm run export:ios -w @waypoint/mobile`. Paste the last lines of each. `test/boundaries.test.ts` passes: `SyncLimitScreen` is in `features/capture` and `ShareSessionScreen` opens it by its route, not by an import.
 
 ### Device check
 
@@ -1850,13 +2207,13 @@ Against a staging API with D3 and D5 deployed (set a test user's `sync_days.byte
 ### Not in this PR
 
 - Opening the sheet by itself when a background send hits the limit.
-- Showing how much of today's budget is used before it runs out (no read route; not asked for).
+- Showing how much of today's budget is used, or what was bought today (no read route; not asked for).
 
 ---
 
 ## D9 · App: play a recording from the session screen
 
-Branch `feat/d9-play-recording`. From `main` at `a999643`. No dependency, no new package (`expo-audio` is already in the app; `OverviewScreen` uses it). Files, and no others:
+Branch `feat/d9-play-recording`. From `main` at `3c90a85`. No dependency, no new package (`expo-audio` is already in the app; `OverviewScreen` uses it). Files, and no others:
 
 - `apps/mobile/src/core/capture/playback.ts` (new), `apps/mobile/test/playback.test.ts` (new)
 - `apps/mobile/src/features/capture/RecordingPlayer.tsx` (new)
@@ -1864,7 +2221,7 @@ Branch `feat/d9-play-recording`. From `main` at `a999643`. No dependency, no new
 
 **Why.** No screen plays back a session's own recording (open question 54). The owner's decision: a small player on the session screen with `expo-audio`, where tapping a transcript line jumps to it. A tap on a line's words already opens Explain (M15), so the line's time (the "4:12" on its left) is the tap target: it plays the recording from there. The time is shown in the accent colour when the recording can be played.
 
-A recording is stored as parts (`captures` of kind `audio`, one `.m4a` each, `t` = where the part starts on the session's clock, which is the clock of the transcript's `t_start`). The player plays the parts in order with `useAudioPlaylist`; a jump finds the part that holds the time (`partAt`) and seeks inside it. A part that came from another device and has not been downloaded yet (`file = ''`) is left out. Nothing plays while a recording is running, as on the overview screen. The player lives in `features/capture`, so `SessionScreen` does not import the overview feature, and `src/core` gets only a pure function.
+A recording is stored as parts (`captures` of kind `audio`, one `.m4a` each, `t` = where the part starts on the session's clock, which is the clock of the transcript's `t_start`). The player plays the parts in order with `useAudioPlaylist`; a jump finds the part that holds the time (`partAt`) and seeks inside it. A part that came from another device and has not been downloaded yet (`file = ''`) is left out. Nothing plays while a recording is running, as on the overview screen. The only audio setting the player changes is `playsInSilentMode` (so a recording is heard with the silent switch on), and only when nothing records; it does not ask to keep playing in the background. The time label has a `hitSlop` of 12 points, so it is easy to tap. The player lives in `features/capture`, so `SessionScreen` does not import the overview feature, and `src/core` gets only a pure function.
 
 ### 1. Where a time is
 
@@ -1957,7 +2314,9 @@ export function RecordingPlayer({ parts, seek }: { parts: PlayFile[]; seek: { ms
 
   async function play(from: number | null): Promise<void> {
     if (recording) return;
-    await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true });
+    // Heard with the silent switch on, as the overview player. Nothing else about the audio session changes, and it is
+    // set only when nothing records (the recorder keeps its own settings).
+    await setAudioModeAsync({ playsInSilentMode: true });
     const where = from === null ? null : partAt(parts, from);
     if (where !== null) {
       if (where.index !== status.currentIndex) playlist.skipTo(where.index);
@@ -2041,6 +2400,7 @@ import { RecordingPlayer } from "./RecordingPlayer.tsx";
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Play from ${formatOffset(segment.tStart)}`}
+              hitSlop={12}
               disabled={!playable}
               onPress={() => setSeek({ ms: segment.tStart })}
             >
@@ -2069,7 +2429,7 @@ Root `npm install`, `npm run typecheck`, `npm test` (mobile + 5), `npm run expor
 
 ## D10 · App: "from now" members drop changes to older notes
 
-Branch `fix/d10-history-from-now`. From `main` at `a999643`. No dependency. Files, and no others:
+Branch `fix/d10-history-from-now`. From `main` at `3c90a85`. No dependency. Files, and no others:
 
 - `apps/mobile/src/core/sync/changes.ts`, `apps/mobile/test/sync.test.ts`
 - `apps/mobile/src/features/share/InviteScreen.tsx`
@@ -2188,3 +2548,5 @@ Root `npm install`, `npm run typecheck`, `npm test` (mobile + 2), `npm run expor
 
 - Changing a member's history after they joined (the server has no route for it).
 - Clearing what already waits in `sync_pending` on a member's iPhone from before this fix: it is capped at 2,000 per group and is dropped when its session is deleted, as before.
+- A "from now" member's own note started before they joined and moved into the shared space later: it is on their iPhone already, so it stays and is shared from there, but other "from now" members drop it by its start time.
+- Clock skew: `started_at` is the creating iPhone's clock and `history_from` the inviter's (capped at the server's time). A note started within a few minutes of the invite may land on either side.
