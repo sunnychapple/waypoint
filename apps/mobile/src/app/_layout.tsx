@@ -22,6 +22,8 @@ function RootStack() {
         <Stack.Screen name="plans" />
         <Stack.Screen name="jobs" />
         <Stack.Screen name="job/[id]" />
+        <Stack.Screen name="made/new" />
+        <Stack.Screen name="practice/[id]" />
         <Stack.Screen name="research/new" />
         <Stack.Screen name="research/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
