@@ -103,11 +103,11 @@ export async function cleanup(
   )
     .bind(now, now - WAITING_DEVICE_KEEP_MS, now)
     .run();
-  const expiredLinks = await deleteExpiredLinks(env, now);
   // Daily sync counts and extras (open question 55) are needed for today only; yesterday's are kept for a request that
   // crossed 00:00 UTC.
   const syncDays = await env.DB.prepare("DELETE FROM sync_days WHERE day < ?").bind(utcDay(now) - 1).run();
   const syncExtras = await env.DB.prepare("DELETE FROM sync_extras WHERE day < ?").bind(utcDay(now) - 1).run();
+  const expiredLinks = await deleteExpiredLinks(env, now);
   return {
     results,
     tmp_audio: tmpAudio,

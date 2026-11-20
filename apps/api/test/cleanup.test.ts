@@ -241,4 +241,17 @@ describe("cleanup", () => {
     const extras = await db.prepare("SELECT day FROM sync_extras ORDER BY day").all<{ day: number }>();
     expect(extras.results).toEqual([{ day: today - 1 }, { day: today }]);
   });
+
+  test("when the R2 delete throws, the expired link's row survives so the next run retries it, and the day counts are still deleted", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'u1')").run();
+    await db.prepare("INSERT INTO groups (id, kind, name_locked, created_by) VALUES ('g1', 'shared', 'sealed', 'u1')").run();
+    await db.prepare("INSERT INTO links (id, group_id, blob_key, expires_at) VALUES ('l_old', 'g1', 'b', ?)").bind(NOW - DAY).run();
+    await db.prepare("INSERT INTO sync_days (user_id, day, bytes) VALUES ('u1', ?, 1)").bind(Math.floor(NOW / DAY) - 3).run();
+    const failing: CleanupBucket = { list: async () => ({ objects: [], truncated: false }), delete: async () => { throw new Error("r2 down"); } };
+    await expect(cleanup({ DB: db, BUCKET: failing }, NOW)).rejects.toThrow("r2 down");
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM links").first<{ n: number }>()).toEqual({ n: 1 });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM sync_days").first<{ n: number }>()).toEqual({ n: 0 });
+    expect((await cleanup({ DB: db, BUCKET: fakeBucket([]).bucket }, NOW)).expired_links).toBe(1);
+  });
 });
