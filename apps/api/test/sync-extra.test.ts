@@ -21,13 +21,27 @@ const U1: SessionUser = { id: "u1", clerk_id: "clerk_u1", plan: "free", billing_
 // how many settles throw before they reach the wallet (a Durable Object call that fails).
 // failSql: D1 statements containing this text throw. releaseBeforeSettle: how many settles find their hold already
 // released (its alarm ran), so the wallet answers not ok. clock.now is the time the route sees.
-async function world(purchased: number, failSettles = 0, options: { failSql?: string; releaseBeforeSettle?: number } = {}) {
+async function world(purchased: number, failSettles = 0, options: { failSql?: string; landThenFail?: string; releaseBeforeSettle?: number } = {}) {
   const realDb = createTestDb();
   const db = realDb;
   const flaky = new Proxy(realDb, {
     get: (target, prop) =>
       prop === "prepare"
         ? (sql: string) => {
+            // landThenFail: the statement runs and its effect stays, but the caller sees an error (a lost D1 reply).
+            if (options.landThenFail !== undefined && sql.includes(options.landThenFail)) {
+              const landed = async () => {
+                await target.prepare(sql).bind(...args).run();
+                throw new Error("d1 reply lost");
+              };
+              let args: unknown[] = [];
+              return {
+                bind: (...a: unknown[]) => {
+                  args = a;
+                  return { run: landed, first: landed, all: landed };
+                },
+              };
+            }
             if (options.failSql !== undefined && sql.includes(options.failSql)) {
               const fail = async () => {
                 throw new Error("d1 unavailable");
@@ -155,6 +169,38 @@ describe("POST /v1/sync/extra", () => {
     expect(await rows(w)).toBe(0);
     expect(w.store.read()).toMatchObject({ purchased: 250 });
     expect((await w.buy({ credits: SYNC_EXTRA_CREDITS }, "key-extra-fresh-00000")).status).toBe(500);
+  });
+
+  test("the INSERT lands but its reply is lost: the row is removed and the hold released, nothing charged", async () => {
+    const w = await world(250, 0, { landThenFail: "INSERT INTO sync_extras" });
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(await rows(w)).toBe(0);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold", "release"]);
+    expect(w.store.read()).toMatchObject({ purchased: 250, holds: [] });
+  });
+
+  test("the INSERT lands, its reply is lost and the DELETE fails: the hold is not released; the same key settles it once", async () => {
+    const w = await world(250, 0, { landThenFail: "INSERT INTO sync_extras", failSql: "DELETE FROM sync_extras" });
+    expect((await w.buy({ credits: SYNC_EXTRA_CREDITS })).status).toBe(500);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold"]);
+    expect(await rows(w)).toBe(1);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [{ id: "sync_extra:u1:key-extra-0123456789" }] });
+    const again = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(again.status).toBe(200);
+    expect(w.commands.map((c) => c.type)).toEqual(["hold", "hold", "settle"]);
+    expect(await rows(w)).toBe(1);
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
+  });
+
+  test("a hold settled earlier and no row left: 409 request already finished, no second charge", async () => {
+    const w = await world(250);
+    await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    await w.db.prepare("DELETE FROM idempotency").run();
+    await w.db.prepare("DELETE FROM sync_extras").run();
+    const again = await w.buy({ credits: SYNC_EXTRA_CREDITS });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ message: "request already finished" });
+    expect(w.store.read()).toMatchObject({ purchased: 150, holds: [] });
   });
 
   test("the sum read fails after the row was written and the settle ran: still charged once and granted once", async () => {
