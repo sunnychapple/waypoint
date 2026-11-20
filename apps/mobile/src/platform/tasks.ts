@@ -1,5 +1,5 @@
 import { ApiCallError, BadReplyError, NetworkError, NotRegisteredError } from "@waypoint/api-client";
-import type { ExplainRequest, StreamDone } from "@waypoint/contracts";
+import type { DoubleCheckResponse, ExplainRequest, FollowUpRequest, StreamDone } from "@waypoint/contracts";
 import { classifyFailure, type CloudFailure } from "../core/cloud/failure.ts";
 import { api } from "./api.ts";
 
@@ -16,4 +16,12 @@ export function toFailure(error: unknown): CloudFailure {
   if (error instanceof NotRegisteredError) return classifyFailure({ kind: "not_registered" });
   if (error instanceof BadReplyError) return classifyFailure({ kind: "bad_reply" });
   return { kind: "failed" };
+}
+
+export function streamMoreDetail(request: FollowUpRequest, key: string, onDelta: (text: string) => void, signal: AbortSignal): Promise<StreamDone> {
+  return api.moreDetail(request, { key, onDelta, signal });
+}
+
+export function doubleCheck(request: FollowUpRequest, key: string): Promise<DoubleCheckResponse> {
+  return api.doubleCheck(request, { key });
 }

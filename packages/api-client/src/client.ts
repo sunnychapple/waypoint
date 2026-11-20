@@ -6,15 +6,32 @@ import {
   AUDIO_CHUNK_CONTENT_TYPE,
   AudioChunkResponseSchema,
   AudioDoneResponseSchema,
+  BlobStoredSchema,
+  ChangesPageSchema,
   ConfigResponseSchema,
+  CreateGroupRequestSchema,
+  CreateInviteRequestSchema,
+  CreateLinkRequestSchema,
   DeviceListSchema,
   DeviceViewSchema,
   DoubleCheckResponseSchema,
+  GroupDevicesSchema,
+  GroupKeysRequestSchema,
+  GroupKeysResponseSchema,
+  GroupListSchema,
+  GroupViewSchema,
   IDEMPOTENCY_KEY_HEADER,
+  InviteViewSchema,
   JobResponseSchema,
   JobViewSchema,
   KeyIdSchema,
+  LinkRevokedSchema,
+  LinkViewSchema,
+  MembershipEndedSchema,
+  MyGroupKeysSchema,
   PairingViewSchema,
+  PostChangeRequestSchema,
+  PostChangeResponseSchema,
   PushTokenResponseSchema,
   PutRecoveryRequestSchema,
   QuoteResponseSchema,
@@ -35,6 +52,7 @@ import {
   type DoubleCheckResponse,
   type ExplainRequest,
   type FollowUpRequest,
+  type GroupView,
   type JobView,
   type PairingView,
   type PushTokenRequest,
@@ -101,6 +119,20 @@ export type RemoveDeviceRequest = z.infer<typeof RemoveDeviceRequestSchema>;
 export type RemoveDeviceResponse = z.infer<typeof RemoveDeviceResponseSchema>;
 export type PutRecoveryRequest = z.infer<typeof PutRecoveryRequestSchema>;
 export type RecoveryView = z.infer<typeof RecoveryViewSchema>;
+export type CreateGroupRequest = z.infer<typeof CreateGroupRequestSchema>;
+export type CreateInviteRequest = z.infer<typeof CreateInviteRequestSchema>;
+export type InviteView = z.infer<typeof InviteViewSchema>;
+export type MembershipEnded = z.infer<typeof MembershipEndedSchema>;
+export type GroupDevices = z.infer<typeof GroupDevicesSchema>;
+export type MyGroupKeys = z.infer<typeof MyGroupKeysSchema>;
+export type GroupKeysRequest = z.infer<typeof GroupKeysRequestSchema>;
+export type GroupKeysResponse = z.infer<typeof GroupKeysResponseSchema>;
+export type ChangesPage = z.infer<typeof ChangesPageSchema>;
+export type PostChangeRequest = z.infer<typeof PostChangeRequestSchema>;
+export type BlobStored = z.infer<typeof BlobStoredSchema>;
+export type CreateLinkRequest = z.infer<typeof CreateLinkRequestSchema>;
+export type LinkView = z.infer<typeof LinkViewSchema>;
+export type LinkRevoked = z.infer<typeof LinkRevokedSchema>;
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 
@@ -355,6 +387,54 @@ export function createApiClient(options: ApiClientOptions) {
       ),
     audioDone: (id: string, chunks: number): Promise<AudioDoneResponse> =>
       json({ method: "POST", target: `/v1/jobs/${encodeURIComponent(id)}/audio/done`, body: { chunks }, retry: true }, AudioDoneResponseSchema),
+    // Groups and keys (PR 27, S2; M28).
+    createGroup: (request: CreateGroupRequest): Promise<GroupView> =>
+      json({ method: "POST", target: "/v1/groups", body: request, signing: "device", retry: true }, GroupViewSchema),
+    groups: async (): Promise<GroupView[]> => (await json({ method: "GET", target: "/v1/groups", retry: true }, GroupListSchema)).groups,
+    createInvite: (groupId: string, request: CreateInviteRequest): Promise<InviteView> =>
+      json({ method: "POST", target: `/v1/groups/${encodeURIComponent(groupId)}/invites`, body: request, signing: "device", retry: true }, InviteViewSchema),
+    acceptInvite: (token: string): Promise<GroupView> =>
+      json({ method: "POST", target: `/v1/invites/${encodeURIComponent(token)}/accept`, signing: "device", retry: true }, GroupViewSchema),
+    removeMember: (groupId: string, userId: string): Promise<MembershipEnded> =>
+      json(
+        { method: "DELETE", target: `/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, signing: "device", retry: true },
+        MembershipEndedSchema,
+      ),
+    groupDevices: (groupId: string): Promise<GroupDevices> =>
+      json({ method: "GET", target: `/v1/groups/${encodeURIComponent(groupId)}/devices`, retry: true }, GroupDevicesSchema),
+    groupKeys: (groupId: string, deviceId: string): Promise<MyGroupKeys> =>
+      json({ method: "GET", target: `/v1/groups/${encodeURIComponent(groupId)}/keys?device=${encodeURIComponent(deviceId)}`, retry: true }, MyGroupKeysSchema),
+    postGroupKeys: (groupId: string, request: GroupKeysRequest): Promise<GroupKeysResponse> =>
+      json({ method: "POST", target: `/v1/groups/${encodeURIComponent(groupId)}/keys`, body: request, signing: "device", retry: true }, GroupKeysResponseSchema),
+    // Sync and media (PR 28, 29; M29). key: the change's own id, so a retried POST is stored once.
+    changes: (groupId: string, after: number, limit?: number): Promise<ChangesPage> =>
+      json(
+        { method: "GET", target: `/v1/groups/${encodeURIComponent(groupId)}/changes?after=${after}${limit === undefined ? "" : `&limit=${limit}`}`, retry: true },
+        ChangesPageSchema,
+      ),
+    postChange: async (groupId: string, request: PostChangeRequest, key: string): Promise<number> =>
+      (await json({ method: "POST", target: `/v1/groups/${encodeURIComponent(groupId)}/changes`, body: request, key, retry: true }, PostChangeResponseSchema)).seq,
+    uploadBlob: (groupId: string, blobId: string, locked: Uint8Array<ArrayBuffer>): Promise<BlobStored> =>
+      json(
+        {
+          method: "POST",
+          target: `/v1/blobs?group=${encodeURIComponent(groupId)}&id=${encodeURIComponent(blobId)}`,
+          raw: { bytes: locked, contentType: "application/octet-stream" },
+          retry: true,
+        },
+        BlobStoredSchema,
+      ),
+    blob: (blobId: string): Promise<Uint8Array<ArrayBuffer>> =>
+      bytes({ method: "GET", target: `/v1/blobs/${encodeURIComponent(blobId)}`, retry: true, accept: "application/octet-stream" }),
+    // The group socket's URL (PR 28). The socket needs the Clerk token in an Authorization header.
+    syncSocketUrl: (groupId: string, deviceId: string): string =>
+      `${options.baseUrl.replace(/^http/, "ws")}/v1/groups/${encodeURIComponent(groupId)}/sync?device=${encodeURIComponent(deviceId)}`,
+    token: (): Promise<string | null> => options.getToken(),
+    // Shared links (PR 30; M30b).
+    createLink: (request: CreateLinkRequest): Promise<LinkView> =>
+      json({ method: "POST", target: "/v1/links", body: request, signing: "device", retry: true }, LinkViewSchema),
+    revokeLink: (linkId: string): Promise<LinkRevoked> =>
+      json({ method: "DELETE", target: `/v1/links/${encodeURIComponent(linkId)}`, signing: "device", retry: true }, LinkRevokedSchema),
     clockOffset: (): number => clockOffset,
   };
 }

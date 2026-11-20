@@ -37,6 +37,7 @@ export default function DeviceWaitingScreen() {
         ) : (
           <PrimaryButton label={checking ? "Checking…" : "Check again"} onPress={() => void checkAgain()} />
         )}
+        {status === "waiting" ? <SecondaryButton label="Use my recovery key" icon="key" onPress={() => router.push("/recover")} /> : null}
         {status === "waiting" && notify === "ask" ? (
           <SecondaryButton label="Notify me when it's approved" icon="bell" onPress={() => void askForPush().then((ok) => setNotify(ok ? "on" : "off"))} />
         ) : null}
@@ -52,7 +53,7 @@ const COPY: Record<DeviceStatus, { title: string; body: string; caption: string 
   waiting: {
     title: "This iPhone needs approval",
     body: "Your Waypoint account is already set up on another iPhone or iPad. That device needs to approve this one before it can use credits.",
-    caption: "Approving from your other device comes in a later update.",
+    caption: "No other device? Use your recovery key.",
   },
   checking: { title: "Setting up this iPhone", body: "Waypoint is getting this iPhone ready to use credits.", caption: "" },
   offline: { title: "You're offline", body: "Connect to the internet so Waypoint can set up this iPhone for credits.", caption: "" },
