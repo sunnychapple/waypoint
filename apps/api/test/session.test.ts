@@ -180,3 +180,26 @@ async function otherKey(): Promise<CryptoKey> {
   if (!("privateKey" in pair)) throw new Error("expected a key pair");
   return pair.privateKey;
 }
+
+describe("the public shared-link data route (PR 30)", () => {
+  const LINK = `link_${"a".repeat(17)}`;
+  const publicEnv = () => ({ ...envWith(), LINK_VIEWS: { limit: async () => ({ success: true }) } });
+
+  test("GET /v1/links/<id>/data without Authorization is not refused with sign in required", async () => {
+    const { app } = setup();
+    const res = await app.request(`/v1/links/${LINK}/data`, {}, publicEnv());
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ code: "not_found", message: "no such link", retry_after: null });
+  });
+
+  test("other paths under a link, a POST to the data path, and a 21-character id still need a session", async () => {
+    const { app } = setup();
+    const env = publicEnv();
+    const extra = await app.request(`/v1/links/${LINK}/data/x`, {}, env);
+    expect(extra.status).toBe(401);
+    const post = await app.request(`/v1/links/${LINK}/data`, { method: "POST", headers: { "Idempotency-Key": VALID_KEY } }, env);
+    expect(post.status).toBe(401);
+    const short = await app.request(`/v1/links/${"a".repeat(21)}/data`, {}, env);
+    expect(short.status).toBe(401);
+  });
+});

@@ -12,6 +12,8 @@ export type SessionDeps = {
 };
 
 const PUBLIC_PATHS = new Set(["GET /v1/config"]);
+// The shared-link web viewer reads a link's locked data without signing in (PR 30).
+const PUBLIC_PATTERNS = [/^GET \/v1\/links\/[A-Za-z0-9_-]{22,64}\/data$/];
 
 export function requireSession(deps: SessionDeps): MiddlewareHandler<AppEnv> {
   const keySources = new Map<string, (kid: string) => Promise<JsonWebKey | undefined>>();
@@ -25,7 +27,8 @@ export function requireSession(deps: SessionDeps): MiddlewareHandler<AppEnv> {
   };
 
   return async (c, next) => {
-    if (PUBLIC_PATHS.has(`${c.req.method} ${c.req.path}`)) return next();
+    const route = `${c.req.method} ${c.req.path}`;
+    if (PUBLIC_PATHS.has(route) || PUBLIC_PATTERNS.some((pattern) => pattern.test(route))) return next();
 
     const header = c.req.header("Authorization") ?? "";
     const match = /^Bearer (.+)$/.exec(header);
