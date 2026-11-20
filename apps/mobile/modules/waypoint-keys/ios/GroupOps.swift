@@ -134,6 +134,8 @@ extension KeysOps {
             envelope: text, groupId: groupId, keyVersion: version, recipientId: recipientId, signers: trustedSigners, knownAccounts: knownAccounts,
             recipient: try P256.KeyAgreement.PrivateKey(rawRepresentation: stored.box))
         }
+        // A held key is never replaced by a different one (docs/security.md section 10). The same key again is a no-op.
+        if let held = keys[at], held != key { throw KeysError.badEnvelope }
         keys[at] = key
         opened.append(version)
       } catch {
@@ -173,7 +175,13 @@ extension KeysOps {
   static func lockFile(userId: String, groupId: String, keyVersion: Int, blobId: String, inPath: String, outPath: String) throws -> Int {
     let stored = try identity(userId)
     guard let version = UInt32(exactly: keyVersion) else { throw KeysError.badInput }
-    let plain = try Data(contentsOf: try documentsURL(inPath))
+    // The server refuses a blob over 95,000,000 bytes (MAX_BLOB_BYTES); locking adds 33 bytes (17 header, 16 tag).
+    // Check the size before reading the file.
+    let inURL = try documentsURL(inPath)
+    guard (try FileManager.default.attributesOfItem(atPath: inURL.path)[.size] as? Int ?? Int.max) <= 95_000_000 - 33 else {
+      throw KeysError.badInput
+    }
+    let plain = try Data(contentsOf: inURL)
     let locked = try LockedContent.lock(
       key: try groupKey(stored, groupId: groupId, keyVersion: keyVersion), keyVersion: version,
       objectContext: try context("blob", [try checkId(groupId), try checkId(blobId)]), plaintext: plain)
