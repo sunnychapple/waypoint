@@ -9,7 +9,7 @@ import { formatOffset } from "../../core/format.ts";
 import { useConfig } from "../../platform/config.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors, type Colors } from "../../ui/theme.ts";
-import { CloudLine } from "./CloudLine.tsx";
+import { CloudLine } from "../../ui/CloudLine.tsx";
 import { useExplain } from "./useExplain.ts";
 
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the

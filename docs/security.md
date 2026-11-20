@@ -1,6 +1,6 @@
 # Waypoint security design
 
-Status: proposed, 19 Nov 2026. Written for an outside security review. **It must be reviewed before real students use it.** Choices that most need the reviewer's eye are marked **[R1]** to **[R14]** and listed in section 17.
+Status: proposed, 19 Nov 2026. Written for an outside security review. **It must be reviewed before real students use it.** Choices that most need the reviewer's eye are marked **[R1]** to **[R15]** and listed in section 17.
 
 Decided by the product owner (19 Nov 2026): only well-known algorithms and the platform's own crypto (Apple CryptoKit on iOS, WebCrypto on Cloudflare Workers); no home-made primitives. Implementation cards: `docs/cards/security.md`. Spec context: `docs/architecture.md` (zones, flows 2, 3, 4, 7, section 5).
 
@@ -9,7 +9,7 @@ Users are K-12 students studying at home, sometimes helped by a parent. There is
 ## 1. Summary
 
 - Every device has two Secure Enclave keys: a **signing key** and an **encryption key**, both P-256.
-- Every account has an **account key**: a P-256 signing key and a P-256 encryption key, held by the user's approved devices and, wrapped, by the **12-word recovery key**. The account key vouches for the user's devices (a *device certificate*) and receives a copy of every group key, so recovery works without any device.
+- Every account has an **account key**: a P-256 signing key and a P-256 encryption key, held by the user's approved devices and, wrapped, by the **12-word recovery key**. The account key vouches for the user's devices (a *device certificate*) and for its own encryption key (an *account certificate*), and receives a copy of every group key, so recovery works without any device.
 - Every group (a personal space or a shared one) has a random 256-bit **group key per key version**. Notes, changes, snapshots, media and the group's name are encrypted with AES-256-GCM under it. The key is wrapped for each device and account key with **HPKE** (RFC 9180) and signed by the device that wrapped it.
 - A new device is approved by an existing device after the person compares a **6-digit code** on both screens. The code comes from a commit-then-reveal exchange, so the server cannot make both screens agree on a key it chose.
 - Requests that change devices, keys, group membership or money are **signed** by the device's Secure Enclave key, with a timestamp and a single-use nonce.
@@ -23,7 +23,7 @@ Users are K-12 students studying at home, sometimes helped by a parent. There is
 | Waypoint's server code and staff, honest but curious | Everything in "What is not protected" (section 16). The plain text of a cloud task while it runs (the person chose to send it). Audio during a second-transcript job. | Notes, transcripts, pages, photos, group names, flashcards, search index. Stored job results after sealing. |
 | Someone with a copy of D1, R2 or KV (a breach) | The same metadata. Ciphertext. Public keys. | Any content or key. The recovery blob needs the 12 words (128 bits). Link passcodes are peppered (the pepper is not in D1). |
 | Cloudflare | Same as our server: it runs our code and terminates TLS. | Same as our server. |
-| An actively malicious server **[R1]** | Can withhold, reorder or replay locked changes (section 11). Can lie about who is in a group or which devices a user has; other members' devices only accept a device certified by an account key they have already seen (trust on first use), so the server can add a device only for a user nobody has met yet or at the moment a user's account key really changes. | Cannot get its own key accepted when a person adds their own device (6-digit code). Cannot forge an envelope, a device certificate or a signed request. |
+| An actively malicious server **[R1]** | Can withhold, reorder or replay locked changes (section 11). Can lie about who is in a group or which devices a user has; other members' devices only accept a device certified by an account key they have already seen (trust on first use), so the server can add a device only for a user nobody has met yet or at the moment a user's account key really changes. | Cannot get its own key accepted when a person adds their own device (6-digit code). Cannot forge an envelope, a device certificate, an account certificate or a signed request. Cannot pair a person's known account key with an encryption key of its own (account certificate, section 6). |
 | A thief with a **locked** phone | Nothing beyond the lock screen. Keys are usable only after the first unlock, and the app needs the passcode to open. | Everything. |
 | A thief with an **unlocked** phone, before it is removed | Everything that phone can show; it is a trusted device. | — |
 | The same phone **after** the person removes it from another device | What it had already downloaded. Its Clerk session can still read ciphertext and metadata until it expires **[R13]**. | Anything written after removal: every group the user is in gets a new key version, the account key is replaced, and the server refuses the removed device's signatures. |
@@ -70,6 +70,7 @@ Out of scope: a compromised iOS or Secure Enclave, a malicious app build (App St
   | `pair-commit` | new sign_pub, new box_pub, new nonce | pairing commitment (section 8) |
   | `pair-code` | new sign_pub, new box_pub, approver sign_pub, approver nonce, new nonce | the 6-digit code |
   | `device-cert` | user id, device id, sign_pub, box_pub | device certificate (section 6) |
+  | `account-cert` | user id, account key row id, account sign_pub, account box_pub | account certificate (section 6) |
   | `group-key` | group id, key version, recipient device id | HPKE info of a group-key envelope |
   | `account-key` | user id, account key row id, recipient device id | HPKE info of an account-key envelope |
   | `envelope-sig` | (none) | prefix of an envelope signature |
@@ -85,7 +86,7 @@ Out of scope: a compromised iOS or Secure Enclave, a malicious app build (App St
 |---|---|---|---|---|
 | Device signing key | P-256 ECDSA, Secure Enclave | One device; never leaves it | Signs requests, envelopes, pairing steps | The app is deleted or the device is removed |
 | Device encryption key (`box`) | P-256 key agreement, Secure Enclave | One device | Receives group keys, the account key and job results (HPKE) | Same |
-| Account signing key | P-256 ECDSA, software | Keychain on every approved device of the user (this device only, after first unlock); wrapped in the recovery blob | Signs device certificates; signs a device approval during recovery | A device that held it is removed |
+| Account signing key | P-256 ECDSA, software | Keychain on every approved device of the user (this device only, after first unlock); wrapped in the recovery blob | Signs device certificates and its own row's account certificate; signs a device approval during recovery | A device that held it is removed |
 | Account encryption key | P-256 key agreement, software | Same | Receives a copy of every group key the user can read, for recovery | Same |
 | Group key, one per key version | 32 random bytes | Keychain on each device that can read the group | AES-256-GCM for everything in the group | A member or a member's device is removed (new version) |
 | Recovery key | 16 random bytes shown as 12 BIP-39 words | On paper, with the person | Wraps the account key | The person makes a new one; after the account key is replaced |
@@ -96,13 +97,15 @@ The two account keys are stored together as 64 bytes: the signing scalar, then t
 
 **Simulator and test builds** have no Secure Enclave. They use software keys in the Keychain with `ThisDeviceOnly`; release builds refuse to run without the Secure Enclave.
 
-## 6. The account key row and device certificates
+## 6. The account key row, device certificates and the account certificate
 
 The server keeps the account key's public halves as a row in `devices` with `kind = 'account'` (one active row per user, enforced by a unique index). That row can receive envelopes like any device, so "wrap the group key for every device of every member" automatically includes each member's recovery copy.
 
 Each approved device has a **certificate**: the account signing key's signature over `context("device-cert", user id, device id, sign_pub, box_pub)`, stored in `devices.cert`.
 
-**Trust on first use [R1].** A device keeps a list of the account signing keys it has seen for each person it shares a group with. It wraps group keys only for devices whose certificate verifies under that person's known account key, and it accepts a group-key envelope only if the signing device's certificate verifies under a known account key of a current member. When a person's account key changes (they removed a lost device, or used their recovery key), co-members see "Sam's security key changed" before their devices wrap anything for the new key. People may compare a short safety code in person; the product does not require it. A key-transparency log, or moving to MLS (RFC 9420) later, would remove this weakness; both are out of scope for v1.
+**Account certificate [R15].** The account row certifies itself: the account signing key's signature over `context("account-cert", user id, account row id, sign_pub, box_pub)`, stored in the account row's `devices.cert` and sent as `self_cert` when the row is created (`POST /v1/devices` for the first device, `DELETE /v1/devices/:id` when the account key is replaced; no other path creates an account row). The server verifies it before writing; every route that lists rows returns it as `cert`. Without it, a co-member's account row was trusted by its `sign_pub` alone: a malicious server could list a person's real, already known account `sign_pub` next to a `box_pub` of its own and receive every group key wrapped for that row (found by the review of PR #104, closed by cards H7a and H7b, `docs/cards/hardening-2-account-cert.md`). Account rows made before H7a (development and staging only; there were no users) have no certificate and are never wrapped for; there is no migration. Envelopes whose *signer* is an account row (the account key during recovery) are not yet accepted by the app's open path, which checks signers by device certificate; M28b decides whether it needs them.
+
+**Trust on first use [R1].** A device keeps a list of the account signing keys it has seen for each person it shares a group with. It wraps group keys only for devices whose certificate verifies under that person's known account key, and for account rows whose `sign_pub` is that known key and whose account certificate verifies under it; it accepts a group-key envelope only if the signing device's certificate verifies under a known account key of a current member. When a person's account key changes (they removed a lost device, or used their recovery key), co-members see "Sam's security key changed" before their devices wrap anything for the new key. People may compare a short safety code in person; the product does not require it. A key-transparency log, or moving to MLS (RFC 9420) later, would remove this weakness; both are out of scope for v1.
 
 ## 7. Request signatures
 
@@ -130,7 +133,7 @@ The Clerk session is still required; the signature adds proof that the request c
 
 ### The first device
 
-The first device of an account makes the account key, certifies itself, and registers both rows in one call: `POST /v1/devices` with `account: { id, sign_pub, box_pub, cert }`. The server accepts this only if the user has no active account key row. The app then asks the person to write down their recovery key (section 13).
+The first device of an account makes the account key, certifies itself and the account row, and registers both rows in one call: `POST /v1/devices` with `account: { id, sign_pub, box_pub, cert, self_cert }` (`cert` is this device's certificate, `self_cert` the account certificate). The server accepts this only if the user has no active account key row. The app then asks the person to write down their recovery key (section 13).
 
 ### A new device, approved by one the person already has (flow 7)
 
@@ -214,7 +217,7 @@ The device id and kind in a change's AAD are also stored in clear by the room, s
 `DELETE /v1/devices/:id`, signed by another approved device of the same user (or by the device itself).
 
 - A device still waiting for approval is just marked removed.
-- An approved device held the account key and the group keys, so in one D1 batch the server: marks it removed; increments `key_version` of every group the user is in; marks the old account row removed and inserts the new account row (the calling device made a new account key); stores a new certificate and account-key envelope for every remaining approved device (all must be present); and deletes the recovery blob, which wrapped the old account key. The app then asks the person to write down a new recovery key, and posts envelopes of the older group key versions for the new account row.
+- An approved device held the account key and the group keys, so in one D1 batch the server: marks it removed; increments `key_version` of every group the user is in; marks the old account row removed and inserts the new account row with its account certificate (the calling device made a new account key and sent `account: { id, sign_pub, box_pub, self_cert }`); stores a new certificate and account-key envelope for every remaining approved device (all must be present); and deletes the recovery blob, which wrapped the old account key. The app then asks the person to write down a new recovery key, and posts envelopes of the older group key versions for the new account row.
 - If no approved device would remain (the last device removing itself), nothing is rotated; the recovery key still works.
 - The batch applies only if, when it runs, the removed device is still live and the user's other approved devices are exactly the ones the request covered; every statement carries that condition, and otherwise nothing changes and the reply is 409 "devices changed, try again". So two devices removing each other at the same time cannot both succeed, which would leave no approved device, an account key nobody holds and no recovery blob (card H2).
 
@@ -271,6 +274,7 @@ Who has an account and when they sign in; each device's name, platform and publi
 - **[R12]** First-set-wins rotation; history for new members decided by clients.
 - **[R13]** A removed device's Clerk session is not revoked by the server (needs a session id per device and a Clerk API call).
 - **[R14]** Threat model completeness for a K-12 audience: shared family iPads, parents helping, lost phones, students who never write the recovery key down.
+- **[R15]** The account certificate (section 6): it binds the account row's `box_pub` to its `sign_pub`, so a known account key cannot be paired with a server-chosen encryption key. It does not help the first time a person is seen (R1). Is signing over user id, row id and both public keys, under its own context label, the right binding? Should the app also refuse to *record* a first-seen account key whose certificate does not verify?
 
 ## 18. Test vectors
 
@@ -280,7 +284,7 @@ Published in `packages/crypto/test/vectors/` (card S0A, S0B), for this server co
 |---|---|---|
 | `rfc9180-p256-sha256-aes256gcm-base.json` | RFC 9180 test vectors (cfrg/draft-irtf-cfrg-hpke, commit `5f503c56`, the entry with `mode 0, kem_id 16, kdf_id 1, aead_id 2`, first encryption) | HPKE seal (with the vector's ephemeral key) and open |
 | `wycheproof-ecdsa-secp256r1-sha256-p1363.json` | C2SP/wycheproof commit `878e5366`, `testvectors_v1/ecdsa_secp256r1_sha256_p1363_test.json`, SHA-256 `c60de693930e386c3a5472d08081623ef8504decc54b38ac01ec6b2a2575c986` | 262 ECDSA verify cases: every `valid` passes, every `invalid` fails |
-| `waypoint-v1.json` | Made with the reference code, re-derived independently (section 3) | Every Waypoint format: context, request input and a valid signature, pairing commitment and code, device certificate, both envelope purposes (exact bytes with fixed `ikmE`, signature, opening), sealed result, recovery wrap key and blob, locked content, link passcode |
+| `waypoint-v1.json` | Made with the reference code, re-derived independently (section 3) | Every Waypoint format: context, request input and a valid signature, pairing commitment and code, device certificate, account certificate (input bytes and a valid signature; added by H7a, its input and signature re-checked on `node:crypto`), both envelope purposes (exact bytes with fixed `ikmE`, signature, opening), sealed result, recovery wrap key and blob, locked content, link passcode |
 
 The iOS side also checks the BIP-39 English vectors from trezor/python-mnemonic (`vectors.json`, commit `b57a5ad7`; entropy ↔ words only, not the seed) and the word list's SHA-256.
 
@@ -292,12 +296,12 @@ For the mobile card writer. Minimum **iOS 17** (CryptoKit HPKE). The module is S
 2. **Encodings.** Strict base64url, `context()`, SEC1 public keys (`x963Representation`), signatures as `rawRepresentation`.
 3. **Request signing** with the headers in section 7; a clock offset from the `Date` header; a new nonce on every send, including retries.
 4. **Pairing**: commitment, nonce order (never reveal before receiving the approver's nonce), check the commitment on the approving side, the 6-digit code, the screens for both sides.
-5. **Certificates**: sign for new devices with the account key; verify co-members' devices; the trust-on-first-use store and the "security key changed" notice.
+5. **Certificates**: sign for new devices with the account key, and the account row's own account certificate whenever an account key is made; verify co-members' devices and account rows (both the known `sign_pub` and the account certificate) before wrapping; the trust-on-first-use store and the "security key changed" notice.
 6. **Envelopes**: make, parse, verify (signature and signer's certificate), open, for both purposes. HPKE with `HPKE.Sender(recipientKey:ciphersuite:info:)` and `HPKE.Recipient(privateKey:ciphersuite:info:encapsulatedKey:)`, one message per context.
 7. **Group keys**: the first-set and add rules of section 10, the random delay, refetch on 409.
 8. **Locked content**: lock and unlock with the AAD contexts of section 11.
 9. **Sealed results**: open `results/{job}` with the device key.
 10. **Recovery**: BIP-39 words ↔ 16 bytes with the checksum, the word list checked by SHA-256, the HKDF wrap key, the blob, the "type 3 words back" check, the new-recovery-key prompt after an account key change.
-11. **Device removal**: new account key, new certificates and account-key envelopes for every remaining device, then envelopes of old group versions for the new account row.
+11. **Device removal**: new account key and its account certificate, new certificates and account-key envelopes for every remaining device, then envelopes of old group versions for the new account row.
 
 It must pass: every case in `waypoint-v1.json` (exact bytes for everything deterministic; open the envelopes and sealed result with the given private keys; verify the given signatures; CryptoKit cannot set HPKE's ephemeral key, so iOS checks HPKE by opening, not by sealing to the same bytes); the RFC 9180 vector (open with `skRm`, check `pkRm`); all Wycheproof `valid`/`invalid` cases with `P256.Signing.PublicKey.isValidSignature`; the Trezor BIP-39 English vectors for 16-byte entropy; and a round trip with the server's TypeScript code in CI once the iOS build machine exists.

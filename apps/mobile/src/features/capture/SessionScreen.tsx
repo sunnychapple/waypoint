@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { dateLine } from "../../core/capture/labels.ts";
 import { listPages } from "../../core/capture/pages.ts";
+import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capture/second.ts";
 import { listSegments } from "../../core/capture/segments.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
+import type { SqlDb } from "../../core/db/sql.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { researchForSession } from "../../core/research/research.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
+import { jobsForSession } from "../../core/jobs/jobs.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -19,7 +22,7 @@ import { useColors } from "../../ui/theme.ts";
 // A recording's transcript lists its lines; tapping a word opens Explain (M15).
 export default function SessionScreen() {
   const colors = useColors();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, view } = useLocalSearchParams<{ id: string; view?: string }>();
   const data = useQuery((db) => {
     const session = getSession(db, id);
     if (!session) return null;
@@ -29,13 +32,17 @@ export default function SessionScreen() {
       pages: session.kind === "pages" ? listPages(db, id) : [],
       segments: session.kind === "recording" ? listSegments(db, id) : [],
       research: researchForSession(db, id),
+      second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [showSecond, setShowSecond] = useState(view === "second");
+  // A push to ?view=second while this screen is already open moves the switch too.
+  useEffect(() => setShowSecond(view === "second"), [view]);
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research } = data;
+  const { session, spaceName, pages, segments, research, second } = data;
   const offset = -new Date().getTimezoneOffset();
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
@@ -47,7 +54,9 @@ export default function SessionScreen() {
   }
 
   function openMenu() {
+    const canSecond = session.kind === "recording" && (session.state === "saved" || session.state === "interrupted");
     Alert.alert(session.title, undefined, [
+      ...(canSecond ? [{ text: "Second transcript", onPress: () => router.push(`/second-transcript?sessionId=${id}`) }] : []),
       { text: "Move to another space", onPress: () => router.push(`/space-picker?sessionId=${id}`) },
       { text: "Delete", style: "destructive", onPress: confirmDelete },
       { text: "Cancel", style: "cancel" },
@@ -109,16 +118,51 @@ export default function SessionScreen() {
         <Caption>Couldn't write down this recording.</Caption>
       ) : null}
 
-      {segments.map((segment) => (
-        <View key={segment.tStart} style={styles.line}>
-          <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
-          <WordText
-            text={segment.text}
-            style={[styles.lineText, { color: colors.ink }]}
-            onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(segment.tStart), word } })}
-          />
+      {second !== null ? (
+        <View style={styles.switchRow}>
+          {(["On this iPhone", "Second transcript"] as const).map((label, index) => {
+            const active = showSecond === (index === 1);
+            return (
+              <Pressable
+                key={label}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => setShowSecond(index === 1)}
+                style={[styles.switchItem, { backgroundColor: active ? colors.accentSoft : colors.surface2 }]}
+              >
+                <Text style={[styles.switchText, { color: colors.ink }]}>{label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
-      ))}
+      ) : null}
+
+      {second !== null && showSecond ? (
+        <>
+          {second.parts.map((words, index) => (
+            <Text key={index} style={[styles.lineText, { color: colors.ink }]}>
+              {words.map((word, i) => (
+                <Text key={i} style={word.changed ? [styles.changed, { backgroundColor: colors.accentSoft }] : undefined}>
+                  {`${word.text} `}
+                </Text>
+              ))}
+            </Text>
+          ))}
+          <Caption>Highlighted words are different from this iPhone's transcript.</Caption>
+          {second.truncated ? <Caption>Only the minutes you paid for were transcribed.</Caption> : null}
+        </>
+      ) : (
+        segments.map((segment) => (
+          <View key={segment.tStart} style={styles.line}>
+            <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
+            <WordText
+              text={segment.text}
+              style={[styles.lineText, { color: colors.ink }]}
+              onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(segment.tStart), word } })}
+            />
+          </View>
+        ))
+      )}
 
       {pages.map((page, index) => (
         <PageBlock key={page.id} number={index + 1} file={page.file} text={page.foundText} />
@@ -148,6 +192,23 @@ export default function SessionScreen() {
       ) : null}
     </Screen>
   );
+}
+
+// The second transcript, one list of changed-word marks per recording part, or null when no cloud transcript exists.
+function secondTranscript(db: SqlDb, sessionId: string): { parts: DiffWord[][]; truncated: boolean } | null {
+  const cloud = db.get<{ n: number }>("SELECT 1 AS n FROM segments WHERE session_id = ? AND source = 'cloud' LIMIT 1", [sessionId]);
+  if (cloud === null) return null;
+  const parts = uploadParts(db, sessionId).map((part) =>
+    diffWords(partText(db, sessionId, "device", part), partText(db, sessionId, "cloud", part)),
+  );
+  const job = jobsForSession(db, sessionId).find((j) => j.type === "retranscribe" && j.state === "succeeded");
+  let truncated = false;
+  try {
+    truncated = (JSON.parse(job?.detail ?? "{}") as { truncated?: unknown }).truncated === true;
+  } catch {
+    truncated = false;
+  }
+  return { parts, truncated };
 }
 
 function PageBlock({ number, file, text }: { number: number; file: string; text: string | null }) {
@@ -211,4 +272,8 @@ const styles = StyleSheet.create({
   line: { flexDirection: "row", gap: 12 },
   time: { width: 48, fontSize: 13, fontVariant: ["tabular-nums"] },
   lineText: { flex: 1, fontSize: 17, lineHeight: 25 },
+  changed: { fontWeight: "700" },
+  switchRow: { flexDirection: "row", gap: 8 },
+  switchItem: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  switchText: { fontSize: 15, fontWeight: "600" },
 });
