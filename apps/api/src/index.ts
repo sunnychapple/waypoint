@@ -12,6 +12,7 @@ import { handleUsageBatch, USAGE_QUEUE_NAME } from "./usage-consumer.ts";
 export { GroupRoom } from "./room/object.ts";
 export { Wallet } from "./wallet/object.ts";
 export { WriteWorkflow } from "./jobs/write-workflow.ts";
+export { RetranscribeWorkflow } from "./jobs/retranscribe-workflow.ts";
 
 const app = createApp({
   fetchJwks: (url) => fetch(url).then((r) => r.json()),
