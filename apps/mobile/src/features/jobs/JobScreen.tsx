@@ -37,6 +37,7 @@ export default function JobScreen() {
       <Screen>
         <BackButton />
         <Title>Cloud job</Title>
+        <Caption>This job isn't on this iPhone.</Caption>
       </Screen>
     );
   }

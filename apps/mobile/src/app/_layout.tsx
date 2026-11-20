@@ -15,6 +15,7 @@ function RootStack() {
         <Stack.Screen name="dev/model" />
         <Stack.Screen name="dev/pages" />
         <Stack.Screen name="dev/sandbox" />
+        <Stack.Screen name="dev/voices" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "app"}>
         <Stack.Screen name="(tabs)" />

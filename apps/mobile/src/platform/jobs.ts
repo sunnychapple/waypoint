@@ -108,8 +108,15 @@ export async function followJob(id: string): Promise<void> {
 }
 
 // Cancel from the job screen. Nothing is charged unless the job had already finished (docs/architecture.md section 4).
+// A job that has already succeeded is not deleted here: it is charged either way, so its result is fetched and kept.
 export async function cancelJob(id: string): Promise<CloudFailure | null> {
   try {
+    const current = await api.job(id);
+    note(current);
+    if (current.state === "succeeded") {
+      void followJob(id);
+      return null;
+    }
     note(await api.deleteJob(id));
     writeDb((db) => markDeleted(db, id, Date.now()));
     return null;

@@ -54,6 +54,13 @@ describe("details and lines", () => {
     expect(nextStep(getJob(d, "job_1")!)).toBe("delete");
     expect(jobLine(getJob(d, "job_1")!)).toBe("Couldn't open the result on this iPhone");
   });
+  it("a job deleted after it succeeded but before its result was saved says the result is gone", () => {
+    const d = db();
+    recordJob(d, { ...VIEW, state: "succeeded", spent: 15, result_ready: true }, { sessionId: null, requestKey: "key_1", detail: {}, now: 1 });
+    markDeleted(d, "job_1", 2);
+    expect(nextStep(getJob(d, "job_1")!)).toBe("done");
+    expect(jobLine(getJob(d, "job_1")!)).toBe("Finished, but the result is gone · 15 credits");
+  });
 });
 
 describe("toBase64Url", () => {

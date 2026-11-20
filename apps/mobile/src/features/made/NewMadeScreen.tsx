@@ -113,6 +113,7 @@ export default function NewMadeScreen() {
       {showSent && hasText ? (
         <ScrollView style={[styles.sent, { backgroundColor: colors.surface2 }]} nestedScrollEnabled>
           <Text style={[styles.sentText, { color: colors.ink3 }]}>{text}</Text>
+          {focus.trim() !== "" ? <Text style={[styles.sentText, { color: colors.ink3 }]}>{`Focus: ${focus.trim()}`}</Text> : null}
         </ScrollView>
       ) : null}
 
