@@ -28,6 +28,7 @@ export type Env = {
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
   APPLE_APP_APPLE_ID: string; // the app's numeric Apple id from App Store Connect
   WRITE_WORKFLOW: Workflow<JobRunInput>;
+  RETRANSCRIBE_WORKFLOW: Workflow<JobRunInput>;
   RESEARCH_WORKFLOW: Workflow<JobRunInput>;
   BROWSER: BrowserRun;
   LINK_PASSCODE_PEPPER: string; // secret: wrangler secret put LINK_PASSCODE_PEPPER (32 random bytes, base64url)

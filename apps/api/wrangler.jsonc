@@ -44,6 +44,7 @@
   },
   "workflows": [
     { "name": "waypoint-write", "binding": "WRITE_WORKFLOW", "class_name": "WriteWorkflow" },
+    { "name": "waypoint-retranscribe", "binding": "RETRANSCRIBE_WORKFLOW", "class_name": "RetranscribeWorkflow" },
     { "name": "waypoint-research", "binding": "RESEARCH_WORKFLOW", "class_name": "ResearchWorkflow" }
   ],
   "durable_objects": {
