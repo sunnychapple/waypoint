@@ -68,6 +68,21 @@ private func signKey(_ hex: String) -> P256.Signing.PrivateKey { try! P256.Signi
   #expect(DeviceCertificate.verify(accountSignPub: c.account_sign_pub, cert: cert, userId: c.user_id, deviceId: c.device_id, signPub: c.sign_pub, boxPub: c.box_pub))
 }
 
+@Test func accountCertificate() throws {
+  let a = v.account_certificate
+  #expect(try AccountCertificate.input(userId: a.user_id, accountId: a.account_id, signPub: a.sign_pub, boxPub: a.box_pub).hex == a.signing_input)
+  #expect(AccountCertificate.verify(cert: a.signature, userId: a.user_id, accountId: a.account_id, signPub: a.sign_pub, boxPub: a.box_pub))
+  // The attack it stops: the known sign_pub with another box_pub.
+  #expect(!AccountCertificate.verify(cert: a.signature, userId: a.user_id, accountId: a.account_id, signPub: a.sign_pub, boxPub: v.device_certificate.box_pub))
+  #expect(!AccountCertificate.verify(cert: a.signature, userId: "usr_2", accountId: a.account_id, signPub: a.sign_pub, boxPub: a.box_pub))
+  #expect(!AccountCertificate.verify(cert: a.signature, userId: a.user_id, accountId: "acct_2", signPub: a.sign_pub, boxPub: a.box_pub))
+  // The vector's 64-byte account key is the row's two keys, and our own self-certificate verifies.
+  let key = try AccountKey(raw: Data(hex: a.account_key))
+  #expect(key.signPub == a.sign_pub && key.boxPub == a.box_pub)
+  let mine = try key.selfCertificate(userId: a.user_id, accountId: a.account_id)
+  #expect(AccountCertificate.verify(cert: mine, userId: a.user_id, accountId: a.account_id, signPub: a.sign_pub, boxPub: a.box_pub))
+}
+
 @Test func groupKeyEnvelopeOpensAndVerifies() throws {
   let g = v.group_key_envelope
   let info = try Envelope.groupKeyInfo(groupId: g.group_id, keyVersion: g.key_version, deviceId: g.recipient_device_id)

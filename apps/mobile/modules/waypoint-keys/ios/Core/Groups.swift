@@ -25,6 +25,13 @@ public enum GroupKeys {
     return DeviceCertificate.verify(accountSignPub: account, cert: signer.cert, userId: signer.userId, deviceId: signer.id, signPub: signer.signPub, boxPub: signer.boxPub)
   }
 
+  // An account row is a wrapping target only if its sign_pub is the account key this iPhone already knows for that
+  // person and its own certificate covers its box_pub (section 6, "Account certificate").
+  public static func trustedAccount(id: String, userId: String, signPub: String, boxPub: String, cert: String, knownAccounts: [String: String]) -> Bool {
+    guard let account = knownAccounts[userId], account == signPub else { return false }
+    return AccountCertificate.verify(cert: cert, userId: userId, accountId: id, signPub: signPub, boxPub: boxPub)
+  }
+
   public static func wrap(key: Data, groupId: String, keyVersion: Int, recipientId: String, recipientBoxPub: String, signerId: String, signer: some SigningKey) throws -> String {
     let info = try Envelope.groupKeyInfo(groupId: groupId, keyVersion: keyVersion, deviceId: recipientId)
     return Base64URL.encode(try Envelope.make(purpose: .groupKey, info: info, recipientBoxPub: try PublicKeys.box(recipientBoxPub), key: key, signerId: signerId, signer: signer))

@@ -145,7 +145,8 @@ enum KeysOps {
   }
 
   // First device only: makes the account key (software P-256, docs/security.md section 5), keeps it with the
-  // device keys, and certifies this device. Returns the existing account key when there is one.
+  // device keys, certifies this device and the account row itself (selfCert). Returns the existing account key when
+  // there is one.
   static func ensureAccountKey(userId: String, accountId: String) throws -> [String: Any] {
     lock.lock(); defer { lock.unlock() }
     guard var identity = try IdentityStore.load(userId: try checkId(userId)) else { throw KeysModuleError.noIdentity }
@@ -160,7 +161,8 @@ enum KeysOps {
     let sign = try P256.Signing.PrivateKey(rawRepresentation: key.prefix(32))
     let box = try P256.KeyAgreement.PrivateKey(rawRepresentation: key.suffix(32))
     let cert = try DeviceCertificate.sign(sign, userId: userId, deviceId: identity.deviceId, signPub: try IdentityStore.signPub(identity), boxPub: try IdentityStore.boxPub(identity))
-    return ["accountId": id, "signPub": sign.publicKeyText, "boxPub": boxKeyText(box.publicKey), "cert": cert]
+    let selfCert = try AccountCertificate.sign(sign, userId: userId, accountId: id, boxPub: boxKeyText(box.publicKey))
+    return ["accountId": id, "signPub": sign.publicKeyText, "boxPub": boxKeyText(box.publicKey), "cert": cert, "selfCert": selfCert]
   }
 
   // Another device already holds the account key: drop ours (a lost race to be the first device).
