@@ -120,6 +120,7 @@ export default function SettingsScreen() {
         onPress={() => router.push("/plans")}
       />
       <Link title="Recovery key" onPress={() => router.push("/recovery-key")} />
+      <Link title="Devices" onPress={() => router.push("/devices")} />
 
       <Row
         title="Cloud jobs"
