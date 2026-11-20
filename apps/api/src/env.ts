@@ -1,5 +1,6 @@
 import type { SignedDevice } from "./auth/signature.ts";
 import type { SessionUser } from "./auth/users.ts";
+import type { JobRunInput } from "./jobs/start.ts";
 import type { PushMessage } from "./push/messages.ts";
 import type { GroupRoom } from "./room/object.ts";
 import type { UsageEvent } from "./usage.ts";
@@ -26,6 +27,7 @@ export type Env = {
   APPLE_BUNDLE_ID: string;
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
   APPLE_APP_APPLE_ID: string; // the app's numeric Apple id from App Store Connect
+  WRITE_WORKFLOW: Workflow<JobRunInput>;
   LINK_PASSCODE_PEPPER: string; // secret: wrangler secret put LINK_PASSCODE_PEPPER (32 random bytes, base64url)
   TURNSTILE_SECRET_KEY: string; // secret: wrangler secret put TURNSTILE_SECRET_KEY
   LINK_VIEWS: RateLimit;

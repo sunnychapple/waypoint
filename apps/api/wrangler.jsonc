@@ -41,6 +41,9 @@
       { "queue": "waypoint-usage", "max_batch_size": 100, "max_batch_timeout": 30, "max_retries": 10 }
     ]
   },
+  "workflows": [
+    { "name": "waypoint-write", "binding": "WRITE_WORKFLOW", "class_name": "WriteWorkflow" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "WALLET", "class_name": "Wallet" },
