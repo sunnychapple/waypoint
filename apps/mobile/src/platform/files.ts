@@ -20,3 +20,8 @@ export function sessionsBytes(): number {
   const folder = new Directory(Paths.document, "sessions");
   return folder.exists ? (folder.info().size ?? 0) : 0;
 }
+
+// A temporary file for locked media (M29b), at the Documents root (the keys module reads paths there). The caller deletes it.
+export function blobTempPath(name: string): string {
+  return `blob-${name}.tmp`;
+}

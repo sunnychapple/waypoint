@@ -19,12 +19,17 @@ export function pushSentValue(request: PushTokenRequest): string {
 export const PUSH_SENT_KEY = "push_token_sent";
 
 // What a tapped notification should do. Payloads carry only kind and ref (apps/api/src/push/messages.ts).
-export type PushAction = { kind: "refresh_device" } | { kind: "approve_device"; deviceId: string } | { kind: "open_job"; jobId: string } | { kind: "none" };
+export type PushAction =
+  | { kind: "refresh_device" }
+  | { kind: "approve_device"; deviceId: string }
+  | { kind: "open_job"; jobId: string }
+  | { kind: "sync"; groupId: string }
+  | { kind: "none" };
 
 export function actionForPush(data: Record<string, unknown>): PushAction {
   if (data.kind === "device_approved") return { kind: "refresh_device" };
   if (data.kind === "job_ready" && typeof data.ref === "string") return { kind: "open_job", jobId: data.ref };
   if (data.kind === "device_request" && typeof data.ref === "string") return { kind: "approve_device", deviceId: data.ref };
-  // sync is M28.
+  if (data.kind === "sync" && typeof data.ref === "string") return { kind: "sync", groupId: data.ref };
   return { kind: "none" };
 }

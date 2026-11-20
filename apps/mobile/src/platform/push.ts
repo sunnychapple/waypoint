@@ -9,6 +9,7 @@ import { api } from "./api.ts";
 import { getDb, writeDb } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { followJob } from "./jobs.ts";
+import { syncNow } from "./sync.ts";
 
 // Alerts show as banners while the app is open, too.
 Notifications.setNotificationHandler({
@@ -58,6 +59,7 @@ function handle(response: Notifications.NotificationResponse | null): void {
     void followJob(action.jobId);
     router.push(`/job/${encodeURIComponent(action.jobId)}`);
   }
+  if (action.kind === "sync") void syncNow(action.groupId);
 }
 
 // Called once in (tabs)/_layout.tsx: registers the token once this iPhone has a device row, and handles taps.

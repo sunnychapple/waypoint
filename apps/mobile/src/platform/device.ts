@@ -48,10 +48,30 @@ function signerFor(user: string, deviceId: string): DeviceSigner {
 let accountKeyProblem = false;
 export const hasAccountKeyProblem = (): boolean => accountKeyProblem;
 
+// The person this iPhone was last approved for, kept for a silent push that wakes the app with no screen (sync.ts).
+export const LAST_USER_KEY = "last_approved_user";
+
 function approve(user: string, deviceId: string): void {
   setDeviceSigner(signerFor(user, deviceId));
-  writeDb((db) => setSetting(db, statusKey(user), "approved"));
+  writeDb((db) => {
+    setSetting(db, statusKey(user), "approved");
+    setSetting(db, LAST_USER_KEY, user);
+  });
   setStatus("approved");
+}
+
+// Headless (no screen, no React hooks): the approved person and their device signer from the stored identity. null
+// when nothing is known, or this iPhone is not approved for that person; the caller then does nothing.
+export function restoreApprovedUser(): string | null {
+  if (userId !== null) return userId;
+  const db = getDb();
+  const user = getSetting(db, LAST_USER_KEY);
+  if (user === null || getSetting(db, statusKey(user)) !== "approved") return null;
+  const keys = getDeviceKeys(user);
+  if (keys === null) return null;
+  userId = user;
+  setDeviceSigner(signerFor(user, keys.deviceId));
+  return user;
 }
 
 function wait(user: string): void {
@@ -166,17 +186,21 @@ function restore(clerkUserId: string): void {
   const keys = getDeviceKeys(user);
   if (keys !== null && getSetting(db, statusKey(user)) === "approved") {
     setDeviceSigner(signerFor(user, keys.deviceId));
+    writeDb((w) => setSetting(w, LAST_USER_KEY, user)); // approved before this key existed
     setStatus("approved");
   }
 }
 
 // Called once in (tabs)/_layout.tsx.
 export function useDeviceRegistration(): void {
-  const { isSignedIn, userId: clerkUserId } = useAuth();
+  const { isLoaded, isSignedIn, userId: clerkUserId } = useAuth();
   useEffect(() => {
     accountKeyProblem = false; // a sign-out or a switch to another person: nothing carries over
     if (isSignedIn !== true || clerkUserId === null || clerkUserId === undefined) {
       setDeviceSigner(null);
+      // A headless push does not sync a signed-out person, including one whose session ended while the app was closed.
+      // Not while Clerk is still loading (isSignedIn undefined).
+      if (userId !== null || (isLoaded && isSignedIn === false)) writeDb((db) => deleteSetting(db, LAST_USER_KEY));
       userId = null;
       clerkId = null;
       setStatus("signed_out");
@@ -190,7 +214,7 @@ export function useDeviceRegistration(): void {
       if (state === "active" && status !== "approved") void refreshDevice(clerkUserId);
     });
     return () => sub.remove();
-  }, [isSignedIn, clerkUserId]);
+  }, [isLoaded, isSignedIn, clerkUserId]);
 }
 
 export function useDeviceStatus(): DeviceStatus {

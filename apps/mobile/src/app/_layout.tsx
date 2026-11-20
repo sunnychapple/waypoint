@@ -2,6 +2,8 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider, useGate } from "../platform/auth.tsx";
 import { useColors } from "../ui/theme.ts";
+// Loaded at app start, so the silent sync push task is defined even when iOS wakes the app with no screen up (M29b).
+import "../platform/sync.ts";
 
 function RootStack() {
   const colors = useColors();

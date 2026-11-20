@@ -116,6 +116,16 @@ describe("collecting changes", () => {
     expect(out[0]?.kind).toBe("delete_sessions");
     expect(out[0]?.groupId).toBe(G);
   });
+  it("the outbox can be read for one group only", () => {
+    const a = device("a");
+    const other = "grp_fedcba9876543210";
+    a.db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES (?, 'personal', 'owner', 1, 0)", [other]);
+    a.db.run("INSERT INTO outbox (id, group_id, kind, body, created_at) VALUES ('x1', ?, 'sessions', '{}', 1)", [other]);
+    a.db.run("INSERT INTO outbox (id, group_id, kind, body, created_at) VALUES ('g1', ?, 'sessions', '{}', 2)", [G]);
+    expect(nextOutgoing(a.db, 50, G).map((o) => o.id)).toEqual(["g1"]);
+    expect(nextOutgoing(a.db, 50, "grp_none")).toEqual([]);
+    expect(nextOutgoing(a.db, 50).map((o) => o.id)).toEqual(["x1", "g1"]);
+  });
   it("a capture names its row for the blob upload", () => {
     const a = device("a");
     const s = startRecordingSession(a.db, a.deps, a.space.id, true);

@@ -24,7 +24,7 @@
       ["expo-sqlite", { "enableFTS": true }],
       ["expo-build-properties", { "ios": { "deploymentTarget": "26.0" } }],
       "expo-apple-authentication",
-      "expo-notifications",
+      ["expo-notifications", { "enableBackgroundRemoteNotifications": true }],
       "@clerk/expo"
     ]
   }
