@@ -110,8 +110,13 @@ export async function askRouter(
   input: RouterInput,
 ): Promise<RouterAnswers | null> {
   let output: unknown;
+  // The abort signal only helps if the binding honors it, so the wait is also raced against a timer.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("router timeout")), ROUTER_TIMEOUT_MS);
+  });
   try {
-    output = await ai.run(
+    output = await Promise.race([ai.run(
       model,
       {
         // The model field is the last path segment of the configured id, e.g. "clef-flash".
@@ -120,9 +125,11 @@ export async function askRouter(
         questions: CLEF_QUESTIONS,
       },
       { gateway: gatewayOptions(gatewayId), signal: AbortSignal.timeout(ROUTER_TIMEOUT_MS) },
-    );
+    ), timeout]);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
   const reply = ClefReplySchema.safeParse(output);
   if (!reply.success) return null;

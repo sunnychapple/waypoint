@@ -1,8 +1,8 @@
 import { PRICE_TABLE_2026_11_16_2 } from "@waypoint/pricing";
 import { DEFAULT_ROUTES, type RouteTable } from "@waypoint/router";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { gatewayOptions, replyText, type AiBinding } from "../src/ai/gateway.ts";
-import { askRouter, routeTask, type RouterInput } from "../src/ai/router.ts";
+import { askRouter, ROUTER_TIMEOUT_MS, routeTask, type RouterInput } from "../src/ai/router.ts";
 import type { LoadedConfig } from "../src/config/load.ts";
 
 export const aiFits: (ai: Ai) => AiBinding = (ai) => ai;
@@ -189,6 +189,70 @@ describe("askRouter", () => {
     const { ai } = fakeAi(async () => clefReply({ needs_web: { type: "noul", noul: 0.9 } }));
     const result = await askRouter(ai, "gw", "m", INPUT);
     expect(result?.needs_web).toEqual({ value: true, p: 0.9 });
+  });
+
+  test("band edges: scores round half up to the value and use that value's band", async () => {
+    const probs = { "0": 0.1, "1": 0.2, "2": 0.3, "3": 0.25, "4": 0.15 };
+    const cases: [number, number, number][] = [
+      [0.49, 1, 0.3],
+      [0.5, 2, 0.3],
+      [1.49, 2, 0.3],
+      [1.5, 3, 0.55],
+      [2.5, 4, 0.55],
+      [3.49, 4, 0.55],
+      [3.5, 5, 0.15],
+      [4.5, 5, 0.15],
+      [4, 5, 0.15],
+    ];
+    for (const [score, value, p] of cases) {
+      const { ai } = fakeAi(async () => clefReply({ difficulty: { type: "score", score, probabilities: probs } }));
+      const result = await askRouter(ai, "gw", "m", INPUT);
+      expect(result?.difficulty.value, `score ${score}`).toBe(value);
+      expect(result?.difficulty.p, `score ${score}`).toBeCloseTo(p, 10);
+    }
+  });
+
+  test("noul of exactly 0.5 is yes with p 0.5, and 0.49 is no with p 0.51", async () => {
+    const half = await askRouter(fakeAi(async () => clefReply({ unsafe: { type: "noul", noul: 0.5 } })).ai, "gw", "m", INPUT);
+    expect(half?.unsafe).toEqual({ value: true, p: 0.5 });
+    const below = await askRouter(fakeAi(async () => clefReply({ unsafe: { type: "noul", noul: 0.49 } })).ai, "gw", "m", INPUT);
+    expect(below?.unsafe.value).toBe(false);
+    expect(below?.unsafe.p).toBeCloseTo(0.51, 10);
+  });
+
+  test("band probabilities that sum past 1 are clamped to 1", async () => {
+    const { ai } = fakeAi(async () =>
+      clefReply({ difficulty: { type: "score", score: 0, probabilities: { "0": 0.7, "1": 0.7, "2": 0, "3": 0, "4": 0 } } }),
+    );
+    expect((await askRouter(ai, "gw", "m", INPUT))?.difficulty).toEqual({ value: 1, p: 1 });
+  });
+
+  test("returns null when ai.run throws synchronously", async () => {
+    const ai: AiBinding = {
+      run: () => {
+        throw new Error("sync boom");
+      },
+    };
+    expect(await askRouter(ai, "gw", "m", INPUT)).toBeNull();
+  });
+
+  test("returns null when the call never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ai } = fakeAi(() => new Promise(() => {}));
+      const pending = askRouter(ai, "gw", "m", INPUT);
+      await vi.advanceTimersByTimeAsync(ROUTER_TIMEOUT_MS + 1);
+      expect(await pending).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("returns null when the reply is a ReadableStream, a string, or null", async () => {
+    for (const reply of [new ReadableStream(), "text", null]) {
+      const { ai } = fakeAi(async () => reply);
+      expect(await askRouter(ai, "gw", "m", INPUT)).toBeNull();
+    }
   });
 
   test("returns null when the call throws", async () => {
