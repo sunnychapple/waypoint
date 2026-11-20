@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+import { listSegments } from "../src/core/capture/segments.ts";
+import { migrate } from "../src/core/db/migrate.ts";
+import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
+import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
+import { cleanWord, excerptAround, splitWords } from "../src/core/explain/excerpt.ts";
+import { askLater } from "../src/core/explain/later.ts";
+import { getSent, logSent, settleSent, utf8Length } from "../src/core/explain/sent.ts";
+import { createMemoryDb } from "./helpers/db.ts";
+
+function setup() {
+  const db = createMemoryDb();
+  migrate(db);
+  let n = 0;
+  const deps = { now: () => 1_000, newId: () => `id_${++n}` };
+  const space = ensureDefaultSpace(db, deps);
+  db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at) VALUES ('s1', ?, 'recording', 'Bio', 'saved', 0)", [space.id]);
+  return { db, deps };
+}
+
+const seg = (tStart: number, text: string) => ({ tStart, tEnd: tStart + 4_000, text });
+
+describe("excerptAround", () => {
+  const lines = [seg(0, "first"), seg(56_000, "before"), seg(100_000, "word here"), seg(108_000, "just after"), seg(120_000, "too late")];
+  it("keeps segments overlapping 45 s before to 9 s after, in time order", () => {
+    expect(excerptAround([...lines].reverse(), 100_000)).toBe("before word here just after");
+  });
+  it("collapses spaces and returns '' when nothing is near", () => {
+    expect(excerptAround([seg(0, "  a \n b ")], 1_000)).toBe("a b");
+    expect(excerptAround(lines, 500_000)).toBe("");
+  });
+  it("cuts from the start at a word boundary to fit", () => {
+    expect(excerptAround([seg(0, "aaa bbb ccc ddd")], 0, 9)).toBe("ccc ddd");
+    expect(excerptAround([seg(0, "abcdefghij")], 0, 4)).toBe("ghij");
+  });
+});
+
+describe("words", () => {
+  it("splitWords keeps every character and finds the words", () => {
+    const tokens = splitWords("Photosynthesis, in “plants”!");
+    expect(tokens.map((t) => t.text).join("")).toBe("Photosynthesis, in “plants”!");
+    expect(tokens.filter((t) => t.word !== null).map((t) => t.word)).toEqual(["Photosynthesis", "in", "plants"]);
+    expect(splitWords("")).toEqual([]);
+  });
+  it("cleanWord", () => {
+    expect(cleanWord("(mitochondria).")).toBe("mitochondria");
+    expect(cleanWord("—")).toBeNull();
+    expect(cleanWord("x".repeat(101))).toBeNull();
+    expect(cleanWord("don't")).toBe("don't");
+  });
+});
+
+describe("explanations and sent_log", () => {
+  it("lists device segments in order", () => {
+    const { db } = setup();
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('s1', 5000, 6000, 'b', 'device'), ('s1', 1000, 2000, 'a', 'device'), ('s1', 1000, 2000, 'c', 'cloud')");
+    expect(listSegments(db, "s1")).toEqual([{ tStart: 1000, tEnd: 2000, text: "a" }, { tStart: 5000, tEnd: 6000, text: "b" }]);
+  });
+  it("start, add to the thread, discard unless saved", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 1234.6, "osmosis");
+    expect(e).toMatchObject({ sessionId: "s1", t: 1235, term: "osmosis", thread: [], saved: false, createdAt: 1_000 });
+    const item: ThreadItem = { kind: "explain", text: "Water moves.", at: 2_000, retention: "standard", sentId: "key_1" };
+    expect(addToThread(db, e.id, item).thread).toEqual([item]);
+    expect(getExplanation(db, e.id)?.thread).toEqual([item]);
+    discardIfUnsaved(db, e.id);
+    expect(getExplanation(db, e.id)).toBeNull();
+  });
+  it("a corrupt thread throws", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 0, "x");
+    db.run("UPDATE explanations SET thread = '[{\"kind\":\"other\"}]' WHERE id = ?", [e.id]);
+    expect(() => getExplanation(db, e.id)).toThrow();
+  });
+  it("logSent stores the exact body once, settleSent adds credits and retention", () => {
+    const { db } = setup();
+    const body = { word: "café", transcript: "un café" };
+    logSent(db, { id: "key_1", task: "explain", sessionId: "s1", body, at: 5 });
+    logSent(db, { id: "key_1", task: "explain", sessionId: "s1", body: { word: "other", transcript: "x" }, at: 6 });
+    expect(getSent(db, "key_1")).toEqual({ id: "key_1", task: "explain", sessionId: "s1", sent: JSON.stringify(body), bytes: 40, credits: null, retention: null, at: 5 });
+    settleSent(db, "key_1", 1, "standard");
+    expect(getSent(db, "key_1")).toMatchObject({ credits: 1, retention: "standard" });
+    expect(getSent(db, "nope")).toBeNull();
+  });
+  it("utf8Length", () => {
+    expect(utf8Length("abc")).toBe(3);
+    expect(utf8Length("é")).toBe(2);
+    expect(utf8Length("€")).toBe(3);
+    expect(utf8Length("😀")).toBe(4);
+  });
+  it("deleting the session removes explanations, terms and sent_log rows", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 0, "x");
+    db.run("INSERT INTO terms (id, session_id, explanation_id, term, meaning, created_at) VALUES ('t1', 's1', ?, 'x', 'm', 1)", [e.id]);
+    logSent(db, { id: "key_1", task: "explain", sessionId: "s1", body: {}, at: 1 });
+    db.run("DELETE FROM sessions WHERE id = 's1'");
+    expect(db.get<{ n: number }>("SELECT (SELECT count(*) FROM explanations) + (SELECT count(*) FROM terms) + (SELECT count(*) FROM sent_log) AS n")?.n).toBe(0);
+  });
+  it("askLater adds a flag with the question", () => {
+    const { db, deps } = setup();
+    askLater(db, deps, "s1", 4_200.4, "osmosis");
+    expect(db.get<{ t: number; question: string; state: string }>("SELECT t, question, state FROM flags")).toEqual({ t: 4200, question: 'What does "osmosis" mean?', state: "open" });
+  });
+});

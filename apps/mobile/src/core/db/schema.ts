@@ -114,4 +114,40 @@ CREATE TABLE settings (
 );
 `,
   },
+  {
+    version: 2,
+    sql: `
+CREATE TABLE explanations (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  t INTEGER NOT NULL CHECK (t >= 0),
+  term TEXT NOT NULL CHECK (length(term) BETWEEN 1 AND 100),
+  thread TEXT NOT NULL DEFAULT '[]',
+  saved INTEGER NOT NULL DEFAULT 0 CHECK (saved IN (0, 1)),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX explanations_session ON explanations (session_id, t);
+
+CREATE TABLE terms (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  explanation_id TEXT NOT NULL UNIQUE REFERENCES explanations (id) ON DELETE CASCADE,
+  term TEXT NOT NULL,
+  meaning TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE sent_log (
+  id TEXT PRIMARY KEY,
+  task TEXT NOT NULL CHECK (task IN ('explain', 'more_detail', 'double_check', 'read_link', 'research', 'overview_script', 'video_slides', 'diagram', 'mini_app', 'practice', 'retranscribe')),
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  sent TEXT NOT NULL,
+  bytes INTEGER NOT NULL CHECK (bytes >= 0),
+  credits INTEGER CHECK (credits >= 0),
+  retention TEXT CHECK (retention IN ('standard', 'zero')),
+  at INTEGER NOT NULL
+);
+CREATE INDEX sent_log_at ON sent_log (at);
+`,
+  },
 ];
