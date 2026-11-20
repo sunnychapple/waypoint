@@ -16,7 +16,11 @@ export const RegisterDeviceRequestSchema = z
     sign_pub: PublicKeySchema,
     box_pub: PublicKeySchema,
     commitment: Bytes32Schema.optional(),
-    account: z.strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema, box_pub: PublicKeySchema, cert: SignatureSchema }).optional(),
+    // cert: the account key's certificate for this device. self_cert: the account key's signature over its own row
+    // (docs/security.md section 6, "Account certificate").
+    account: z
+      .strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema, box_pub: PublicKeySchema, cert: SignatureSchema, self_cert: SignatureSchema })
+      .optional(),
   })
   .refine((r) => (r.commitment === undefined) !== (r.account === undefined), {
     message: "send commitment (a new device) or account (the first device), not both",
@@ -82,7 +86,7 @@ export const RecoveryViewSchema = z.strictObject({
 export const RemoveDeviceRequestSchema = z.union([
   z.strictObject({}),
   z.strictObject({
-    account: z.strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema, box_pub: PublicKeySchema }),
+    account: z.strictObject({ id: KeyIdSchema, sign_pub: PublicKeySchema, box_pub: PublicKeySchema, self_cert: SignatureSchema }),
     devices: z.array(z.strictObject({ id: KeyIdSchema, cert: SignatureSchema, account_envelope: EnvelopeTextSchema })).min(1).max(50),
   }),
 ]);

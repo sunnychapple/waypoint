@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  accountKeyInfo, bodySha256, concat, context, deviceCertificateInput, envelopeSignatureInput, fromBase64Url, fromHex,
+  accountCertificateInput, accountKeyInfo, bodySha256, concat, context, deviceCertificateInput, envelopeSignatureInput, fromBase64Url, fromHex,
   groupKeyInfo, HPKE_SUITE, importContentKey, linkPasscodeHash, lockContent, makeEnvelope, openEnvelope, openResult,
   pairingCode, pairingCommitment, parseEnvelope, recoveryAad, recoveryWrapKey, requestSigningInput, resultInfo, sealResult,
-  toBase64Url, toHex, unlockContent, unwrapAccountKey, utf8, verifyP256, wrapAccountKey, type EnvelopePurpose,
+  toBase64Url, toHex, unlockContent, unwrapAccountKey, utf8, verifyAccountCertificate, verifyP256, wrapAccountKey, type EnvelopePurpose,
 } from "../src/index.ts";
 import { readVectors } from "./helpers/vectors.ts";
 
@@ -14,6 +14,7 @@ type Vectors = {
   request: { method: string; target: string; deviceId: string; timestamp: number; nonce: string; bodySha256: string; body_utf8: string; signing_input: string; device_sign_pub: string; signature: string };
   pairing: { new_sign_pub: string; new_box_pub: string; new_nonce: string; approver_sign_pub: string; approver_nonce: string; commitment: string; code: string };
   device_certificate: { user_id: string; device_id: string; sign_pub: string; box_pub: string; signing_input: string; account_sign_pub: string; signature: string };
+  account_certificate: { user_id: string; account_id: string; account_key: string; sign_pub: string; box_pub: string; signing_input: string; signature: string };
   group_key_envelope: { group_id: string; key_version: number; recipient_device_id: string; recipient_private_key: string; recipient_box_pub: string; ikm_e: string; group_key: string; signer_id: string; signer_sign_pub: string; info: string; signature_input: string; envelope: string };
   account_key_envelope: { user_id: string; account_device_id: string; recipient_device_id: string; recipient_private_key: string; ikm_e: string; account_key: string; signer_id: string; signer_sign_pub: string; info: string; envelope: string };
   sealed_result: { job_id: string; device_id: string; device_private_key: string; device_box_pub: string; ikm_e: string; info: string; plaintext_utf8: string; sealed: string };
@@ -52,6 +53,21 @@ describe("waypoint-v1 vectors", () => {
     const input = deviceCertificateInput(c.user_id, c.device_id, c.sign_pub, c.box_pub);
     expect(toHex(input)).toBe(c.signing_input);
     expect(await verifyP256(fromBase64Url(c.account_sign_pub), fromBase64Url(c.signature), input)).toBe(true);
+  });
+
+  it("account certificate", async () => {
+    const a = v.account_certificate;
+    expect(toHex(accountCertificateInput(a.user_id, a.account_id, a.sign_pub, a.box_pub))).toBe(a.signing_input);
+    expect(await verifyAccountCertificate(a.signature, a.user_id, a.account_id, a.sign_pub, a.box_pub)).toBe(true);
+    // The attack it stops: the known sign_pub with another box_pub (docs/security.md section 6).
+    expect(await verifyAccountCertificate(a.signature, a.user_id, a.account_id, a.sign_pub, v.device_certificate.box_pub)).toBe(false);
+    expect(await verifyAccountCertificate(a.signature, "usr_2", a.account_id, a.sign_pub, a.box_pub)).toBe(false);
+    expect(await verifyAccountCertificate(a.signature, a.user_id, "acct_2", a.sign_pub, a.box_pub)).toBe(false);
+    // A device certificate made by the same account key is not an account certificate (another context label).
+    const d = v.device_certificate;
+    expect(d.account_sign_pub).toBe(a.sign_pub);
+    expect(await verifyAccountCertificate(d.signature, d.user_id, d.device_id, a.sign_pub, d.box_pub)).toBe(false);
+    expect(await verifyAccountCertificate("not base64url!", a.user_id, a.account_id, a.sign_pub, a.box_pub)).toBe(false);
   });
 
   const envelopes: [string, EnvelopePurpose, () => Uint8Array, string, string, string, string, string, string][] = [
