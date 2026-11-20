@@ -346,7 +346,7 @@ export function createApiClient(options: ApiClientOptions) {
     pushToken: (request: PushTokenRequest): Promise<PushTokenResponse> =>
       json({ method: "POST", target: "/v1/push-tokens", body: request, retry: true }, PushTokenResponseSchema),
     setZeroRetention: (enabled: boolean): Promise<ZeroRetentionResponse> =>
-      json({ method: "PUT", target: "/v1/settings/zero-retention", body: { enabled }, retry: true }, ZeroRetentionResponseSchema),
+      json({ method: "PUT", target: "/v1/settings/zero-retention", body: { enabled }, signing: "device", retry: true }, ZeroRetentionResponseSchema),
     activity: (before?: string): Promise<ActivityResponse> =>
       json({ method: "GET", target: before === undefined ? "/v1/activity" : `/v1/activity?before=${encodeURIComponent(before)}`, retry: true }, ActivityResponseSchema),
     // Devices and recovery (M27b; docs/security.md sections 8, 12 and 13).

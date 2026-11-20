@@ -43,6 +43,10 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
       if (workflow === null) throw new ApiFailure("bad_request", "job type not available");
       const route = jobRoute(config, request.type, user.zero_retention);
       if (route === null) throw new ApiFailure("forbidden", "no zero-retention route for this task");
+      // The cloud fallback voice has a price but no Workflow yet (open question 36): nothing may be charged for it.
+      if ((request.type === "overview_script" || request.type === "video_slides") && request.fallback_voice === true) {
+        throw new ApiFailure("bad_request", "fallback voice not available");
+      }
       const credits = quoteCredits(config.prices, {
         task: request.type,
         depth: request.type === "research" ? request.depth : undefined,

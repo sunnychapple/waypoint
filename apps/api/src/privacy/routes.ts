@@ -5,6 +5,7 @@ import {
   type ZeroRetentionResponse,
 } from "@waypoint/contracts";
 import { Hono } from "hono";
+import { requireDeviceSignature } from "../auth/signature.ts";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
@@ -30,7 +31,9 @@ function parseLimit(value: string | undefined): number {
 
 export function privacyRoutes(deps: { now: () => number }): Hono<AppEnv> {
   return new Hono<AppEnv>()
-    .put("/v1/settings/zero-retention", idempotent(deps), async (c) => {
+    // Signed (docs/security.md section 15): a session alone, such as one left on a removed or lost device, cannot turn
+    // the person's zero retention off.
+    .put("/v1/settings/zero-retention", requireDeviceSignature(deps), idempotent(deps), async (c) => {
       const user = c.get("user");
       const body: unknown = await c.req.json().catch(() => {
         throw new ApiFailure("bad_request", "invalid request");

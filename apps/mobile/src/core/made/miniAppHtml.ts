@@ -87,9 +87,27 @@ function readRawText(s: string, lower: string, i: number, name: string): { text:
   }
 }
 
+// Script types a browser runs as JavaScript (M25c review): only these are run, through the loader.
+const SCRIPT_TYPES = new Set(["", "text/javascript", "application/javascript", "module"]);
+
 function rawElement(tag: Tag, text: string): string {
   if (tag.name === "script") {
-    return tag.attributes.some(([key]) => key === "src") ? "" : `<script>${RUN}(${scriptJson(text)})</script>`;
+    if (tag.attributes.some(([key]) => key === "src")) return "";
+    const type = (tag.attributes.find(([key]) => key === "type")?.[1] ?? "").trim().toLowerCase();
+    if (SCRIPT_TYPES.has(type)) return `<script>${RUN}(${scriptJson(text)})</script>`;
+    // A JSON data block stays data: parsed and written again with "<" escaped, under its id. It never runs.
+    if (type === "application/json") {
+      const id = tag.attributes.find(([key]) => key === "id")?.[1];
+      let value: unknown;
+      try {
+        value = JSON.parse(text);
+      } catch {
+        return "";
+      }
+      const attributes: [string, string][] = id === undefined ? [["type", "application/json"]] : [["type", "application/json"], ["id", id]];
+      return `${openTag({ ...tag, attributes })}${scriptJson(value)}</script>`;
+    }
+    return ""; // any other type is data the page cannot use here
   }
   // CSS has no use for "<"; without it the style holds no tag however a browser reads it.
   if (tag.name === "style") return text.includes("<") ? "" : `<style>${text}</style>`;

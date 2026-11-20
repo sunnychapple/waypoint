@@ -193,6 +193,18 @@ describe("cancelJob", () => {
     expect([...w.objects.keys()]).toEqual([]);
   });
 
+  test("the hold is released before the Workflow is stopped", async () => {
+    const w = await makeJobsWorld();
+    await insertJob(w, { id: "job_run", key: KEY, state: "running" });
+    const row = await loadJob(w.db, "job_run", "u1");
+    if (row === null) throw new Error("expected the job");
+    const seen: string[] = [];
+    await cancelJob(w.deps, row, async () => {
+      seen.push(`stop after ${w.commands.map((command) => command.type).join(",")}`);
+    });
+    expect(seen).toEqual(["stop after release"]);
+  });
+
   test("cancelling a running job still cancels when its stop rejects", async () => {
     const w = await makeJobsWorld();
     await insertJob(w, { id: "job_run", key: KEY, state: "running" });
@@ -220,14 +232,16 @@ describe("cancelJob", () => {
     expect(w.objects.has("results/job_ok")).toBe(false);
   });
 
-  test("cancelling a running job whose hold was already settled keeps the state running and the charge, deletes the objects and sends no usage event", async () => {
+  test("cancelling a running job whose hold was already settled does not stop it, keeps the state running and the charge, deletes the objects and sends no usage event", async () => {
     const w = await makeJobsWorld();
     await insertJob(w, { id: "job_run", key: KEY, state: "running" });
     w.store.apply({ type: "settle", id: `job_settle:u1:${KEY}`, hold_id: `job:u1:${KEY}`, actual: 30 }, JOB_NOW);
     await w.bucket.put("results/job_run", new Uint8Array([1]));
     const row = await loadJob(w.db, "job_run", "u1");
     if (row === null) throw new Error("expected the job");
-    await cancelJob(w.deps, row, async () => {});
+    const { calls, stop } = stopCounter();
+    await cancelJob(w.deps, row, stop);
+    expect(calls.count).toBe(0);
     expect((await loadJob(w.db, "job_run", "u1"))?.state).toBe("running");
     expect(w.store.read().monthly).toBe(70);
     expect(w.usage).toHaveLength(0);
