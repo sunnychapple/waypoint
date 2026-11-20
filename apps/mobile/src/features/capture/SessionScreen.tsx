@@ -23,9 +23,12 @@ import { linkRefused, revokeLink } from "../../platform/links.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
+import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
+import { RecordingPlayer } from "./RecordingPlayer.tsx";
 
 // One session: its title, when and where it was saved, and what to do with it.
-// A recording's transcript lists its lines; tapping a word opens Explain (M15).
+// A recording's transcript lists its lines; tapping a word opens Explain (M15), tapping a line's time plays the
+// recording from there (open question 54).
 export default function SessionScreen() {
   const colors = useColors();
   const { id, view } = useLocalSearchParams<{ id: string; view?: string }>();
@@ -43,18 +46,22 @@ export default function SessionScreen() {
       links: linksForSession(db, id),
       role: spaceGroups(db).get(session.spaceId)?.role ?? null,
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
+      // The recording's parts that are on this iPhone (a synced part may not be downloaded yet).
+      playParts: session.kind === "recording" ? uploadParts(db, id).filter((part) => part.file !== "") : [],
     };
   }, id);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [showSecond, setShowSecond] = useState(view === "second");
+  const [seek, setSeek] = useState<{ ms: number } | null>(null);
   // A push to ?view=second while this screen is already open moves the switch too.
   useEffect(() => setShowSecond(view === "second"), [view]);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research, second, overviews, links, role } = data;
+  const { session, spaceName, pages, segments, research, second, overviews, links, role, playParts } = data;
+  const playable = playParts.length > 0 && (session.state === "saved" || session.state === "interrupted");
   // A mini app or a diagram is listed only while its flag is on (M25b).
   const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
   const offset = -new Date().getTimezoneOffset();
@@ -149,6 +156,8 @@ export default function SessionScreen() {
         <Caption>Couldn't write down this recording.</Caption>
       ) : null}
 
+      {playable ? <RecordingPlayer parts={playParts} seek={seek} onSeekDone={() => setSeek(null)} /> : null}
+
       {second !== null ? (
         <View style={styles.switchRow}>
           {(["On this iPhone", "Second transcript"] as const).map((label, index) => {
@@ -185,7 +194,15 @@ export default function SessionScreen() {
       ) : (
         segments.map((segment) => (
           <View key={segment.tStart} style={styles.line}>
-            <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Play from ${formatOffset(segment.tStart)}`}
+              hitSlop={12}
+              disabled={!playable || getRecorderStatus().state !== "idle"}
+              onPress={() => setSeek({ ms: segment.tStart })}
+            >
+              <Text style={[styles.time, { color: playable ? colors.accent : colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
+            </Pressable>
             <WordText
               text={segment.text}
               style={[styles.lineText, { color: colors.ink }]}
