@@ -9,6 +9,8 @@ import { devicesRoute } from "./devices/register.ts";
 import { memberRoutes } from "./groups/members.ts";
 import { groupRoutes } from "./groups/routes.ts";
 import { groupKeyRoutes } from "./keys/routes.ts";
+import { jobsRoutes } from "./jobs/routes.ts";
+import { jobWorkflow } from "./jobs/start.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
@@ -54,6 +56,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", recoveryRoute({ now: deps.now }));
   app.route("/", removeDeviceRoute({ now: deps.now }));
   app.route("/", groupKeyRoutes({ now: deps.now }));
+  app.route("/", jobsRoutes({ now: deps.now, workflows: jobWorkflow }));
   app.route("/", groupRoutes({ now: deps.now }));
   app.route("/", memberRoutes({ now: deps.now }));
   return app;

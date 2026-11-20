@@ -254,6 +254,7 @@ describe("GET /v1/devices", () => {
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
     const list = DeviceListSchema.parse(body);
+    expect(list.user_id).toBe("u1");
     expect(list.devices.map((device) => device.id)).toEqual(["a_dev", "acc_u1", "b_dev"]);
   });
 });

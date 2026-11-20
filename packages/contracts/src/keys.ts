@@ -38,7 +38,7 @@ export const DeviceViewSchema = z.strictObject({
 });
 export type DeviceView = z.infer<typeof DeviceViewSchema>;
 
-export const DeviceListSchema = z.strictObject({ devices: z.array(DeviceViewSchema) });
+export const DeviceListSchema = z.strictObject({ user_id: KeyIdSchema, devices: z.array(DeviceViewSchema) });
 
 // S1C: pairing and approval.
 export const PairingNonceRequestSchema = z.strictObject({ nonce: Bytes32Schema });
