@@ -183,10 +183,11 @@ describe("GET /v1/activity", () => {
     expect(seen).toEqual(["x3", "x2", "x1"]);
   });
 
-  test("two rows with the same at, the smaller id inserted first, come back larger id first", async () => {
+  test("two rows with the same at, the larger id inserted first, come back larger id first", async () => {
+    // Larger id first: with the (user_id, at) index, smaller-first would pass even without "id DESC".
     const db = await fixture([
-      { user: "u1", id: "y1", at: 6000 },
       { user: "u1", id: "y2", at: 6000 },
+      { user: "u1", id: "y1", at: 6000 },
     ]);
     const body = (await (await activityGet(setup(PLUS), { DB: db }, "?limit=10")).json()) as ActivityResponse;
     expect(body.items.map((item) => item.id)).toEqual(["y2", "y1"]);
