@@ -24,8 +24,24 @@ export function memberLabels(members: readonly Member[], me: string): Map<string
 export type InviteAccess = "none" | "week" | "month" | "quarter";
 const ACCESS_DAYS: Record<Exclude<InviteAccess, "none">, number> = { week: 7, month: 30, quarter: 90 };
 
-export function inviteEnds(choice: InviteAccess, now: number): number | null {
-  return choice === "none" ? null : now + ACCESS_DAYS[choice] * DAY_MS;
+// An owner invite never ends, so an owner role gives null whatever the choice.
+export function inviteEnds(choice: InviteAccess, now: number, role?: Role): number | null {
+  if (role === "owner" || choice === "none") return null;
+  return now + ACCESS_DAYS[choice] * DAY_MS;
+}
+
+// The name a joined group's local space gets until its key makes the group's name readable.
+export const SHARED_FALLBACK_NAME = "Shared space";
+
+// True for "Shared space" and "Shared space 2", "Shared space 3"…: a placeholder, not a name the person chose.
+export function isFallbackSpaceName(name: string): boolean {
+  return name === SHARED_FALLBACK_NAME || /^Shared space \d+$/.test(name);
+}
+
+// The last owner cannot leave: the server needs an owner (409). Anyone else, or an owner with another owner, can.
+export function canLeave(members: readonly Member[], me: string): boolean {
+  const owners = members.filter((m) => m.role === "owner");
+  return !owners.some((m) => m.user_id === me) || owners.length > 1;
 }
 
 // The safety code for a pending account key: the first 12 hex characters of its SHA-256, in groups of 4.

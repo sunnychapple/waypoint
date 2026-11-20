@@ -59,7 +59,7 @@ export default function InviteScreen() {
 
   async function makeLink(): Promise<void> {
     try {
-      const url = await invite(groupId, role, history, inviteEnds(access, Date.now()));
+      const url = await invite(groupId, role, history, inviteEnds(access, Date.now(), role));
       await Share.share({ message: url });
       router.back();
     } catch {

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { canInvite, canRemove, inviteEnds, memberLabels, safetyCode, type Member } from "../src/core/share/spaces.ts";
+import {
+  canInvite,
+  canLeave,
+  canRemove,
+  inviteEnds,
+  isFallbackSpaceName,
+  memberLabels,
+  safetyCode,
+  type Member,
+} from "../src/core/share/spaces.ts";
 
 const member = (user_id: string, role: Member["role"], starts_at: number): Member => ({
   user_id,
@@ -53,6 +62,43 @@ describe("inviteEnds", () => {
 
   it("ends 90 days after now for 3 months", () => {
     expect(inviteEnds("quarter", 1_000)).toBe(1_000 + 90 * DAY);
+  });
+
+  it("never ends an owner invite, whatever the choice", () => {
+    expect(inviteEnds("week", 1_000, "owner")).toBeNull();
+    expect(inviteEnds("quarter", 1_000, "owner")).toBeNull();
+  });
+
+  it("still ends an editor or viewer invite", () => {
+    expect(inviteEnds("week", 1_000, "editor")).toBe(1_000 + 7 * DAY);
+  });
+});
+
+describe("isFallbackSpaceName", () => {
+  it("matches Shared space and its numbered forms", () => {
+    expect(isFallbackSpaceName("Shared space")).toBe(true);
+    expect(isFallbackSpaceName("Shared space 2")).toBe(true);
+    expect(isFallbackSpaceName("Shared space 12")).toBe(true);
+  });
+
+  it("does not match a name the person chose", () => {
+    expect(isFallbackSpaceName("Family")).toBe(false);
+    expect(isFallbackSpaceName("Shared space notes")).toBe(false);
+    expect(isFallbackSpaceName("")).toBe(false);
+  });
+});
+
+describe("canLeave", () => {
+  it("lets the last owner not leave", () => {
+    expect(canLeave([member("usr_me", "owner", 1), member("usr_a", "viewer", 2)], "usr_me")).toBe(false);
+  });
+
+  it("lets an owner leave when another owner remains", () => {
+    expect(canLeave([member("usr_me", "owner", 1), member("usr_o2", "owner", 2)], "usr_me")).toBe(true);
+  });
+
+  it("lets an editor or viewer leave", () => {
+    expect(canLeave([member("usr_me", "editor", 2), member("usr_o", "owner", 1)], "usr_me")).toBe(true);
   });
 });
 

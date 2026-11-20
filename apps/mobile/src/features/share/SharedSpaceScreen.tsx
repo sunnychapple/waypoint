@@ -4,7 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { dateLine } from "../../core/capture/labels.ts";
 import { getGroup, heldVersions } from "../../core/groups/groups.ts";
-import { canInvite, canRemove, memberLabels, type Role } from "../../core/share/spaces.ts";
+import { canInvite, canLeave, canRemove, memberLabels, type Role } from "../../core/share/spaces.ts";
 import { refreshGroups } from "../../platform/groups.ts";
 import { currentUserId } from "../../platform/device.ts";
 import { useQuery } from "../../platform/db.ts";
@@ -99,7 +99,7 @@ export default function SharedSpaceScreen() {
 
       {changed.map((change) => (
         <View key={change.userId} style={[styles.notice, { backgroundColor: colors.surface2 }]}>
-          <Body style={{ fontWeight: "600", color: colors.ink }}>A member's security key changed</Body>
+          <Body style={{ fontWeight: "600", color: colors.ink }}>{`${labels.get(change.userId) ?? "A member"}'s security key changed`}</Body>
           <Caption>
             Their notes are not shared with their new key until you check. Compare the safety code with them, or tap Trust if you know they changed
             devices.
@@ -133,10 +133,12 @@ export default function SharedSpaceScreen() {
         />
       ) : null}
 
-      <View style={styles.leave}>
-        <Caption>Leaving keeps your copy of the notes on this iPhone.</Caption>
-        <SecondaryButton label="Leave this shared space" icon="rectangle.portrait.and.arrow.right" tone="surface" onPress={confirmLeave} />
-      </View>
+      {canLeave(group.members, me) ? (
+        <View style={styles.leave}>
+          <Caption>Leaving keeps your copy of the notes on this iPhone.</Caption>
+          <SecondaryButton label="Leave this shared space" icon="rectangle.portrait.and.arrow.right" tone="surface" onPress={confirmLeave} />
+        </View>
+      ) : null}
     </Screen>
   );
 }

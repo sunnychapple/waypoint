@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { SpaceNameError } from "../../core/db/spaces.ts";
@@ -11,6 +11,7 @@ export default function NewSharedSpaceScreen() {
   const colors = useColors();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false); // a second tap before the first request ends is ignored
 
   async function create(): Promise<void> {
     const trimmed = name.trim();
@@ -18,10 +19,13 @@ export default function NewSharedSpaceScreen() {
       setError("Give it a name.");
       return;
     }
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       const groupId = await newSharedSpace(trimmed);
       router.replace(`/shared/${encodeURIComponent(groupId)}`);
     } catch (e) {
+      inFlight.current = false;
       if (e instanceof SpaceNameError && e.message === "taken") {
         setError(`You already have a space called ${trimmed}.`);
         return;

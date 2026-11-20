@@ -1,8 +1,8 @@
 import { randomUUID, CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
-import { createSpace, SpaceNameError } from "../core/db/spaces.ts";
-import { getGroup, type Role } from "../core/groups/groups.ts";
+import { createSpace, freeSpaceName } from "../core/db/spaces.ts";
+import { getGroup, upsertGroup, type Role } from "../core/groups/groups.ts";
 import { acceptNewAccountKey } from "../core/groups/keys.ts";
-import { safetyCode } from "../core/share/spaces.ts";
+import { SHARED_FALLBACK_NAME, safetyCode } from "../core/share/spaces.ts";
 import { getDb, writeDb } from "./db.ts";
 import { currentUserId } from "./device.ts";
 import {
@@ -10,6 +10,8 @@ import {
   createGroup,
   createInvite,
   ensureAllKeysNow,
+  ensureKeys,
+  refreshGroups,
   removeMember as removeGroupMember,
 } from "./groups.ts";
 
@@ -23,8 +25,6 @@ export type PendingKeyChange = {
   // "Trust the new key": accepts the member's new account key, then wraps the group keys for it.
   trust: () => Promise<void>;
 };
-
-const SHARED_FALLBACK_NAME = "Shared space";
 
 // Maps a local space to a group and marks the space's row to send (as M29b's turnOnSync does for a personal space).
 function mapSpace(spaceId: string, groupId: string): void {
@@ -54,27 +54,25 @@ export async function newSharedSpace(name: string): Promise<string> {
 // The link for a new invite. "From now" gives history_from = now; "everything" gives 0. An owner invite never ends.
 export async function invite(groupId: string, role: Role, history: HistoryChoice, ends: number | null): Promise<string> {
   const historyFrom = history === "from_now" ? Date.now() : 0;
-  return createInvite(groupId, role, historyFrom, role === "owner" ? null : ends);
+  return createInvite(groupId, role, historyFrom, ends);
 }
 
-// Joins with a token (the token is used once and never kept), then maps a local space named from the group's name.
+// Joins with a token (the token is used once and never kept). Once the server accepts it, the local space is mapped
+// first; the keys and the refresh are best effort, so nothing after the server step can fail the join.
 export async function join(token: string): Promise<string> {
-  const groupId = await acceptInvite(token);
-  const group = getGroup(getDb(), groupId);
-  if (group !== null && getDb().get("SELECT 1 AS ok FROM space_groups WHERE group_id = ?", [groupId]) === null) {
-    const base = group.name === "" ? SHARED_FALLBACK_NAME : group.name;
-    // A name this iPhone already uses gets a number after it.
-    for (let n = 1; ; n += 1) {
-      const name = n === 1 ? base : `${base} ${n}`;
-      try {
-        const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, name));
-        mapSpace(space.id, groupId);
-        break;
-      } catch (error) {
-        if (!(error instanceof SpaceNameError && error.message === "taken")) throw error;
-      }
-    }
+  const user = currentUserId();
+  if (user === null) throw new Error("signed out");
+  const view = await acceptInvite(token);
+  const groupId = view.id;
+  writeDb((db) => upsertGroup(db, view, null, Date.now(), user));
+  if (getDb().get("SELECT 1 AS ok FROM space_groups WHERE group_id = ?", [groupId]) === null) {
+    const group = getGroup(getDb(), groupId);
+    const base = group === null || group.name === "" ? SHARED_FALLBACK_NAME : group.name;
+    const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, freeSpaceName(db, base, null)));
+    mapSpace(space.id, groupId);
   }
+  await ensureKeys(groupId, { now: false }).catch(() => undefined);
+  await refreshGroups().catch(() => undefined);
   return groupId;
 }
 

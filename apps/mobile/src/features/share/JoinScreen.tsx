@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { join } from "../../platform/share.ts";
@@ -9,6 +9,7 @@ export default function JoinScreen() {
   const { token } = useLocalSearchParams<{ token: string }>();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const inFlight = useRef(false); // a second tap before the first request ends is ignored
 
   function close(): void {
     if (router.canGoBack()) router.back();
@@ -16,12 +17,15 @@ export default function JoinScreen() {
   }
 
   async function joinSpace(): Promise<void> {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setFailed(false);
     try {
       const groupId = await join(token);
       router.replace(`/shared/${encodeURIComponent(groupId)}`);
     } catch {
+      inFlight.current = false;
       setFailed(true);
       setBusy(false);
     }
