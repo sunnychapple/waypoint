@@ -22,6 +22,7 @@ function RootStack() {
         <Stack.Screen name="plans" />
         <Stack.Screen name="jobs" />
         <Stack.Screen name="job/[id]" />
+        <Stack.Screen name="practice/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="recovery-key" />

@@ -173,4 +173,18 @@ CREATE INDEX jobs_open ON jobs (deleted_at, created_at);
 CREATE INDEX jobs_session ON jobs (session_id, created_at);
 `,
   },
+  {
+    version: 5,
+    sql: `
+CREATE TABLE made (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('diagram', 'mini_app', 'practice')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX made_session ON made (session_id, created_at);
+`,
+  },
 ];
