@@ -1,4 +1,6 @@
+import { linkKey } from "./links/routes.ts";
 import type { Db } from "./storage.ts";
+import { utcDay } from "./sync/budget.ts";
 
 export const RESULTS_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 export const TMP_AUDIO_KEEP_MS = 24 * 60 * 60 * 1000;
@@ -16,6 +18,9 @@ export const WAITING_DEVICE_KEEP_MS = 24 * 60 * 60 * 1000;
 export const MAX_LIST_PAGES = 20;
 // A safety limit on pages listed per prefix per run, so a run always ends.
 export const MAX_SCAN_PAGES = 100;
+// Expired shared links are deleted this many at a time (D1 binds at most 100 values per statement), at most
+// MAX_LIST_PAGES pages per run.
+export const LINKS_PAGE = 50;
 const MAX_DELETES_PER_RUN = MAX_LIST_PAGES * 1000;
 
 // The parts of an R2 bucket the cleanup uses. R2Bucket satisfies this type.
@@ -50,10 +55,41 @@ export async function deleteOlderThan(bucket: CleanupBucket, prefix: string, cut
 
 export type CleanupEnv = { DB: Db; BUCKET: CleanupBucket };
 
+// Shared links past their expiry (open question 55): the locked data in R2 and the row are deleted. The viewer and the
+// app already answer a link that is gone as they answer an expired one (404). Revoked links lost their data when they
+// were revoked. Returns how many were deleted.
+async function deleteExpiredLinks(env: CleanupEnv, now: number): Promise<number> {
+  let deleted = 0;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const { results } = await env.DB.prepare("SELECT id FROM links WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at, id LIMIT ?")
+      .bind(now, LINKS_PAGE)
+      .all<{ id: string }>();
+    if (results.length === 0) break;
+    await env.BUCKET.delete(results.map((row) => linkKey(row.id)));
+    await env.DB.prepare(`DELETE FROM links WHERE id IN (${results.map(() => "?").join(", ")})`)
+      .bind(...results.map((row) => row.id))
+      .run();
+    deleted += results.length;
+    if (results.length < LINKS_PAGE) break;
+  }
+  return deleted;
+}
+
 export async function cleanup(
   env: CleanupEnv,
   now: number,
-): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number; pending_blobs: number; waiting_devices: number }> {
+): Promise<{
+  results: number;
+  tmp_audio: number;
+  tmp_input: number;
+  idempotency: number;
+  request_nonces: number;
+  pending_blobs: number;
+  waiting_devices: number;
+  expired_links: number;
+  sync_days: number;
+  sync_extras: number;
+}> {
   const results = await deleteOlderThan(env.BUCKET, "results/", now - RESULTS_KEEP_MS);
   const tmpAudio = await deleteOlderThan(env.BUCKET, "tmp/audio/", now - TMP_AUDIO_KEEP_MS);
   const tmpInput = await deleteOlderThan(env.BUCKET, "tmp/input/", now - TMP_INPUT_KEEP_MS);
@@ -67,6 +103,11 @@ export async function cleanup(
   )
     .bind(now, now - WAITING_DEVICE_KEEP_MS, now)
     .run();
+  const expiredLinks = await deleteExpiredLinks(env, now);
+  // Daily sync counts and extras (open question 55) are needed for today only; yesterday's are kept for a request that
+  // crossed 00:00 UTC.
+  const syncDays = await env.DB.prepare("DELETE FROM sync_days WHERE day < ?").bind(utcDay(now) - 1).run();
+  const syncExtras = await env.DB.prepare("DELETE FROM sync_extras WHERE day < ?").bind(utcDay(now) - 1).run();
   return {
     results,
     tmp_audio: tmpAudio,
@@ -75,5 +116,8 @@ export async function cleanup(
     request_nonces: nonces.meta.changes,
     pending_blobs: pendingBlobs.meta.changes,
     waiting_devices: waitingDevices.meta.changes,
+    expired_links: expiredLinks,
+    sync_days: syncDays.meta.changes,
+    sync_extras: syncExtras.meta.changes,
   };
 }
