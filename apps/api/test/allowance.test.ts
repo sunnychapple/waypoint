@@ -182,4 +182,16 @@ describe("topUpYearlyPlus", () => {
     expect(await topUpYearlyPlus(db, recordingWallet(commands), NOW)).toBe(0);
     expect(commands).toEqual([]);
   });
+
+  test("a yearly subscription claimed from a deleted account (released_at set) gets no command", async () => {
+    const db = createTestDb();
+    await userWithPlus(db, "u1", "ba1");
+    await db
+      .prepare("INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at, released_at) VALUES ('t1', 'o1', 'ba1', 'waypoint.plus.yearly', 'subscription', 'active', ?, ?)")
+      .bind(YEARLY_START, NOW - DAY)
+      .run();
+    const commands: Command[] = [];
+    expect(await topUpYearlyPlus(db, recordingWallet(commands), NOW)).toBe(0);
+    expect(commands).toEqual([]);
+  });
 });

@@ -117,9 +117,9 @@ export async function applyNotice(input: NoticeInput): Promise<void> {
 
   if (action === "refund" || action === "revoke") {
     const row = await db
-      .prepare("SELECT status FROM purchases WHERE transaction_id = ? AND billing_account_id = ?")
+      .prepare("SELECT status, released_at FROM purchases WHERE transaction_id = ? AND billing_account_id = ?")
       .bind(txn.transactionId, account.billing_account_id)
-      .first<{ status: string }>();
+      .first<{ status: string; released_at: number | null }>();
     if (row !== null && product.kind === "plus" && (await laterPeriodActive(db, txn))) {
       // An earlier Plus period refunded after the subscription renewed: that period's allowance was already replaced
       // by the later one's, so only its row changes. The monthly credits, the entitlement and the plan stay.
@@ -148,7 +148,8 @@ export async function applyNotice(input: NoticeInput): Promise<void> {
         .run();
       return;
     }
-    if (row.status === "active" && purchased) {
+    // A row claimed from a deleted account gave this wallet nothing, so nothing is taken back from it.
+    if (row.status === "active" && purchased && row.released_at === null) {
       if (product.kind === "plus") {
         await applyWalletCommand(wallet, { type: "reset", id: commandId, credits: 0, resets_at: now });
       } else {
