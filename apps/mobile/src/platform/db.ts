@@ -1,6 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import { openDatabaseSync } from "expo-sqlite";
-import { useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
 import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
@@ -42,12 +42,14 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-// Re-runs `read` after every writeDb call. The result is cached per version, as useSyncExternalStore requires.
-export function useQuery<T>(read: (db: SqlDb) => T): T {
-  const cache = useRef<{ version: number; value: T } | null>(null);
+// Re-runs `read` after every writeDb call, and when `key` changes. Pass as `key` every value `read` uses
+// that can change while the screen is open (an id from the route, the time), joined into one string.
+// The result is cached per version and key, as useSyncExternalStore requires.
+export function useQuery<T>(read: (db: SqlDb) => T, key = ""): T {
+  const cache = useRef<{ version: number; key: string; value: T } | null>(null);
   const getSnapshot = (): T => {
-    if (cache.current === null || cache.current.version !== version) {
-      cache.current = { version, value: read(getDb()) };
+    if (cache.current === null || cache.current.version !== version || cache.current.key !== key) {
+      cache.current = { version, key, value: read(getDb()) };
     }
     return cache.current.value;
   };
@@ -59,4 +61,16 @@ export function writeDb<T>(write: (db: SqlDb) => T): T {
   version += 1;
   for (const listener of listeners) listener();
   return result;
+}
+
+const MINUTE_MS = 60_000;
+
+// The time, rounded down to the minute, for reads that depend on it (cards due now). Re-checked every 15 s.
+export function useMinuteNow(): number {
+  const [minute, setMinute] = useState(() => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute(Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+  return minute;
 }

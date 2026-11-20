@@ -3,11 +3,11 @@ import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { dateLine, greeting } from "../../core/capture/labels.ts";
 import { latestSession } from "../../core/capture/sessions.ts";
-import { formatClock } from "../../core/format.ts";
+import { countLabel, formatClock } from "../../core/format.ts";
 import { countDue } from "../../core/study/cards.ts";
 import { minutesLabel } from "../../core/study/labels.ts";
 import { useProfile } from "../../platform/auth.tsx";
-import { useQuery } from "../../platform/db.ts";
+import { useMinuteNow, useQuery } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { SavingToPill } from "./SavingToPill.tsx";
@@ -18,7 +18,8 @@ export default function HomeScreen() {
   const colors = useColors();
   const profile = useProfile();
   const latest = useQuery(latestSession);
-  const due = useQuery((db) => countDue(db, Date.now()));
+  const now = useMinuteNow();
+  const due = useQuery((db) => countDue(db, now), String(now));
   const offset = -new Date().getTimezoneOffset();
   const hello = greeting(new Date().getHours());
 
@@ -41,7 +42,7 @@ export default function HomeScreen() {
 
       {due > 0 ? (
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
-          <Text style={[styles.cardTitle, { color: colors.ink }]}>{`${due} cards due`}</Text>
+          <Text style={[styles.cardTitle, { color: colors.ink }]}>{`${countLabel(due, "card", "cards")} due`}</Text>
           <Body>{minutesLabel(due)}</Body>
           <PrimaryButton label="Start" onPress={() => router.push("/study/review")} />
         </View>
@@ -51,11 +52,11 @@ export default function HomeScreen() {
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
           <Caption>{latest.spaceName}</Caption>
           <Text style={[styles.cardTitle, { color: colors.ink }]}>{latest.title}</Text>
-          <Body>{latest.kind === "recording" ? formatClock(latest.recordedMs) : `${latest.pages} pages`}</Body>
+          <Body>{latest.kind === "recording" ? formatClock(latest.recordedMs) : countLabel(latest.pages, "page", "pages")}</Body>
           <View style={styles.chips}>
-            {latest.flags > 0 ? <Chip label={plural(latest.flags, "flag", "flags")} tone="flag" /> : null}
-            {latest.photos > 0 ? <Chip label={plural(latest.photos, "photo", "photos")} /> : null}
-            {latest.pages > 0 ? <Chip label={plural(latest.pages, "page", "pages")} /> : null}
+            {latest.flags > 0 ? <Chip label={countLabel(latest.flags, "flag", "flags")} tone="flag" /> : null}
+            {latest.photos > 0 ? <Chip label={countLabel(latest.photos, "photo", "photos")} /> : null}
+            {latest.pages > 0 ? <Chip label={countLabel(latest.pages, "page", "pages")} /> : null}
           </View>
           <SecondaryButton label="Open session" onPress={() => router.push(`/session/${latest.id}`)} />
         </View>
@@ -92,10 +93,6 @@ export default function HomeScreen() {
       <SecondaryButton label="From Photos" onPress={() => router.push("/pages/new?from=photos")} />
     </Screen>
   );
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 function Chip({ label, tone }: { label: string; tone?: "flag" }) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatClock, formatOffset } from "../src/core/format.ts";
+import { countLabel, formatClock, formatOffset } from "../src/core/format.ts";
 
 describe("formatClock", () => {
   it("formats milliseconds as HH:MM:SS, clamps negatives to zero and does not cap hours", () => {
@@ -16,5 +16,13 @@ describe("formatOffset", () => {
     expect(formatOffset(0)).toBe("0:00");
     expect(formatOffset(2_537_000)).toBe("42:17");
     expect(formatOffset(3_725_000)).toBe("1:02:05");
+  });
+});
+
+describe("countLabel", () => {
+  it("uses the singular only for exactly one", () => {
+    expect(countLabel(1, "page", "pages")).toBe("1 page");
+    expect(countLabel(0, "page", "pages")).toBe("0 pages");
+    expect(countLabel(12, "card", "cards")).toBe("12 cards");
   });
 });

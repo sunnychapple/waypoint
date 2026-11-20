@@ -6,7 +6,7 @@ import { dateLine } from "../../core/capture/labels.ts";
 import { listPages } from "../../core/capture/pages.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
-import { formatClock } from "../../core/format.ts";
+import { countLabel, formatClock } from "../../core/format.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -25,14 +25,14 @@ export default function SessionScreen() {
       spaceName: getSpace(db, session.spaceId)?.name ?? "",
       pages: session.kind === "pages" ? listPages(db, id) : [],
     };
-  });
+  }, id);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
   if (!data) return <Screen>{null}</Screen>;
   const { session, spaceName, pages } = data;
   const offset = -new Date().getTimezoneOffset();
-  const detail = session.kind === "recording" ? formatClock(session.recordedMs) : `${pages.length} pages`;
+  const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
   function saveTitle() {
     setEditing(false);

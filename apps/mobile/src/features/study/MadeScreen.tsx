@@ -4,6 +4,7 @@ import { SymbolView } from "expo-symbols";
 import { listPages } from "../../core/capture/pages.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
+import { countLabel } from "../../core/format.ts";
 import { dueCards, sessionCardCount } from "../../core/study/cards.ts";
 import { madeSummary } from "../../core/study/labels.ts";
 import { getDb } from "../../platform/db.ts";
@@ -27,7 +28,11 @@ export function MadeScreen({ sessionId, onStart }: { sessionId: string; onStart:
       <View style={[styles.ring, { borderColor: colors.accent }]}>
         <SymbolView name="square.stack.3d.up" tintColor={colors.accent} size={34} />
       </View>
-      <Title>{isRecording ? `${cards} flashcards from your recording.` : `${cards} flashcards from your ${pages} pages.`}</Title>
+      <Title>
+        {isRecording
+          ? `${countLabel(cards, "flashcard", "flashcards")} from your recording.`
+          : `${countLabel(cards, "flashcard", "flashcards")} from your ${countLabel(pages, "page", "pages")}.`}
+      </Title>
       <Body>{`Made on this iPhone. Saved in ${space}.`}</Body>
 
       <View style={[styles.box, { backgroundColor: colors.surface, borderColor: colors.line }]}>

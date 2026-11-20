@@ -65,4 +65,16 @@ describe("study units", () => {
     expect(studyUnits(db, "rec")).toEqual([]);
     expect(studyUnits(db, "no-such-session")).toEqual([]);
   });
+
+  it("pages come in page order, not id order", () => {
+    addPage("a", 1, "Second page");
+    addPage("b", 0, "First page");
+    expect(studyUnits(db, "pages").map((u) => u.captureId)).toEqual(["b", "a"]);
+  });
+
+  it("a cloud transcript segment is not used", () => {
+    addSegment(0, "Spoken words.");
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('rec', 0, 1000, 'Cloud words.', 'cloud')");
+    expect(studyUnits(db, "rec").map((u) => u.text)).toEqual(["Spoken words."]);
+  });
 });

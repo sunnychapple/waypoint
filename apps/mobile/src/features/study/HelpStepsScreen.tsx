@@ -2,29 +2,13 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { SqlDb } from "../../core/db/sql.ts";
-import { groupBlocks, parseLines } from "../../core/pages/blocks.ts";
 import { cleanHelp } from "../../core/study/drafts.ts";
-import { problemContext, showAnswer, showNextStep, startHelp, type HelpState } from "../../core/study/help.ts";
+import { problemOf, showAnswer, showNextStep, startHelp, type HelpState } from "../../core/study/help.ts";
 import { getDb } from "../../platform/db.ts";
 import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
-
-type Problem = { text: string; context: string };
-
-// The problem the student tapped, with the rest of its page for the model. Null when it can't be found.
-function problemOf(db: SqlDb, captureId: string, index: number): Problem | null {
-  const page = db.get<{ found_text: string | null; found_lines: string | null }>(
-    "SELECT found_text, found_lines FROM captures WHERE id = ? AND kind = 'page'",
-    [captureId],
-  );
-  if (page === null || page.found_text === null) return null;
-  const block = groupBlocks(parseLines(page.found_lines))[index];
-  if (block === undefined) return null;
-  return { text: block.text, context: problemContext(page.found_text, block) };
-}
 
 function isDeclined(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "declined";

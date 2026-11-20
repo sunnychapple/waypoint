@@ -3,9 +3,10 @@ import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { listSpaces } from "../../core/db/spaces.ts";
 import { sessionsInSpace } from "../../core/capture/sessions.ts";
+import { countLabel } from "../../core/format.ts";
 import { countDue, nextDueAt } from "../../core/study/cards.ts";
 import { minutesLabel } from "../../core/study/labels.ts";
-import { useQuery } from "../../platform/db.ts";
+import { useMinuteNow, useQuery } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { nextDueLabel } from "./ReviewScreen.tsx";
@@ -13,8 +14,8 @@ import { nextDueLabel } from "./ReviewScreen.tsx";
 // The Review tab: what is due, and the five newest sessions to make cards from.
 export default function ReviewHomeScreen() {
   const colors = useColors();
+  const now = useMinuteNow();
   const data = useQuery((db) => {
-    const now = Date.now();
     const sessions = listSpaces(db)
       .flatMap((space) => sessionsInSpace(db, space.id))
       .sort((a, b) => b.startedAt - a.startedAt);
@@ -25,7 +26,7 @@ export default function ReviewHomeScreen() {
       recent: sessions.slice(0, 5),
       now,
     };
-  });
+  }, String(now));
 
   if (data.total === 0) {
     return (
@@ -50,7 +51,7 @@ export default function ReviewHomeScreen() {
             <View style={[styles.ring, { borderColor: colors.accent }]}>
               <Text style={[styles.ringText, { color: colors.ink }]}>{`${data.due}/${data.total}`}</Text>
             </View>
-            <Text style={[styles.cardTitle, { color: colors.ink }]}>{`${data.due} cards due`}</Text>
+            <Text style={[styles.cardTitle, { color: colors.ink }]}>{`${countLabel(data.due, "card", "cards")} due`}</Text>
             <Body>{minutesLabel(data.due)}</Body>
             <PrimaryButton label="Start review" icon="play.fill" onPress={() => router.push("/study/review")} />
           </>

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from "react-native";
 import { getAvailability, getContextSize, helpWithProblem, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
-import { cleanCards, cleanHelp, cleanQuiz } from "../../core/study/drafts.ts";
+import { cleanHelp, cleanQuiz } from "../../core/study/drafts.ts";
+import { makeCardsFromUnits } from "../../core/study/generate.ts";
 import { useColors } from "../../ui/theme.ts";
 
 function describeError(error: unknown): string {
@@ -24,7 +25,8 @@ export default function ModelDevScreen() {
   }
 
   const actions = [
-    { label: "Cards", run: async () => cleanCards(await makeCards(text, 10), 10) },
+    // Through the same packing and halving as the Flashcards screen, so a long transcript can be checked here.
+    { label: "Cards", run: () => makeCardsFromUnits({ contextSize: getContextSize, makeCards, makeQuiz }, [{ text, captureId: null, t: null }], 10) },
     { label: "Quiz", run: async () => cleanQuiz(await makeQuiz(text, 5), 5) },
     { label: "Help", run: async () => cleanHelp(await helpWithProblem(text, "")) },
   ];

@@ -23,7 +23,7 @@ export default function YourPagesScreen() {
     const session = getSession(db, id);
     if (!session) return null;
     return { spaceName: getSpace(db, session.spaceId)?.name ?? "", pages: listPages(db, id) };
-  });
+  }, id);
   const [openId, setOpenId] = useState<string | null>(null);
   const cell = (width - 40 - GAP * (COLUMNS - 1)) / COLUMNS;
 

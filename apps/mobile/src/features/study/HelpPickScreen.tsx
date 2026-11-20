@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { SqlDb } from "../../core/db/sql.ts";
 import { groupBlocks, parseLines, type Block } from "../../core/pages/blocks.ts";
+import { pagesWithLines, type PageWithLines } from "../../core/study/help.ts";
 import { useQuery } from "../../platform/db.ts";
 import { fileUri } from "../../platform/files.ts";
 import { getAvailability } from "../../../modules/waypoint-model/index.ts";
@@ -11,20 +11,11 @@ import { Caption, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
 
-type PageRow = { id: string; file: string; found_text: string | null; found_lines: string | null };
-
-function pagesOf(db: SqlDb, sessionId: string): PageRow[] {
-  return db.all<PageRow>(
-    "SELECT id, file, found_text, found_lines FROM captures WHERE session_id = ? AND kind = 'page' ORDER BY position, id",
-    [sessionId],
-  );
-}
-
 // Each page full width, with its problems drawn as tappable outlines. Tapping one opens its steps.
 export default function HelpPickScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [availability] = useState(getAvailability);
-  const pages = useQuery((db) => pagesOf(db, sessionId));
+  const pages = useQuery((db) => pagesWithLines(db, sessionId), sessionId);
 
   if (availability !== "available") {
     return (
@@ -46,7 +37,7 @@ export default function HelpPickScreen() {
   );
 }
 
-function PageProblems({ sessionId, page }: { sessionId: string; page: PageRow }) {
+function PageProblems({ sessionId, page }: { sessionId: string; page: PageWithLines }) {
   const colors = useColors();
   const [ratio, setRatio] = useState(1 / 1.4);
   if (page.found_text === null) return <Caption>Reading this page…</Caption>;

@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsInSpace } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
-import { formatClock } from "../../core/format.ts";
+import { countLabel, formatClock } from "../../core/format.ts";
 import { useQuery } from "../../platform/db.ts";
 import { Body, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -11,7 +11,7 @@ import { useColors } from "../../ui/theme.ts";
 export default function SpaceScreen() {
   const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const data = useQuery((db) => ({ space: getSpace(db, id), sessions: sessionsInSpace(db, id) }));
+  const data = useQuery((db) => ({ space: getSpace(db, id), sessions: sessionsInSpace(db, id) }), id);
   const name = data.space?.name ?? "";
 
   return (
@@ -22,7 +22,7 @@ export default function SpaceScreen() {
       ) : (
         data.sessions.map((s) => {
           const date = new Date(s.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-          const detail = s.kind === "recording" ? formatClock(s.recordedMs) : `${s.pages} pages`;
+          const detail = s.kind === "recording" ? formatClock(s.recordedMs) : countLabel(s.pages, "page", "pages");
           return (
             <Row
               key={s.id}
