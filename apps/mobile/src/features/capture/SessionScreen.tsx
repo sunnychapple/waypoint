@@ -10,6 +10,7 @@ import { deleteSessionRow, getSession, renameSession } from "../../core/capture/
 import type { SqlDb } from "../../core/db/sql.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { researchForSession } from "../../core/research/research.ts";
+import { madeForSession } from "../../core/made/made.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
@@ -32,6 +33,7 @@ export default function SessionScreen() {
       pages: session.kind === "pages" ? listPages(db, id) : [],
       segments: session.kind === "recording" ? listSegments(db, id) : [],
       research: researchForSession(db, id),
+      made: madeForSession(db, id).filter((item) => item.kind === "practice"),
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
@@ -42,7 +44,7 @@ export default function SessionScreen() {
   useEffect(() => setShowSecond(view === "second"), [view]);
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research, second } = data;
+  const { session, spaceName, pages, segments, research, made, second } = data;
   const offset = -new Date().getTimezoneOffset();
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
@@ -175,6 +177,7 @@ export default function SessionScreen() {
         <PrimaryButton label="Flashcards" icon="square.stack.3d.up" onPress={() => router.push(`/study/make?sessionId=${id}`)} />
         <SecondaryButton label="Quiz me" icon="checklist" onPress={() => router.push(`/study/quiz?sessionId=${id}`)} />
         <SecondaryButton label="Research the web" icon="globe" onPress={() => router.push(`/research/new?sessionId=${id}`)} />
+        <SecondaryButton label="Practice set" icon="list.bullet.clipboard" onPress={() => router.push(`/made/new?sessionId=${id}&kind=practice`)} />
       </View>
 
       {research.length > 0 ? (
@@ -186,6 +189,20 @@ export default function SessionScreen() {
               title={item.question}
               right={<Caption>{dateLine(item.createdAt, offset)}</Caption>}
               onPress={() => router.push(`/research/${encodeURIComponent(item.id)}`)}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {made.length > 0 ? (
+        <View style={styles.actions}>
+          <Caption>MADE FROM THIS SESSION</Caption>
+          {made.map((item) => (
+            <Row
+              key={item.id}
+              title={item.title}
+              right={<Caption>{dateLine(item.createdAt, offset)}</Caption>}
+              onPress={() => router.push(`/practice/${encodeURIComponent(item.id)}`)}
             />
           ))}
         </View>
