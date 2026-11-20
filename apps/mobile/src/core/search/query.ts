@@ -19,9 +19,10 @@ const MIN_SIMILARITY = 0.25;
 const DEFAULT_LIMIT = 20;
 const SNIPPET_CHARS = 140;
 
-type CachedVector = { chunkId: number; spaceId: string; vector: StoredVector };
+type CachedVector = { chunkId: number; vector: StoredVector };
 
-// Loaded vectors, keyed by model_version. indexSession clears it after writing.
+// Loaded vectors, keyed by model_version. indexSession clears it after writing. A chunk's space is read at query time,
+// not cached, so moving a session (or deleting one) needs no clear.
 const vectorCache = new Map<string, CachedVector[]>();
 
 export function clearVectorCache(): void {
@@ -31,15 +32,11 @@ export function clearVectorCache(): void {
 function vectorsFor(db: SqlDb, modelVersion: string): CachedVector[] {
   const cached = vectorCache.get(modelVersion);
   if (cached) return cached;
-  const rows = db.all<{ chunk_id: number; space_id: string; scale: number; vector: Uint8Array }>(
-    `SELECT s.chunk_id, ses.space_id, s.scale, s.vector
-     FROM search_index s
-     JOIN chunks c ON c.id = s.chunk_id
-     JOIN sessions ses ON ses.id = c.session_id
-     WHERE s.model_version = ?`,
+  const rows = db.all<{ chunk_id: number; scale: number; vector: Uint8Array }>(
+    "SELECT chunk_id, scale, vector FROM search_index WHERE model_version = ?",
     [modelVersion],
   );
-  const loaded = rows.map((r) => ({ chunkId: r.chunk_id, spaceId: r.space_id, vector: { scale: r.scale, bytes: r.vector } }));
+  const loaded = rows.map((r) => ({ chunkId: r.chunk_id, vector: { scale: r.scale, bytes: r.vector } }));
   vectorCache.set(modelVersion, loaded);
   return loaded;
 }
@@ -71,9 +68,13 @@ export async function searchNotes(
   const queryVector = await embedder.embed([query]).then((vectors) => vectors[0] ?? [], (): number[] => []);
   if (hasDirection(queryVector)) {
     const q = quantize(queryVector);
+    // Each chunk's space as it is now; a chunk whose session is gone has none.
+    const spaceOf = new Map(
+      db.all<{ id: number; space_id: string }>("SELECT c.id, s.space_id FROM chunks c JOIN sessions s ON s.id = c.session_id").map((r) => [r.id, r.space_id]),
+    );
     vectorIds.push(
       ...vectorsFor(db, embedder.modelVersion)
-        .filter((c) => (options.spaceId === undefined || c.spaceId === options.spaceId) && c.vector.bytes.length === q.bytes.length)
+        .filter((c) => spaceOf.has(c.chunkId) && (spaceId === null || spaceOf.get(c.chunkId) === spaceId) && c.vector.bytes.length === q.bytes.length)
         .map((c) => ({ chunkId: c.chunkId, score: similarity(q, c.vector) }))
         .filter((c) => c.score >= MIN_SIMILARITY)
         .sort((a, b) => b.score - a.score)
