@@ -119,6 +119,13 @@ export default function SettingsScreen() {
         right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
         onPress={() => router.push("/plans")}
       />
+      <Link title="Recovery key" onPress={() => router.push("/recovery-key")} />
+
+      <Row
+        title="Cloud jobs"
+        right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+        onPress={() => router.push("/jobs")}
+      />
 
       <Caption style={styles.section}>ON THIS IPHONE</Caption>
       <Row

@@ -20,8 +20,13 @@ function RootStack() {
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
         <Stack.Screen name="plans" />
+        <Stack.Screen name="jobs" />
+        <Stack.Screen name="job/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
+        <Stack.Screen name="recovery-key" />
+        <Stack.Screen name="recovery-words" options={{ presentation: "modal", gestureEnabled: false }} />
+        <Stack.Screen name="recover" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />
         <Stack.Screen name="settings-storage" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
@@ -39,6 +44,7 @@ function RootStack() {
         <Stack.Screen name="study/quiz" />
         <Stack.Screen name="study/help" />
         <Stack.Screen name="study/help-steps" />
+        <Stack.Screen name="sent" options={{ presentation: "modal" }} />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />

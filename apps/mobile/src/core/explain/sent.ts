@@ -1,7 +1,10 @@
+import type { JobType } from "@waypoint/contracts";
 import type { CloudFailure } from "../cloud/failure.ts";
 import type { SqlDb } from "../db/sql.ts";
 
-export type SentTask = "explain" | "more_detail" | "double_check";
+export type SentTask = "explain" | "more_detail" | "double_check" | JobType;
+// The tasks the Explain sheet runs (the instant ones; jobs log through M34).
+export type InstantSentTask = Exclude<SentTask, JobType>;
 
 // UTF-8 length without TextEncoder, so it runs the same in Node and Hermes.
 export function utf8Length(text: string): number {
@@ -43,4 +46,32 @@ export type SentEntry = { id: string; task: string; sessionId: string | null; se
 
 export function getSent(db: SqlDb, id: string): SentEntry | null {
   return db.get<SentEntry>("SELECT id, task, session_id AS sessionId, sent, bytes, credits, retention, at FROM sent_log WHERE id = ?", [id]);
+}
+
+export const TASK_LABELS: Readonly<Record<string, string>> = {
+  explain: "Explain",
+  more_detail: "More detail",
+  double_check: "Double-check",
+  read_link: "Read a link",
+  research: "Research the web",
+  overview_script: "Audio overview",
+  video_slides: "Video overview",
+  diagram: "Diagram",
+  mini_app: "Mini app",
+  practice: "Practice set",
+  retranscribe: "Second transcript",
+};
+
+// The fields of a sent body, in the order the "What was sent" screen shows them. Unknown fields are shown too, so the
+// screen never hides anything that left the phone.
+export function sentFields(sent: string): { label: string; text: string }[] {
+  let body: unknown;
+  try {
+    body = JSON.parse(sent);
+  } catch {
+    return [{ label: "Sent", text: sent }];
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return [{ label: "Sent", text: sent }];
+  const labels: Record<string, string> = { word: "Word", transcript: "Transcript", answer: "Explanation" };
+  return Object.entries(body).map(([key, value]) => ({ label: labels[key] ?? key, text: typeof value === "string" ? value : JSON.stringify(value) }));
 }
