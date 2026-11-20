@@ -13,9 +13,10 @@ import { researchForSession } from "../../core/research/research.ts";
 import { madeForSession, type MadeItem } from "../../core/made/made.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
+import { overviewsForSession, type OverviewState } from "../../core/overviews/overviews.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
-import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
+import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -35,6 +36,7 @@ export default function SessionScreen() {
       segments: session.kind === "recording" ? listSegments(db, id) : [],
       research: researchForSession(db, id),
       made: madeForSession(db, id),
+      overviews: overviewsForSession(db, id),
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
@@ -47,7 +49,7 @@ export default function SessionScreen() {
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research, second } = data;
+  const { session, spaceName, pages, segments, research, second, overviews } = data;
   // A mini app or a diagram is listed only while its flag is on (M25b).
   const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
   const offset = -new Date().getTimezoneOffset();
@@ -79,6 +81,7 @@ export default function SessionScreen() {
         onPress: () => {
           writeDb((db) => deleteSessionRow(db, id));
           deleteSessionFiles(id);
+          for (const overview of overviews) if (overview.file !== null) deleteFile(overview.file);
           router.replace("/");
         },
       },
@@ -182,6 +185,7 @@ export default function SessionScreen() {
         <PrimaryButton label="Flashcards" icon="square.stack.3d.up" onPress={() => router.push(`/study/make?sessionId=${id}`)} />
         <SecondaryButton label="Quiz me" icon="checklist" onPress={() => router.push(`/study/quiz?sessionId=${id}`)} />
         <SecondaryButton label="Research the web" icon="globe" onPress={() => router.push(`/research/new?sessionId=${id}`)} />
+        <SecondaryButton label="Audio overview" icon="waveform" onPress={() => router.push(`/overview/new?sessionId=${id}`)} />
         <SecondaryButton label="Practice set" icon="list.bullet.clipboard" onPress={() => router.push(`/made/new?sessionId=${id}&kind=practice`)} />
         {diagramsOn ? (
           <SecondaryButton label="Diagram" icon="point.3.connected.trianglepath.dotted" onPress={() => router.push(`/made/new?sessionId=${id}&kind=diagram`)} />
@@ -190,6 +194,20 @@ export default function SessionScreen() {
           <SecondaryButton label="Mini app" icon="square.grid.2x2" onPress={() => router.push(`/made/new?sessionId=${id}&kind=mini_app`)} />
         ) : null}
       </View>
+
+      {overviews.length > 0 ? (
+        <View style={styles.actions}>
+          <Caption>OVERVIEWS</Caption>
+          {overviews.map((item) => (
+            <Row
+              key={item.id}
+              title={item.title}
+              right={<Caption>{OVERVIEW_STATE[item.state]}</Caption>}
+              onPress={() => router.push(`/overview/${encodeURIComponent(item.id)}`)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {research.length > 0 ? (
         <View style={styles.actions}>
@@ -221,6 +239,13 @@ export default function SessionScreen() {
     </Screen>
   );
 }
+
+const OVERVIEW_STATE: Record<OverviewState, string> = {
+  script: "Making the voices…",
+  rendering: "Making the voices…",
+  ready: "Ready",
+  failed: "Couldn't make the voices",
+};
 
 // Where a made item opens: practice sets, diagrams and mini apps each have their own screen.
 function madeRoute(item: MadeItem): string {

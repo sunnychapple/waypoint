@@ -27,6 +27,8 @@ function RootStack() {
         <Stack.Screen name="practice/[id]" />
         <Stack.Screen name="diagram/[id]" />
         <Stack.Screen name="mini-app/[id]" />
+        <Stack.Screen name="overview/new" />
+        <Stack.Screen name="overview/[id]" />
         <Stack.Screen name="research/new" />
         <Stack.Screen name="research/[id]" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />

@@ -10,6 +10,7 @@ import { usePush } from "../../platform/push.ts";
 import { useRecoveryPrompt } from "../../platform/recovery.ts";
 import "../../platform/jobKinds.ts";
 import { useJobs } from "../../platform/jobs.ts";
+import { useOverviewRenders } from "../../platform/overviews.ts";
 import { useTranscriptionQueue } from "../../platform/transcription.ts";
 import { useColors } from "../../ui/theme.ts";
 
@@ -27,6 +28,7 @@ export default function TabsLayout() {
   usePush();
   useRecoveryPrompt();
   useJobs();
+  useOverviewRenders();
   useTranscriptionQueue();
   return (
     <Tabs
