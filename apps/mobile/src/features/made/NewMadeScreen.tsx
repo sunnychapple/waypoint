@@ -2,19 +2,35 @@ import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
-import { SymbolView } from "expo-symbols";
+import { SymbolView, type SFSymbol } from "expo-symbols";
 import { JOB_PROMPT_MAX_CHARS } from "@waypoint/contracts";
 import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel } from "../../core/config/config.ts";
+import type { MadeKind } from "../../core/made/made.ts";
 import { keyForRequest } from "../../core/research/research.ts";
+import { useConfig } from "../../platform/config.ts";
 import { useQuote } from "../../platform/jobs.ts";
 import { madeText, startMade } from "../../platform/made.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
 
-// "Practice set": questions made from one session, with an optional focus and the price from the quote (M25a).
-// Opened from a session (sessionId). Practice needs no web view; the set is saved when the job's result opens.
+// Makes a practice set (M25a), a diagram or a mini app (M25b) from one session, with an optional focus and the price
+// from the quote. Opened from a session (sessionId and kind). The result is saved when the job's result opens.
+const KIND_COPY: Record<MadeKind, { title: string; caption: string; icon: SFSymbol }> = {
+  practice: { title: "Practice set", caption: "Questions made from this session to test yourself.", icon: "list.bullet.clipboard" },
+  diagram: { title: "Diagram", caption: "A diagram of this session. It is drawn on this iPhone.", icon: "point.3.connected.trianglepath.dotted" },
+  mini_app: {
+    title: "Mini app",
+    caption: "A small app made from this session. It can't use the internet or see anything else on your iPhone.",
+    icon: "square.grid.2x2",
+  },
+};
+
+function kindOf(value: string | undefined): MadeKind {
+  return value === "diagram" || value === "mini_app" ? value : "practice";
+}
+
 const ACTION_LABELS: Partial<Record<FailureAction, string>> = {
   try_again: "Try again",
   get_credits: "Get credits",
@@ -24,8 +40,12 @@ const ACTION_LABELS: Partial<Record<FailureAction, string>> = {
 
 export default function NewMadeScreen() {
   const colors = useColors();
-  const params = useLocalSearchParams<{ sessionId?: string }>();
+  const params = useLocalSearchParams<{ sessionId?: string; kind?: string }>();
   const sessionId = params.sessionId ?? null;
+  const kind = kindOf(params.kind);
+  const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
+  const diagramsOn = useConfig()?.flags.diagram_viewer === true;
+  const available = (kind !== "mini_app" || miniAppsOn) && (kind !== "diagram" || diagramsOn);
   const [focus, setFocus] = useState("");
   const [showSent, setShowSent] = useState(false);
   // The last failed request that may be re-sent (keepsKey), with its key and body. "Try again" reuses the key only
@@ -33,19 +53,19 @@ export default function NewMadeScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useQuote({ task: "practice" });
+  const quote = useQuote(available ? { task: kind } : null);
   const price = quote.quote?.credits ?? null;
-  const text = sessionId !== null ? madeText(sessionId, "practice") : "";
+  const text = sessionId !== null ? madeText(sessionId, kind) : "";
   const hasText = text !== "";
 
   async function start(): Promise<void> {
-    if (sessionId === null || !hasText || price === null || starting) return;
+    if (sessionId === null || !hasText || !available || price === null || starting) return;
     setStarting(true);
     setFailure(null);
     const prompt = focus.trim() === "" ? null : focus.trim();
-    const body = JSON.stringify({ kind: "practice", sessionId, text, prompt });
+    const body = JSON.stringify({ kind, sessionId, text, prompt });
     const key = keyForRequest(attempt.current, body, () => randomUUID());
-    const result = await startMade("practice", sessionId, key, prompt);
+    const result = await startMade(kind, sessionId, key, prompt);
     setStarting(false);
     if (result.ok) {
       router.replace(`/job/${encodeURIComponent(result.jobId)}`);
@@ -69,8 +89,8 @@ export default function NewMadeScreen() {
       <View style={styles.topRow}>
         <CircleButton label="Back" icon="chevron.left" onPress={() => router.back()} />
       </View>
-      <Title>Practice set</Title>
-      <Caption>Questions made from this session to test yourself.</Caption>
+      <Title>{KIND_COPY[kind].title}</Title>
+      <Caption>{KIND_COPY[kind].caption}</Caption>
 
       {hasText ? (
         <>
@@ -103,10 +123,11 @@ export default function NewMadeScreen() {
         </View>
       ) : null}
 
-      {hasText ? (
+      {!available ? <Caption>{kind === "diagram" ? "Diagrams aren't available yet." : "Mini apps aren't available yet."}</Caption> : null}
+      {hasText && available ? (
         <PrimaryButton
           label={price === null ? "Make" : `Make · ${creditsLabel(price)}`}
-          icon="list.bullet.clipboard"
+          icon={KIND_COPY[kind].icon}
           onPress={() => void start()}
         />
       ) : null}

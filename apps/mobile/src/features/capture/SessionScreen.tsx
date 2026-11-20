@@ -10,9 +10,10 @@ import { deleteSessionRow, getSession, renameSession } from "../../core/capture/
 import type { SqlDb } from "../../core/db/sql.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { researchForSession } from "../../core/research/research.ts";
-import { madeForSession } from "../../core/made/made.ts";
+import { madeForSession, type MadeItem } from "../../core/made/made.ts";
 import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
+import { useConfig } from "../../platform/config.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -33,7 +34,7 @@ export default function SessionScreen() {
       pages: session.kind === "pages" ? listPages(db, id) : [],
       segments: session.kind === "recording" ? listSegments(db, id) : [],
       research: researchForSession(db, id),
-      made: madeForSession(db, id).filter((item) => item.kind === "practice"),
+      made: madeForSession(db, id),
       second: session.kind === "recording" ? secondTranscript(db, id) : null,
     };
   }, id);
@@ -42,9 +43,13 @@ export default function SessionScreen() {
   const [showSecond, setShowSecond] = useState(view === "second");
   // A push to ?view=second while this screen is already open moves the switch too.
   useEffect(() => setShowSecond(view === "second"), [view]);
+  const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
+  const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, segments, research, made, second } = data;
+  const { session, spaceName, pages, segments, research, second } = data;
+  // A mini app or a diagram is listed only while its flag is on (M25b).
+  const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
   const offset = -new Date().getTimezoneOffset();
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
@@ -178,6 +183,12 @@ export default function SessionScreen() {
         <SecondaryButton label="Quiz me" icon="checklist" onPress={() => router.push(`/study/quiz?sessionId=${id}`)} />
         <SecondaryButton label="Research the web" icon="globe" onPress={() => router.push(`/research/new?sessionId=${id}`)} />
         <SecondaryButton label="Practice set" icon="list.bullet.clipboard" onPress={() => router.push(`/made/new?sessionId=${id}&kind=practice`)} />
+        {diagramsOn ? (
+          <SecondaryButton label="Diagram" icon="point.3.connected.trianglepath.dotted" onPress={() => router.push(`/made/new?sessionId=${id}&kind=diagram`)} />
+        ) : null}
+        {miniAppsOn ? (
+          <SecondaryButton label="Mini app" icon="square.grid.2x2" onPress={() => router.push(`/made/new?sessionId=${id}&kind=mini_app`)} />
+        ) : null}
       </View>
 
       {research.length > 0 ? (
@@ -202,13 +213,19 @@ export default function SessionScreen() {
               key={item.id}
               title={item.title}
               right={<Caption>{dateLine(item.createdAt, offset)}</Caption>}
-              onPress={() => router.push(`/practice/${encodeURIComponent(item.id)}`)}
+              onPress={() => router.push(`${madeRoute(item)}${encodeURIComponent(item.id)}`)}
             />
           ))}
         </View>
       ) : null}
     </Screen>
   );
+}
+
+// Where a made item opens: practice sets, diagrams and mini apps each have their own screen.
+function madeRoute(item: MadeItem): string {
+  if (item.kind === "practice") return "/practice/";
+  return item.kind === "diagram" ? "/diagram/" : "/mini-app/";
 }
 
 // The second transcript, one list of changed-word marks per recording part, or null when no cloud transcript exists.

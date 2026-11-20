@@ -21,3 +21,5 @@ RESULT_SAVERS.practice = (db, job, text) => saveMade(db, "practice", job, text, 
 RESULT_SAVERS.diagram = (db, job, text) => saveMade(db, "diagram", job, text, Date.now());
 RESULT_SAVERS.mini_app = (db, job, text) => saveMade(db, "mini_app", job, text, Date.now());
 RESULT_ROUTES.practice = (job) => `/practice/${job.id}`;
+RESULT_ROUTES.diagram = (job) => `/diagram/${job.id}`;
+RESULT_ROUTES.mini_app = (job) => `/mini-app/${job.id}`;
