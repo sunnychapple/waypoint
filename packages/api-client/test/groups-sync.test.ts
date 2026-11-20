@@ -61,4 +61,17 @@ describe("sync, media, links", () => {
     expect(h(sent[1]!, "Waypoint-Device")).toBe("dev_me");
     expect(client.syncSocketUrl(GROUP.id, "dev_me")).toBe(`wss://api.test/v1/groups/${GROUP.id}/sync?device=dev_me`);
   });
+
+  it("buySyncExtra is signed and sends the price under the given key", async () => {
+    const me = softwareSigner("dev_me");
+    const { client, sent } = fakeApi([jsonReply(200, { credits: 100, extra_bytes: 1_000_000_000 })], { device: () => me });
+    expect(await client.buySyncExtra(100, "key-extra-0123456789")).toEqual({ credits: 100, extra_bytes: 1_000_000_000 });
+    expect([sent[0]?.init.method, sent[0]?.url.slice(BASE.length), h(sent[0]!, "Waypoint-Device"), h(sent[0]!, "Idempotency-Key")]).toEqual([
+      "POST",
+      "/v1/sync/extra",
+      "dev_me",
+      "key-extra-0123456789",
+    ]);
+    expect(sent[0]?.init.body).toBe(JSON.stringify({ credits: 100 }));
+  });
 });
