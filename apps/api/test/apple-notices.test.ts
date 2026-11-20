@@ -269,6 +269,39 @@ describe("refunds, revokes and lapses", () => {
     expect(await planOf(B)).toBe("free");
   });
 
+  test("a refund of a Plus period claimed from a deleted account makes no wallet command, ends the new entitlement and sets the plan to free", async () => {
+    const txn = transaction("t1", "waypoint.plus.monthly", { expiresDate: NOW + 30 * DAY });
+    await record(accountA, txn);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(A).run();
+    await record(accountB, txn);
+    expect(await planOf(B)).toBe("plus");
+    expect(read(accountB).monthly).toBe(0);
+    commands.splice(0);
+    await apply(accountB, notice("REFUND", uuid(2)), txn);
+    expect(commands).toHaveLength(0);
+    expect((await one<{ status: string }>("SELECT status FROM purchases WHERE transaction_id = ?", "t1")).status).toBe("refunded");
+    expect((await one<{ ended_at: number | null }>("SELECT ended_at FROM entitlements WHERE user_id = ? AND product = 'plus'", B)).ended_at).toBe(NOW);
+    expect(await planOf(B)).toBe("free");
+  });
+
+  test("a renewal after a claim gives the new account its monthly credits, and refunding the renewal resets them to 0", async () => {
+    const first = transaction("t1", "waypoint.plus.monthly", { purchaseDate: NOW - 40 * DAY, expiresDate: NOW - 10 * DAY });
+    const second = transaction("t2", "waypoint.plus.monthly", { originalTransactionId: "t1", purchaseDate: NOW - 10 * DAY, expiresDate: NOW + 20 * DAY });
+    await record(accountA, first);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(A).run();
+    await record(accountB, first);
+    expect(read(accountB).monthly).toBe(0);
+    await record(accountB, second);
+    expect(read(accountB).monthly).toBe(2000);
+    commands.splice(0);
+    await apply(accountB, notice("REFUND", uuid(3)), second);
+    expect(commands).toEqual([{ type: "reset", id: `apple:${uuid(3)}`, credits: 0, resets_at: NOW }]);
+    expect(read(accountB).monthly).toBe(0);
+    expect(await planOf(B)).toBe("free");
+  });
+
   test("a refund of Plus resets monthly to 0 under the notice's id, ends the entitlement and turns zero retention off", async () => {
     await db.prepare("UPDATE users SET zero_retention = 1 WHERE id = ?").bind(A).run();
     const txn = transaction("t1", "waypoint.plus.monthly", { expiresDate: NOW + 30 * DAY });
