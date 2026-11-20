@@ -270,9 +270,10 @@ const OVERVIEW_STATE: Record<OverviewState, string> = {
   no_voices: "Needs a second voice",
 };
 
-// A video row says "video" while it is made; the other states keep the shared wording.
+// A video row says "video" while it is made and when that failed; the other states keep the shared wording.
 function overviewLabel(item: Overview): string {
   if (item.kind === "video" && (item.state === "script" || item.state === "rendering")) return "Making the video…";
+  if (item.kind === "video" && item.state === "failed") return "Couldn't make the video";
   return OVERVIEW_STATE[item.state];
 }
 
