@@ -18,6 +18,7 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import { formatClock, formatOffset } from "../../core/format.ts";
 import { fileUri } from "../../platform/files.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { useRecording, type Banner, type TimelineItem } from "./useRecording.ts";
 
@@ -143,7 +144,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         }}
       >
         {model.timeline.map((item) => (
-          <TimelineRow key={item.key} item={item} />
+          <TimelineRow key={item.key} item={item} sessionId={model.sessionId} />
         ))}
         {model.volatile ? (
           <View style={styles.line}>
@@ -163,14 +164,20 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   );
 }
 
-function TimelineRow({ item }: { item: TimelineItem }) {
+function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: string | null }) {
   const colors = useColors();
   switch (item.kind) {
     case "line":
       return (
         <View style={styles.line}>
           <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
-          <Text style={[styles.lineText, { color: colors.ink }]}>{item.text}</Text>
+          <WordText
+            text={item.text}
+            style={[styles.lineText, { color: colors.ink }]}
+            onWord={(word) => {
+              if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(item.at), word } });
+            }}
+          />
         </View>
       );
     case "gap":

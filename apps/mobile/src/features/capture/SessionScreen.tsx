@@ -4,16 +4,18 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { dateLine } from "../../core/capture/labels.ts";
 import { listPages } from "../../core/capture/pages.ts";
+import { listSegments } from "../../core/capture/segments.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
-import { countLabel, formatClock } from "../../core/format.ts";
+import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // One session: its title, when and where it was saved, and what to do with it.
-// Recording transcripts are not listed yet (see the pull request).
+// A recording's transcript lists its lines; tapping a word opens Explain (M15).
 export default function SessionScreen() {
   const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,13 +26,14 @@ export default function SessionScreen() {
       session,
       spaceName: getSpace(db, session.spaceId)?.name ?? "",
       pages: session.kind === "pages" ? listPages(db, id) : [],
+      segments: session.kind === "recording" ? listSegments(db, id) : [],
     };
   }, id);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
 
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages } = data;
+  const { session, spaceName, pages, segments } = data;
   const offset = -new Date().getTimezoneOffset();
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
 
@@ -103,6 +106,17 @@ export default function SessionScreen() {
       {session.kind === "recording" && session.transcript === "failed" ? (
         <Caption>Couldn't write down this recording.</Caption>
       ) : null}
+
+      {segments.map((segment) => (
+        <View key={segment.tStart} style={styles.line}>
+          <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(segment.tStart)}</Text>
+          <WordText
+            text={segment.text}
+            style={[styles.lineText, { color: colors.ink }]}
+            onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(segment.tStart), word } })}
+          />
+        </View>
+      ))}
 
       {pages.map((page, index) => (
         <PageBlock key={page.id} number={index + 1} file={page.file} text={page.foundText} />
@@ -177,4 +191,7 @@ const styles = StyleSheet.create({
   toggle: { fontSize: 15, fontWeight: "600" },
   pageText: { fontSize: 15, lineHeight: 22 },
   actions: { gap: 12 },
+  line: { flexDirection: "row", gap: 12 },
+  time: { width: 48, fontSize: 13, fontVariant: ["tabular-nums"] },
+  lineText: { flex: 1, fontSize: 17, lineHeight: 25 },
 });
