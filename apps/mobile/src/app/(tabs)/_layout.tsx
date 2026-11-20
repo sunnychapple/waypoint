@@ -5,6 +5,7 @@ import { useConfigRefresh } from "../../platform/config.ts";
 import { useDeviceRegistration } from "../../platform/device.ts";
 import { useIndexer } from "../../platform/indexer.ts";
 import { usePageReader } from "../../platform/pageReading.ts";
+import { usePush } from "../../platform/push.ts";
 import { useTranscriptionQueue } from "../../platform/transcription.ts";
 import { useColors } from "../../ui/theme.ts";
 
@@ -18,6 +19,7 @@ export default function TabsLayout() {
   useConfigRefresh();
   useDeviceRegistration();
   usePageReader();
+  usePush();
   useTranscriptionQueue();
   return (
     <Tabs
