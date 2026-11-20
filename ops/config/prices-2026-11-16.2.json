@@ -1,0 +1,18 @@
+{
+  "version": "2026-11-16.2",
+  "credits": {
+    "explain": 1,
+    "double_check": 4,
+    "more_detail": 3,
+    "research_quick": 15,
+    "research_standard": 45,
+    "research_deep": 125,
+    "overview_script": 40,
+    "video_slides": 50,
+    "diagram": 18,
+    "mini_app": 40,
+    "practice": 8,
+    "retranscribe": 1,
+    "fallback_voice": 2
+  }
+}

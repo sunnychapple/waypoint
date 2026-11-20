@@ -1,0 +1,19 @@
+{
+  "version": "2026-11-20.1",
+  "tiers": {
+    "light": [{ "model": "@cf/zai-org/glm-4.7-flash", "retention": "standard" }],
+    "standard": [{ "model": "@cf/deepseek-ai/deepseek-v4.1-flash-1017", "retention": "standard" }],
+    "strong": [{ "model": "@cf/deepseek-ai/deepseek-v4.1-flash-1017", "retention": "standard" }]
+  },
+  "fixed": {
+    "more_detail": "standard",
+    "double_check": "strong",
+    "read_link": "light",
+    "research": "standard",
+    "overview_script": "strong",
+    "video_slides": "strong",
+    "diagram": "strong",
+    "mini_app": "strong",
+    "practice": "standard"
+  }
+}

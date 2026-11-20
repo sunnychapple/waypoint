@@ -1,0 +1,4 @@
+{
+  "model": "@cf/cloudflare/clef-flash",
+  "min_confidence": 0.6
+}
