@@ -42,3 +42,12 @@ export const SyncAckMessageSchema = z.strictObject({ type: z.literal("ack"), seq
 // seconds until 00:00 UTC.
 export const SYNC_DAILY_BYTES = 200_000_000;
 export const SYNC_DAILY_LIMIT_MESSAGE = "daily sync limit reached";
+
+// POST /v1/sync/extra (open question 55): SYNC_EXTRA_CREDITS buys SYNC_EXTRA_BYTES more for the rest of the UTC day.
+// The price is not confirmed yet (open question 57). The request names the price the app showed; another price gets
+// 409 "price changed" and nothing is charged. extra_bytes in the reply is all the extra bought for today.
+export const SYNC_EXTRA_BYTES = 1_000_000_000;
+export const SYNC_EXTRA_CREDITS = 100;
+export const SyncExtraRequestSchema = z.strictObject({ credits: z.number().int().min(1) });
+export const SyncExtraResponseSchema = z.strictObject({ credits: z.number().int().min(1), extra_bytes: z.number().int().min(1) });
+export type SyncExtraResponse = z.infer<typeof SyncExtraResponseSchema>;

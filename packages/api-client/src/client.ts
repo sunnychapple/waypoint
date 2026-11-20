@@ -40,6 +40,7 @@ import {
   RemoveDeviceResponseSchema,
   StreamDeltaSchema,
   StreamDoneSchema,
+  SyncExtraResponseSchema,
   WalletResponseSchema,
   ZeroRetentionResponseSchema,
   type ActivityResponse,
@@ -61,6 +62,7 @@ import {
   type QuoteResponse,
   type RegisterDeviceRequest,
   type StreamDone,
+  type SyncExtraResponse,
   type WalletResponse,
   type ZeroRetentionResponse,
 } from "@waypoint/contracts";
@@ -439,6 +441,10 @@ export function createApiClient(options: ApiClientOptions) {
       json({ method: "POST", target: "/v1/links", body: request, signing: "device", retry: true }, LinkViewSchema),
     revokeLink: (linkId: string): Promise<LinkRevoked> =>
       json({ method: "DELETE", target: `/v1/links/${encodeURIComponent(linkId)}`, signing: "device", retry: true }, LinkRevokedSchema),
+    // More sync for today (open question 55). `credits` is the price the app showed; the key stays the same when the
+    // person buys credits after a 402 and tries again.
+    buySyncExtra: (credits: number, key: string): Promise<SyncExtraResponse> =>
+      json({ method: "POST", target: "/v1/sync/extra", body: { credits }, key, signing: "device", retry: true }, SyncExtraResponseSchema),
     clockOffset: (): number => clockOffset,
   };
 }
