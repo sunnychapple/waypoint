@@ -52,6 +52,7 @@ export const JOB_WORKFLOWS: Partial<Record<JobType, (env: Env) => JobWorkflow>> 
   diagram: (env) => env.WRITE_WORKFLOW,
   mini_app: (env) => env.WRITE_WORKFLOW,
   practice: (env) => env.WRITE_WORKFLOW,
+  research: (env) => env.RESEARCH_WORKFLOW,
 };
 
 // The Workflow for a job type, or null while its card is not merged (POST /v1/jobs then answers 400 "job type not
