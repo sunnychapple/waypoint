@@ -181,6 +181,26 @@ describe("user.deleted", () => {
     expect(walletFor(billing).read().purchased).toBe(25);
   });
 
+  test("releases the user's Own it and Plus rows, keeps their packs and other users' rows unreleased", async () => {
+    await send(userCreated("user_abc"));
+    const billing = (await db.prepare("SELECT billing_account_id FROM users").first<{ billing_account_id: string }>())?.billing_account_id ?? "";
+    const insert = "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES (?, ?, ?, ?, ?, 'active', 1)";
+    await db.prepare(insert).bind("t_own", "t_own", billing, "waypoint.own_it", "non_consumable").run();
+    await db.prepare(insert).bind("t_plus", "t_plus", billing, "waypoint.plus.monthly", "subscription").run();
+    await db.prepare(insert).bind("t_pack", "t_pack", billing, "waypoint.credits.1000", "consumable").run();
+    await db.prepare(insert).bind("t_other", "t_other", "ba_other", "waypoint.own_it", "non_consumable").run();
+
+    const res = await send(JSON.stringify({ type: "user.deleted", data: { id: "user_abc" } }));
+    expect(res.status).toBe(200);
+    const rows = await db.prepare("SELECT transaction_id, released_at FROM purchases ORDER BY transaction_id").all<{ transaction_id: string; released_at: number | null }>();
+    expect(rows.results).toEqual([
+      { transaction_id: "t_other", released_at: null },
+      { transaction_id: "t_own", released_at: NOW },
+      { transaction_id: "t_pack", released_at: null },
+      { transaction_id: "t_plus", released_at: NOW },
+    ]);
+  });
+
   test("an unknown Clerk id gives 200 and changes nothing", async () => {
     await send(userCreated("user_abc"));
     const res = await send(JSON.stringify({ type: "user.deleted", data: { id: "user_zzz" } }));

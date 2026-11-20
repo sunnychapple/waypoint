@@ -22,7 +22,7 @@ const EXPECTED = {
   invites: ["token_hash", "group_id", "role", "expires_at", "accepted_by", "created_by", "history_from", "ends_at"],
   blobs: ["id", "group_id", "user_id", "bytes", "created_at", "stored_at"],
   links: ["id", "group_id", "blob_key", "passcode_hash", "expires_at", "revoked_at", "views", "created_by", "created_at"],
-  purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at"],
+  purchases: ["transaction_id", "original_id", "billing_account_id", "product_id", "kind", "status", "purchased_at", "released_at"],
   jobs: ["id", "user_id", "type", "state", "quoted", "spent", "route", "result_key", "created_at", "expires_at", "device_id", "command_key", "model", "retention", "bytes_sent", "deadline_at", "finished_at"],
   activity: ["id", "user_id", "task", "bytes_sent", "credits", "route", "retention", "at"],
   idempotency: ["user_id", "key", "request_hash", "state", "status", "body", "created_at"],
@@ -46,7 +46,7 @@ const EXPECTED_TYPES = {
   invites: { token_hash: "TEXT", group_id: "TEXT", role: "TEXT", expires_at: "INTEGER", accepted_by: "TEXT?", created_by: "TEXT?", history_from: "INTEGER", ends_at: "INTEGER?" },
   blobs: { id: "TEXT", group_id: "TEXT", user_id: "TEXT?", bytes: "INTEGER", created_at: "INTEGER", stored_at: "INTEGER?" },
   links: { id: "TEXT", group_id: "TEXT", blob_key: "TEXT", passcode_hash: "TEXT?", expires_at: "INTEGER?", revoked_at: "INTEGER?", views: "INTEGER", created_by: "TEXT?", created_at: "INTEGER" },
-  purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER" },
+  purchases: { transaction_id: "TEXT", original_id: "TEXT", billing_account_id: "TEXT", product_id: "TEXT", kind: "TEXT", status: "TEXT", purchased_at: "INTEGER", released_at: "INTEGER?" },
   jobs: { id: "TEXT", user_id: "TEXT", type: "TEXT", state: "TEXT", quoted: "INTEGER", spent: "INTEGER?", route: "TEXT?", result_key: "TEXT?", created_at: "INTEGER", expires_at: "INTEGER?", device_id: "TEXT?", command_key: "TEXT?", model: "TEXT?", retention: "TEXT?", bytes_sent: "INTEGER", deadline_at: "INTEGER?", finished_at: "INTEGER?" },
   activity: { id: "TEXT", user_id: "TEXT", task: "TEXT", bytes_sent: "INTEGER", credits: "INTEGER", route: "TEXT", retention: "TEXT", at: "INTEGER" },
   idempotency: { user_id: "TEXT", key: "TEXT", request_hash: "TEXT", state: "TEXT", status: "INTEGER?", body: "TEXT?", created_at: "INTEGER" },
@@ -535,4 +535,26 @@ test("a link without created_at reads back 0", () => {
   seedGroup(db);
   db.exec("INSERT INTO links (id, group_id, blob_key) VALUES ('l1', 'g1', 'b')");
   assert.equal(count(db, "SELECT created_at AS n FROM links WHERE id = 'l1'"), 0);
+});
+
+test("0010 releases the Own it and Plus rows of accounts already deleted, and nothing else", () => {
+  const names = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
+  const at = names.indexOf("0010_purchases_released.sql");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const sql of migrations.slice(0, at)) db.exec(sql);
+  seedUser(db);
+  const insert = db.prepare(
+    "INSERT INTO purchases (transaction_id, original_id, billing_account_id, product_id, kind, status, purchased_at) VALUES (?, ?, ?, 'p', ?, 'active', 1)",
+  );
+  insert.run("t_gone_own", "t_gone_own", "ba_gone", "non_consumable");
+  insert.run("t_gone_plus", "t_gone_plus", "ba_gone", "subscription");
+  insert.run("t_gone_pack", "t_gone_pack", "ba_gone", "consumable");
+  insert.run("t_live_own", "t_live_own", "ba_1", "non_consumable");
+  for (const sql of migrations.slice(at)) db.exec(sql);
+  const rows = db.prepare("SELECT transaction_id, released_at FROM purchases ORDER BY transaction_id").all();
+  assert.deepEqual(
+    rows.map((r) => [r.transaction_id, r.released_at]),
+    [["t_gone_own", 0], ["t_gone_pack", null], ["t_gone_plus", 0], ["t_live_own", null]],
+  );
 });

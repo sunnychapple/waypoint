@@ -53,6 +53,14 @@ export function clerkWebhookRoute(deps: { now: () => number; newId: () => string
         user_id: user.id,
       });
     } else if (event.type === "user.deleted") {
+      // Own it and Plus are released (open question 7): the next account to send one of these transactions claims it
+      // once, for the entitlement only. Packs stay with the deleted account, and so does its wallet.
+      await c.env.DB.prepare(
+        `UPDATE purchases SET released_at = ? WHERE kind IN ('non_consumable', 'subscription')
+           AND billing_account_id = (SELECT billing_account_id FROM users WHERE clerk_id = ?)`,
+      )
+        .bind(now, event.data.id)
+        .run();
       await c.env.DB.prepare("DELETE FROM users WHERE clerk_id = ?").bind(event.data.id).run();
     }
     return c.json({ ok: true });

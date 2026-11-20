@@ -3,11 +3,13 @@ import type { Command } from "@waypoint/ledger";
 import { Hono } from "hono";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import type { SessionUser } from "../src/auth/users.ts";
-import { addMonths } from "../src/apple/products.ts";
+import { addMonths, appleProduct } from "../src/apple/products.ts";
+import { applyTransaction, type PurchaseOutcome } from "../src/apple/purchases.ts";
 import { applePurchaseRoute } from "../src/apple/route.ts";
+import { AppleTransactionSchema } from "../src/apple/transaction.ts";
 import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
-import type { Db } from "../src/storage.ts";
+import type { Db, DbStatement } from "../src/storage.ts";
 import { createWalletStore } from "../src/wallet/store.ts";
 import { makeChain, signJws, type TestChain } from "./helpers/apple.ts";
 import { createTestDb } from "./helpers/d1.ts";
@@ -431,5 +433,119 @@ describe("POST /v1/purchases/apple", () => {
     expect(addMonths(Date.UTC(2026, 11, 15), 1)).toBe(Date.UTC(2027, 0, 15));
     expect(addMonths(Date.UTC(2028, 0, 31), 1)).toBe(Date.UTC(2028, 1, 29));
     expect(addMonths(Date.UTC(2026, 0, 15, 10, 30), 1)).toBe(Date.UTC(2026, 1, 15, 10, 30));
+  });
+});
+
+// A Db that runs `between` right after the first statement it is given, before handing back that statement's result:
+// another request lands in the middle of this one.
+function interrupted(inner: Db, between: () => Promise<void>): Db {
+  let done = false;
+  const once = async (): Promise<void> => {
+    if (done) return;
+    done = true;
+    await between();
+  };
+  const wrap = (statement: DbStatement): DbStatement => ({
+    bind: (...values: unknown[]) => wrap(statement.bind(...values)),
+    first: async <T,>() => {
+      const result = await statement.first<T>();
+      await once();
+      return result;
+    },
+    all: async <T,>() => {
+      const result = await statement.all<T>();
+      await once();
+      return result;
+    },
+    run: async () => {
+      const result = await statement.run();
+      await once();
+      return result;
+    },
+  });
+  return { prepare: (query: string) => wrap(inner.prepare(query)) };
+}
+
+// What Clerk's user.deleted does to an account's purchases (apps/api/src/webhooks/clerk.ts).
+async function deleteAccount(id: string): Promise<void> {
+  await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ? AND kind IN ('non_consumable', 'subscription')").bind(NOW, id).run();
+  await db.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
+}
+
+describe("POST /v1/purchases/apple: purchases of a deleted account", () => {
+  test("Own it: the next account gets the entitlement and plan own with 0 credits, once; a third account gets 409", async () => {
+    const own = await jwsFor({ transactionId: "2000000000000050", originalTransactionId: "2000000000000050", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A });
+    expect((await send(own, { user: userA })).status).toBe(200);
+    await deleteAccount(A);
+    commands.splice(0);
+    const userC = await addUser(C);
+    const res = await send(own, { user: userC });
+    expect(ApplePurchaseResponseSchema.parse(await res.json())).toEqual({ transaction_id: "2000000000000050", product: "own_it", credits: 0, plan: "own" });
+    expect(commands).toHaveLength(0);
+    expect(await countRows("SELECT COUNT(*) AS n FROM purchases WHERE billing_account_id = ?", C)).toBe(1);
+    expect(await countRows("SELECT COUNT(*) AS n FROM entitlements WHERE user_id = ? AND product = 'own_it' AND ended_at IS NULL", C)).toBe(1);
+    expect(ApplePurchaseResponseSchema.parse(await (await send(own, { user: userC })).json()).credits).toBe(0);
+    expect(commands).toHaveLength(0);
+    expect(walletFor(C).read().purchased).toBe(0);
+    const userD = await addUser(D);
+    await expectError(await send(own, { user: userD }), 409, "conflict", "purchase belongs to another account");
+  });
+
+  test("Plus: the claimed period gives plan plus and no reset; the next renewal resets to 2,000 for the new account", async () => {
+    const plus = { productId: "waypoint.plus.monthly", type: "Auto-Renewable Subscription", appAccountToken: A, expiresDate: NOW + 20 * DAY };
+    expect((await send(await jwsFor({ ...plus, transactionId: "2000000000000060", originalTransactionId: "2000000000000060" }), { user: userA })).status).toBe(200);
+    await deleteAccount(A);
+    commands.splice(0);
+    const userC = await addUser(C);
+    const claimed = await send(await jwsFor({ ...plus, transactionId: "2000000000000060", originalTransactionId: "2000000000000060" }), { user: userC });
+    expect(ApplePurchaseResponseSchema.parse(await claimed.json())).toMatchObject({ product: "plus", credits: 0, plan: "plus" });
+    expect(commands).toHaveLength(0);
+    const renewal = await send(
+      await jwsFor({ ...plus, transactionId: "2000000000000061", originalTransactionId: "2000000000000060", purchaseDate: NOW, expiresDate: NOW + 30 * DAY }),
+      { user: userC },
+    );
+    expect(ApplePurchaseResponseSchema.parse(await renewal.json())).toMatchObject({ credits: 2000, plan: "plus" });
+    expect(commands.map((c) => c.type)).toEqual(["reset"]);
+    expect(walletFor(C).read().monthly).toBe(2000);
+  });
+
+  test("two accounts claiming at once: the claim that lands second gets other_account and no entitlement", async () => {
+    const fields = { transactionId: "2000000000000090", originalTransactionId: "2000000000000090", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A };
+    expect((await send(await jwsFor(fields), { user: userA })).status).toBe(200);
+    await deleteAccount(A);
+    await addUser(C);
+    await addUser(D);
+    const txn = AppleTransactionSchema.parse(transaction(fields));
+    const product = appleProduct("waypoint.own_it");
+    if (product === undefined) throw new Error("unknown product");
+    const claim = (id: string, on: Db) => applyTransaction(on, WALLET.get(id), { user_id: id, billing_account_id: id }, txn, product, NOW);
+    const second: PurchaseOutcome[] = [];
+    // D's first statement runs, then C's whole claim, then the rest of D's.
+    const first = await claim(D, interrupted(db, async () => void second.push(await claim(C, db))));
+    expect(first).toMatchObject({ ok: true, credits: 0 });
+    expect(second).toEqual([{ ok: false, reason: "other_account" }]);
+    expect(await countRows("SELECT COUNT(*) AS n FROM entitlements WHERE user_id = ?", C)).toBe(0);
+    expect(await countRows("SELECT COUNT(*) AS n FROM purchases WHERE billing_account_id = ?", D)).toBe(1);
+  });
+
+  test("a token of an account that never existed, for a purchase nobody released, gets 409", async () => {
+    const own = await jwsFor({ transactionId: "2000000000000095", originalTransactionId: "2000000000000095", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: C });
+    await expectError(await send(own, { user: userB }), 409, "conflict", "purchase belongs to another account");
+  });
+
+  test("a pack stays with the deleted account: the next account gets 409 and no credits", async () => {
+    const pack = await jwsFor({ transactionId: "2000000000000070", originalTransactionId: "2000000000000070", appAccountToken: A });
+    expect((await send(pack, { user: userA })).status).toBe(200);
+    await deleteAccount(A);
+    const userC = await addUser(C);
+    await expectError(await send(pack, { user: userC }), 409, "conflict", "purchase belongs to another account");
+    expect(walletFor(C).read().purchased).toBe(0);
+  });
+
+  test("the account still exists: its released rows cannot be claimed", async () => {
+    const own = await jwsFor({ transactionId: "2000000000000080", originalTransactionId: "2000000000000080", productId: "waypoint.own_it", type: "Non-Consumable" });
+    expect((await send(own, { user: userA })).status).toBe(200);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await expectError(await send(own, { user: userB }), 409, "conflict", "purchase belongs to another account");
   });
 });
