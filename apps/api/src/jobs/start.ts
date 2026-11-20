@@ -47,6 +47,10 @@ export type JobWorkflow = {
 // Which Workflow runs each job type. PR 22 to 25 add one line each and change nothing else in this file.
 export const JOB_WORKFLOWS: Partial<Record<JobType, (env: Env) => JobWorkflow>> = {
   overview_script: (env) => env.WRITE_WORKFLOW,
+  video_slides: (env) => env.WRITE_WORKFLOW,
+  diagram: (env) => env.WRITE_WORKFLOW,
+  mini_app: (env) => env.WRITE_WORKFLOW,
+  practice: (env) => env.WRITE_WORKFLOW,
 };
 
 // The Workflow for a job type, or null while its card is not merged (POST /v1/jobs then answers 400 "job type not

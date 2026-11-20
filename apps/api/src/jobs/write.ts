@@ -1,4 +1,4 @@
-import { OverviewScriptDraftSchema } from "@waypoint/contracts";
+import { DiagramDraftSchema, MiniAppDraftSchema, OverviewScriptDraftSchema, PracticeSetDraftSchema, VideoSlidesDraftSchema } from "@waypoint/contracts";
 import type { z } from "zod";
 import type { AiBinding } from "../ai/gateway.ts";
 import type { ChatMessage } from "../tasks/instant.ts";
@@ -49,6 +49,55 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
     maxTokens: 2_500,
     user: userMessage,
     result: fromDraft(OverviewScriptDraftSchema),
+  },
+  video_slides: {
+    system: [
+      "You turn a student's lecture or reading into the slides of a short video overview. Each slide has a heading, up to",
+      "5 short bullets, and the narration a voice reads while it shows (2 to 5 sentences). 6 to 10 slides that follow the",
+      "source in order: a title slide first, a recap slide last. Use only facts from the source text. No markdown in the strings.",
+      "Reply with one JSON object and nothing else:",
+      '{"title":"<at most 120 characters>","slides":[{"heading":"<at most 80>","bullets":["<at most 120>"],"narration":"<at most 700>"}]}',
+    ].join("\n"),
+    maxTokens: 3_000,
+    user: userMessage,
+    result: fromDraft(VideoSlidesDraftSchema),
+  },
+  diagram: {
+    system: [
+      "You draw one diagram, as Mermaid code, that helps a student understand the source text. Choose the kind that fits:",
+      "flowchart (a process, cause and effect), mindmap (ideas around one topic), timeline (events in order) or sequence",
+      "(messages between actors). At most 20 nodes with short labels; only facts from the source text. The mermaid field holds",
+      "only Mermaid code, starting with flowchart TD, mindmap, timeline or sequenceDiagram.",
+      "Reply with one JSON object and nothing else:",
+      '{"title":"<at most 120 characters>","kind":"flowchart"|"mindmap"|"timeline"|"sequence","mermaid":"<Mermaid code>"}',
+    ].join("\n"),
+    maxTokens: 1_200,
+    user: userMessage,
+    result: fromDraft(DiagramDraftSchema),
+  },
+  mini_app: {
+    system: [
+      "You build one small interactive web page that helps a student practise or explore an idea from the source text, for",
+      "example a slider that shows how a quantity changes, a sorting game, or a worked example revealed step by step.",
+      "One self-contained HTML document with inline CSS and JavaScript. No external scripts, styles, fonts, images or links,",
+      "no network requests, no forms that send data, no storage. It must work on a phone screen. Use only facts from the source text.",
+      "Reply with one JSON object and nothing else:",
+      '{"title":"<at most 120 characters>","html":"<the whole HTML document>"}',
+    ].join("\n"),
+    maxTokens: 3_500,
+    user: userMessage,
+    result: fromDraft(MiniAppDraftSchema),
+  },
+  practice: {
+    system: [
+      "You write a practice set from the source text: 5 to 10 questions that check understanding, easy first, mixing",
+      "multiple choice and short answer. Each has a one or two sentence explanation of the right answer. Use only facts",
+      "from the source text. Reply with one JSON object and nothing else:",
+      '{"title":"<at most 120 characters>","questions":[{"kind":"multiple_choice","prompt":"...","choices":["..."],"answer":<index of the right choice, from 0>,"explanation":"..."},{"kind":"short_answer","prompt":"...","answer":"...","explanation":"..."}]}',
+    ].join("\n"),
+    maxTokens: 1_500,
+    user: userMessage,
+    result: fromDraft(PracticeSetDraftSchema),
   },
 };
 
