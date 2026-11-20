@@ -25,6 +25,8 @@ function RootStack() {
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="recovery-key" />
+        <Stack.Screen name="devices" />
+        <Stack.Screen name="devices/approve" />
         <Stack.Screen name="recovery-words" options={{ presentation: "modal", gestureEnabled: false }} />
         <Stack.Screen name="recover" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />

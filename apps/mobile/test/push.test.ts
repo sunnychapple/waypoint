@@ -20,6 +20,8 @@ describe("push", () => {
   it("taps", () => {
     expect(actionForPush({ kind: "device_approved", ref: "dev" })).toEqual({ kind: "refresh_device" });
     expect(actionForPush({ kind: "job_ready", ref: "job_1" })).toEqual({ kind: "open_job", jobId: "job_1" });
+    expect(actionForPush({ kind: "device_request", ref: "dev_new" })).toEqual({ kind: "approve_device", deviceId: "dev_new" });
+    expect(actionForPush({ kind: "device_request" })).toEqual({ kind: "none" });
     expect(actionForPush({})).toEqual({ kind: "none" });
   });
 });

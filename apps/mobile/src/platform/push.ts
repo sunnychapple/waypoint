@@ -41,10 +41,19 @@ export async function askForPush(): Promise<boolean> {
   return status === "granted";
 }
 
+// APNs payloads carry kind and ref at the top level (apps/api/src/push/messages.ts); expo-notifications puts only a
+// "body" key into content.data for remote notifications, so read the raw payload from the push trigger.
+function pushData(response: Notifications.NotificationResponse): Record<string, unknown> {
+  const { trigger, content } = response.notification.request;
+  if (trigger !== null && typeof trigger === "object" && "type" in trigger && trigger.type === "push") return trigger.payload ?? {};
+  return content.data ?? {};
+}
+
 function handle(response: Notifications.NotificationResponse | null): void {
   if (response === null) return;
-  const action = actionForPush(response.notification.request.content.data ?? {});
+  const action = actionForPush(pushData(response));
   if (action.kind === "refresh_device") void refreshDeviceNow();
+  if (action.kind === "approve_device") router.push(`/devices/approve?id=${encodeURIComponent(action.deviceId)}`);
   if (action.kind === "open_job") {
     void followJob(action.jobId);
     router.push(`/job/${encodeURIComponent(action.jobId)}`);
