@@ -8,7 +8,7 @@ Server cards follow `AGENTS.md` and the server card rules in `docs/cards/hardeni
 
 | Question | Owner's answer | Cards |
 |---|---|---|
-| 7 (extended) | On Clerk `user.deleted`, release that billing account's Own it and Plus purchase rows, so a later account can claim them once: the entitlement only, no credits, no monthly reset. Packs stay with the deleted account. Default (owner may say otherwise): a Plus renewal after the claim gives the new account its monthly credits, because the person paid for that renewal. | D1a, D1b |
+| 7 (extended) | On Clerk `user.deleted`, release that billing account's Own it and Plus purchase rows, so a later account can claim them once: the entitlement only, no credits, no monthly reset. Packs stay with the deleted account. Confirmed by the owner 20 Nov 2026: a Plus renewal after the claim gives the new account its monthly credits, because the person paid for that renewal. | D1a, D1b |
 | 29 (extended) | A per-user rate limit on `POST /v1/jobs`: a `ratelimits` binding like `LINK_VIEWS`, 30 a minute, answering 429. | D2 |
 | 52 | One notes database per Clerk user (`waypoint-<clerk user id>.db`), opened after sign-in and closed on sign-out. Nothing is deleted; each person sees only their own notes. A short design first (below). | D6, D7 |
 | 53 | Keep notes in the iPhone backup. Correct architecture section 1 and `docs/security.md`: notes live on the device and in the person's own iPhone backup (encrypted by Apple; end to end with Advanced Data Protection). | none (docs, in this pull request) |
@@ -82,7 +82,7 @@ Branch `feat/d1a-release-purchases`. From `main` at `3c90a85`. No dependency. Mi
 
 **Why.** Someone who deletes their account and signs up again can never restore Own it or a running Plus: the purchase rows keep the old billing account (409 "purchase belongs to another account"). The owner's decision (open question 7): on `user.deleted`, that account's Own it and Plus rows are released, and the next account to send one of those transactions claims them once. It gets the entitlement only. The credits (Own it's 2,000) and the monthly reset (Plus) went to the deleted account's wallet when the transaction was first recorded, so the claim gives no credits and no reset (D1b makes sure nothing is taken back from the new wallet later either). Packs are not released.
 
-Default, unless the owner says otherwise: a Plus renewal after the claim is a new transaction the person paid for, so it resets the new account's monthly credits as any renewal does.
+Confirmed by the owner 20 Nov 2026: a Plus renewal after the claim is a new transaction the person paid for, so it resets the new account's monthly credits as any renewal does.
 
 A released row can be claimed only while no account with its billing account exists, so a release that happened while the user row was somehow still there cannot be claimed by someone else, and a claimed row belongs to the claiming account like any other row. Two accounts claiming at the same moment cannot both win: the claim is one `UPDATE` that moves only rows whose account is gone, and the ownership check runs after it.
 
