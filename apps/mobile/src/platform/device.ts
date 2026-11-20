@@ -24,13 +24,23 @@ import {
 } from "../../modules/waypoint-keys/index.ts";
 import { api, setDeviceSigner } from "./api.ts";
 import { isUpdateRequired } from "./config.ts";
-import { dbUser, getDb, writeDb } from "./db.ts";
+import { dbUser, getDb, onNotesClosed, writeDb } from "./db.ts";
 
 let status: DeviceStatus = "checking";
 let userId: string | null = null;
 let clerkId: string | null = null;
 let running: { clerkId: string; promise: Promise<void> } | null = null;
 const listeners = new Set<() => void>();
+
+// The notes of the person these belong to were closed (sign-out, or another person's notes opening): nothing carries over.
+onNotesClosed(() => {
+  setDeviceSigner(null);
+  userId = null;
+  clerkId = null;
+  running = null;
+  accountKeyProblem = false;
+  setStatus("signed_out");
+});
 
 function setStatus(next: DeviceStatus): void {
   status = next;
@@ -182,7 +192,11 @@ export function refreshDeviceNow(): Promise<void> {
 function restore(clerkUserId: string): void {
   const db = getDb();
   const user = getSetting(db, userIdKey(clerkUserId));
-  if (user === null) return;
+  if (user === null) {
+    userId = null; // nothing stored for this person: not the last person's id
+    setDeviceSigner(null);
+    return;
+  }
   userId = user;
   const keys = getDeviceKeys(user);
   if (keys !== null && getSetting(db, statusKey(user)) === "approved") {

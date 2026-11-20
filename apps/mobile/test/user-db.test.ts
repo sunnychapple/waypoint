@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clerkIdsIn, LEGACY_DB_NAME, legacyIsTheirs, notesStep, userDbName } from "../src/core/db/users.ts";
+import { checkpointDone, clerkIdsIn, LEGACY_DB_NAME, legacyIsTheirs, notesStep, userDbName } from "../src/core/db/users.ts";
 
 describe("userDbName", () => {
   it("names a person's database after their Clerk user id", () => {
@@ -41,5 +41,13 @@ describe("notesStep", () => {
   it("leaves them while Clerk is loading, or signed in without an id yet", () => {
     expect(notesStep({ clerkLoaded: false, clerkSignedIn: undefined, clerkUserId: undefined })).toEqual({ kind: "keep" });
     expect(notesStep({ clerkLoaded: true, clerkSignedIn: true, clerkUserId: null })).toEqual({ kind: "keep" });
+  });
+});
+
+describe("checkpointDone", () => {
+  it("allows the rename only when the checkpoint was not busy", () => {
+    expect(checkpointDone({ busy: 0 })).toBe(true);
+    expect(checkpointDone({ busy: 1 })).toBe(false);
+    expect(checkpointDone(null)).toBe(false);
   });
 });

@@ -82,11 +82,19 @@ export function useAppleSignIn(): () => Promise<AppleResult> {
 export function useGate(): Gate {
   const { isLoaded, isSignedIn, userId } = useAuth();
   const notes = notesStep({ clerkLoaded: isLoaded, clerkSignedIn: isSignedIn, clerkUserId: userId });
-  if (notes.kind === "open") openUserDb(notes.user);
+  let openFailed = false;
+  if (notes.kind === "open") {
+    try {
+      openUserDb(notes.user);
+    } catch {
+      openFailed = true; // the sign-in screen instead of a crash on every launch; the next render tries again
+    }
+  }
   const signedInBefore = dbUser() !== null;
   const [waitedMs, setWaitedMs] = useState(0);
   const started = useRef(Date.now());
-  const gate = decideGate({ requireSignIn: REQUIRE_SIGN_IN, clerkLoaded: isLoaded, clerkSignedIn: isSignedIn === true, signedInBefore, waitedMs });
+  const decided = decideGate({ requireSignIn: REQUIRE_SIGN_IN, clerkLoaded: isLoaded, clerkSignedIn: isSignedIn === true, signedInBefore, waitedMs });
+  const gate: Gate = openFailed ? "sign_in" : decided;
   const waiting = gate === "wait";
   useEffect(() => {
     if (!waiting) return;

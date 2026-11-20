@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
 import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
-import { LEGACY_DB_NAME, clerkIdsIn, legacyIsTheirs, userDbName } from "../core/db/users.ts";
+import { LEGACY_DB_NAME, checkpointDone, clerkIdsIn, legacyIsTheirs, userDbName } from "../core/db/users.ts";
 import { userIdKey } from "../core/device/registration.ts";
 
 function openDeviceDb(name: string): { db: SqlDb; close: () => void } {
@@ -35,8 +35,30 @@ const KEYCHAIN = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
 let open: { user: string; db: SqlDb; close: () => void } | null = null;
 // The Keychain value once read: a Clerk user id, null for nobody, undefined before the first read.
 let stored: string | null | undefined;
-// The Keychain delete of the last sign-out, awaited by the next one.
+// The Keychain writes, one after the other: a delete at sign-out finishes before the next person's id is written.
 let forgetting: Promise<void> = Promise.resolve();
+let deleting = false;
+const retryOnce = (op: () => Promise<void>): Promise<void> => op().catch(op).catch(() => undefined);
+const closeHooks = new Set<() => void>();
+
+// Called once whenever open notes are closed (sign-out, or another person's notes opening): module state kept for the
+// person whose notes they were (device.ts) is reset there.
+export function onNotesClosed(hook: () => void): void {
+  closeHooks.add(hook);
+}
+
+// Closes the open notes. A failing close must not leave them open: the next person could never sign in.
+function closeOpen(): void {
+  const prev = open;
+  open = null;
+  if (prev === null) return;
+  try {
+    prev.close();
+  } catch {
+    // Dropped anyway.
+  }
+  for (const hook of closeHooks) hook();
+}
 // Counts every open and close. Work that awaits between reading and writing notes compares it before writing, so it
 // never writes into the notes of someone who signed in meanwhile.
 let generation = 0;
@@ -69,7 +91,7 @@ function adoptLegacyDb(clerkUserId: string, name: string): void {
     try {
       const keys = old.getAllSync<{ key: string }>("SELECT key FROM settings WHERE key LIKE ?", [`${userIdKey("")}%`]).map((row) => row.key);
       if (!legacyIsTheirs(clerkIdsIn(keys), clerkUserId)) return;
-      old.execSync("PRAGMA wal_checkpoint(TRUNCATE)");
+      if (!checkpointDone(old.getFirstSync<{ busy: number }>("PRAGMA wal_checkpoint(TRUNCATE)"))) return; // not folded in: a new file
     } finally {
       old.closeSync();
     }
@@ -87,19 +109,28 @@ function adoptLegacyDb(clerkUserId: string, name: string): void {
 // signed in, before any screen reads notes, so it does nothing when that person's notes are already open.
 export function openUserDb(clerkUserId: string): SqlDb {
   if (open !== null && open.user === clerkUserId) return open.db;
-  open?.close();
-  open = null;
+  closeOpen();
   const name = userDbName(clerkUserId);
   adoptLegacyDb(clerkUserId, name);
   const { db, close } = openDeviceDb(name);
-  migrate(db);
-  ensureDefaultSpace(db, { now: Date.now, newId: randomUUID });
+  try {
+    migrate(db);
+    ensureDefaultSpace(db, { now: Date.now, newId: randomUUID });
+  } catch (error) {
+    try {
+      close();
+    } catch {
+      // Nothing more to do.
+    }
+    throw error;
+  }
   open = { user: clerkUserId, db, close };
   generation += 1;
   if (stored !== clerkUserId) {
     stored = clerkUserId;
     try {
-      SecureStore.setItem(DB_USER_KEY, clerkUserId, KEYCHAIN);
+      if (deleting) forgetting = forgetting.then(() => retryOnce(() => SecureStore.setItemAsync(DB_USER_KEY, clerkUserId, KEYCHAIN)));
+      else SecureStore.setItem(DB_USER_KEY, clerkUserId, KEYCHAIN);
     } catch {
       // Not kept: a silent push does nothing until the next sign-in keeps it.
     }
@@ -111,13 +142,17 @@ export function openUserDb(clerkUserId: string): SqlDb {
 // Signed out (or Clerk found the session gone): this person's notes are closed and nothing is deleted. They open again
 // when this person signs in; anyone else who signs in gets their own. Resolves once the Keychain no longer names them.
 export async function closeUserDb(): Promise<void> {
-  open?.close();
-  open = null;
+  closeOpen();
   generation += 1;
   version += 1;
   if (stored !== null) {
     stored = null;
-    forgetting = SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN).catch(() => undefined);
+    deleting = true;
+    const done = forgetting.then(() => retryOnce(() => SecureStore.deleteItemAsync(DB_USER_KEY, KEYCHAIN)));
+    forgetting = done;
+    void done.then(() => {
+      if (forgetting === done) deleting = false;
+    });
   }
   await forgetting;
 }

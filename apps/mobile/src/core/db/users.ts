@@ -21,6 +21,12 @@ export function legacyIsTheirs(recorded: readonly string[], clerkUserId: string)
   return recorded.length === 0 || recorded.includes(clerkUserId);
 }
 
+// PRAGMA wal_checkpoint(TRUNCATE) returns (busy, log, checkpointed) and does not throw when it could not finish: the
+// old file may be renamed only when busy is 0, otherwise the write-ahead log would be left behind.
+export function checkpointDone(row: { busy: number } | null | undefined): boolean {
+  return row !== null && row !== undefined && row.busy === 0;
+}
+
 // What the sign-in gate does with the notes: open the signed-in person's, close them once Clerk says nobody is signed
 // in, and leave them as they are while Clerk is still loading (offline, the person signed in last is opened on use).
 export type NotesStep = { kind: "open"; user: string } | { kind: "close" } | { kind: "keep" };
