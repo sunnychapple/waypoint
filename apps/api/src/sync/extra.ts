@@ -4,6 +4,7 @@ import { requireDeviceSignature } from "../auth/signature.ts";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure, InsufficientCredits } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
+import { sendUsage } from "../usage.ts";
 import { readTaskBody } from "../tasks/instant.ts";
 import { utcDay } from "./budget.ts";
 
@@ -71,6 +72,23 @@ export function syncExtraRoute(deps: { now: () => number }) {
     }
     // A settle that answers not ok means the hold is gone without a charge (its alarm released it): no free gigabyte.
     if (!(await settle()).ok) return notCompleted();
+    // One event so the purchase shows in Cloud activity. Its id is the hold id: a retry that settles again is written once.
+    await sendUsage(c.env.USAGE_QUEUE, {
+      v: 1,
+      id: holdId,
+      at: now,
+      user_id: user.id,
+      task: "sync_extra",
+      outcome: "ok",
+      credits: SYNC_EXTRA_CREDITS,
+      tier: "light",
+      model: "none",
+      retention: user.zero_retention ? "zero" : "standard",
+      router: "skipped",
+      bytes_sent: 0,
+      tokens_in: null,
+      tokens_out: null,
+    });
     // The reply is the total bought on the day of this key's own row, which is the day of the purchase, even for a retry
     // after midnight. It is only information: if the read fails, the charge and the bytes still stand.
     const total = await c.env.DB.prepare(

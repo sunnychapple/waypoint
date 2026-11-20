@@ -509,6 +509,20 @@ describe("POST /v1/purchases/apple: purchases of a deleted account", () => {
     expect(walletFor(C).read().monthly).toBe(2000);
   });
 
+  test("the 409 'belongs to another account' is not stored: after that account is deleted, the same Idempotency-Key claims it", async () => {
+    const fields = { transactionId: "2000000000000095", originalTransactionId: "2000000000000095", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A };
+    const own = await jwsFor(fields);
+    expect((await send(own, { user: userA })).status).toBe(200);
+    const userC = await addUser(C);
+    const key = "apple_txn_2000000000000095";
+    await expectError(await send(own, { user: userC, key }), 409, "conflict", "purchase belongs to another account");
+    expect(await countRows("SELECT COUNT(*) AS n FROM idempotency WHERE key = ?", key)).toBe(0);
+    await deleteAccount(A);
+    const res = await send(own, { user: userC, key });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Idempotent-Replayed")).toBeNull();
+  });
+
   test("two accounts claiming at once: the claim that lands second gets other_account and no entitlement", async () => {
     const fields = { transactionId: "2000000000000090", originalTransactionId: "2000000000000090", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A };
     expect((await send(await jwsFor(fields), { user: userA })).status).toBe(200);

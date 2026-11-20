@@ -14,7 +14,7 @@ export const UsageEventSchema = z.strictObject({
   id: z.string().regex(/^[A-Za-z0-9_:-]{1,128}$/),
   at: z.number().int().min(0),
   user_id: z.string().min(1).max(128),
-  task: z.enum([...INSTANT_TASKS, ...JOB_TYPES]),
+  task: z.enum([...INSTANT_TASKS, ...JOB_TYPES, "sync_extra"]),
   outcome: z.enum(["ok", "model_failed", "cancelled"]),
   credits: z.number().int().min(0),
   tier: z.enum(TIERS),

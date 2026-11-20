@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure } from "../errors.ts";
 import { AppleJwsError, verifyAppleJws } from "./jws.ts";
-import { AppleNotificationSchema, applyNotice, findAccount } from "./notifications.ts";
+import { actionFor, AppleNotificationSchema, applyNotice, findAccount } from "./notifications.ts";
 import { appleProduct } from "./products.ts";
 import { allowedEnvironments, AppleTransactionSchema } from "./transaction.ts";
 
@@ -56,6 +56,16 @@ export function appleWebhookRoute(deps: AppleWebhookDeps): Hono<AppEnv> {
       if (product !== undefined && account !== null) {
         const wallet = c.env.WALLET.get(c.env.WALLET.idFromName(account.billing_account_id));
         await applyNotice({ db, wallet, account, notification, txn, product, now: deps.now() });
+      } else if (product !== undefined) {
+        // No account: it was deleted and a claim has not happened yet, so the purchase rows are released but still
+        // 'active'. Mark them, so a later claim is refused instead of receiving a refunded purchase.
+        const action = actionFor(notification.notificationType, notification.subtype);
+        if (action === "refund" || action === "revoke") {
+          await db
+            .prepare("UPDATE purchases SET status = ? WHERE transaction_id = ? AND status IN ('active', 'expired')")
+            .bind(action === "refund" ? "refunded" : "revoked", txn.transactionId)
+            .run();
+        }
       }
     }
 

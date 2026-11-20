@@ -13,6 +13,8 @@ export const requireIdempotencyKey: MiddlewareHandler<AppEnv> = async (c, next) 
   await next();
 };
 
+const OTHER_ACCOUNT_MESSAGE = "purchase belongs to another account";
+
 export const IDEMPOTENCY_KEEP_MS = 24 * 60 * 60 * 1000;
 export const IDEMPOTENCY_PENDING_MS = 60 * 1000;
 export const IDEMPOTENCY_MAX_BODY_BYTES = 16384;
@@ -98,10 +100,14 @@ export function idempotent(deps: { now: () => number }): MiddlewareHandler<AppEn
       const reply = c.res;
       if (isStorable(reply)) {
         const bytes = await reply.clone().arrayBuffer();
-        if (bytes.byteLength <= IDEMPOTENCY_MAX_BODY_BYTES) {
+        const text = new TextDecoder().decode(bytes);
+        // "belongs to another account" is true only until that account is deleted: stored for a day, it would refuse a
+        // restore that works by then. Not stored; the next try asks the server again.
+        const stale = reply.status === 409 && text.includes(OTHER_ACCOUNT_MESSAGE);
+        if (!stale && bytes.byteLength <= IDEMPOTENCY_MAX_BODY_BYTES) {
           await db
             .prepare("UPDATE idempotency SET state = 'done', status = ?, body = ? WHERE user_id = ? AND key = ?")
-            .bind(reply.status, new TextDecoder().decode(bytes), userId, key)
+            .bind(reply.status, text, userId, key)
             .run();
           return;
         }

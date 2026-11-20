@@ -57,6 +57,7 @@ export const TASK_LABELS: Readonly<Record<string, string>> = {
   overview_script: "Audio overview",
   video_slides: "Video overview",
   diagram: "Diagram",
+  sync_extra: "More sync",
   mini_app: "Mini app",
   practice: "Practice set",
   retranscribe: "Second transcript",

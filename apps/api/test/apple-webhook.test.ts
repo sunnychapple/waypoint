@@ -371,4 +371,32 @@ describe("POST /webhooks/apple", () => {
     expect(storeFor(A).read().purchased).toBe(1000);
     expect(await noticeRows()).toHaveLength(1);
   });
+
+  test("a REFUND of Own it after its account was deleted and before a claim marks the released row refunded, so a claim is refused", async () => {
+    const txn = transaction({ transactionId: "2000000000000070", originalTransactionId: "2000000000000070", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A });
+    const product = appleProduct(txn.productId);
+    if (product === undefined) throw new Error("test product missing");
+    await applyTransaction(db, walletFor(A), { user_id: A, billing_account_id: A }, txn, product, NOW);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(A).run();
+    expect((await post(await notice("REFUND", U1, txn))).status).toBe(200);
+    const row = await db.prepare("SELECT status FROM purchases WHERE transaction_id = ?").bind(txn.transactionId).first<{ status: string }>();
+    expect(row?.status).toBe("refunded");
+    const claim = await applyTransaction(db, walletFor(B), { user_id: B, billing_account_id: B }, txn, product, NOW);
+    expect(claim.ok).toBe(false);
+  });
+
+  test("a REVOKE after deletion marks the row revoked; a notice that is not a refund or revoke leaves it active", async () => {
+    const txn = transaction({ transactionId: "2000000000000071", originalTransactionId: "2000000000000071", productId: "waypoint.own_it", type: "Non-Consumable", appAccountToken: A });
+    const product = appleProduct(txn.productId);
+    if (product === undefined) throw new Error("test product missing");
+    await applyTransaction(db, walletFor(A), { user_id: A, billing_account_id: A }, txn, product, NOW);
+    await db.prepare("UPDATE purchases SET released_at = ? WHERE billing_account_id = ?").bind(NOW, A).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(A).run();
+    const status = async () => (await db.prepare("SELECT status FROM purchases WHERE transaction_id = ?").bind(txn.transactionId).first<{ status: string }>())?.status;
+    expect((await post(await notice("DID_RENEW", U1, txn))).status).toBe(200);
+    expect(await status()).toBe("active");
+    expect((await post(await notice("REVOKE", U2, txn))).status).toBe(200);
+    expect(await status()).toBe("revoked");
+  });
 });
