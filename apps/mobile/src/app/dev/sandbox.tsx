@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SandboxView } from "../../../modules/waypoint-sandbox/index.ts";
 import { GATE_HTML } from "../../core/made/gate.ts";
+import { miniAppPage } from "../../core/made/sandbox.ts";
 import { useColors } from "../../ui/theme.ts";
 
 // The M25b gate, development builds only. Enter the Mac's address, load the gate, wait 10 seconds, then check the
@@ -13,8 +14,10 @@ export default function DevSandbox() {
   const [run, setRun] = useState(0);
   const valid = /^[A-Za-z0-9.-]+$/.test(address.trim());
 
-  function load() {
-    setHtml(GATE_HTML.replaceAll("HOST", address.trim()));
+  // asMiniApp: the gate goes through miniAppPage, as a model's mini app does (M25c).
+  function load(asMiniApp: boolean) {
+    const gate = GATE_HTML.replaceAll("HOST", address.trim());
+    setHtml(asMiniApp ? miniAppPage(gate) : gate);
     setRun((n) => n + 1);
   }
 
@@ -32,10 +35,18 @@ export default function DevSandbox() {
       <Pressable
         accessibilityRole="button"
         disabled={!valid}
-        onPress={load}
+        onPress={() => load(false)}
         style={[styles.button, { backgroundColor: colors.accent, opacity: valid ? 1 : 0.4 }]}
       >
         <Text style={{ color: colors.onAccent, fontWeight: "600", textAlign: "center" }}>Load gate</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!valid}
+        onPress={() => load(true)}
+        style={[styles.button, { backgroundColor: colors.accent, opacity: valid ? 1 : 0.4 }]}
+      >
+        <Text style={{ color: colors.onAccent, fontWeight: "600", textAlign: "center" }}>Load gate as a mini app</Text>
       </Pressable>
       <Pressable
         accessibilityRole="button"
