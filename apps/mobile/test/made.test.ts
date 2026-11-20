@@ -1,6 +1,7 @@
 import { PracticeSetResultSchema } from "@waypoint/contracts";
 import { describe, expect, it } from "vitest";
 import { startRecordingSession } from "../src/core/capture/recording.ts";
+import { deleteSessionRow } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { getMade, madeForSession, saveMade } from "../src/core/made/made.ts";
@@ -39,6 +40,24 @@ describe("made", () => {
     expect(() => saveMade(db, "diagram", { id: "job_2", sessionId: null }, JSON.stringify(PRACTICE), 5)).toThrow();
     expect(getMade(db, "job_2")).toBeNull();
   });
+  it("a stored row that no longer fits its contract is left out", () => {
+    const { db, session } = setup();
+    db.run("INSERT INTO made (id, session_id, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)", ["bad_1", session.id, "practice", "Old", '{"v":1}', 5]);
+    expect(getMade(db, "bad_1")).toBeNull();
+    expect(madeForSession(db, session.id)).toEqual([]);
+  });
+  it("lists a session's items newest first", () => {
+    const { db, session } = setup();
+    saveMade(db, "practice", { id: "job_old", sessionId: session.id }, JSON.stringify(PRACTICE), 5);
+    saveMade(db, "practice", { id: "job_new", sessionId: session.id }, JSON.stringify(PRACTICE), 9);
+    expect(madeForSession(db, session.id).map((m) => m.id)).toEqual(["job_new", "job_old"]);
+  });
+  it("deleting the session deletes its items", () => {
+    const { db, session } = setup();
+    saveMade(db, "practice", { id: "job_1", sessionId: session.id }, JSON.stringify(PRACTICE), 5);
+    deleteSessionRow(db, session.id);
+    expect(getMade(db, "job_1")).toBeNull();
+  });
 });
 
 describe("practice grading", () => {
@@ -59,5 +78,6 @@ describe("practice grading", () => {
   it("answerKey", () => {
     expect(answerKey("The Mitochondria.")).toBe("mitochondria");
     expect(answerKey("well-known")).toBe("well known");
+    expect(answerKey("Pi is 3.14.")).toBe("pi is 3.14");
   });
 });

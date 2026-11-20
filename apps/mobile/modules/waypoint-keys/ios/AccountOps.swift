@@ -72,6 +72,8 @@ extension KeysOps {
     let key = try RecoveryKey.open(words: words, blob: blob, userId: userId, accountId: try checkId(accountId), signPub: signPub, boxPub: boxPub)
     identity.accountId = accountId
     identity.accountKey = key.raw
+    identity.pendingAccountId = nil // a key this device made for a removal is never needed after a recovery
+    identity.pendingAccountKey = nil
     try IdentityStore.save(identity, userId: userId)
   }
 
@@ -84,6 +86,8 @@ extension KeysOps {
     identity.accountId = accountId
     identity.accountKey = key.raw
     identity.pairingNonce = nil
+    identity.pendingAccountId = nil // adopted: any key this device made for a removal is now the account key or retired
+    identity.pendingAccountKey = nil
     try IdentityStore.save(identity, userId: userId)
   }
 
