@@ -976,6 +976,7 @@ Status: batches 0 to 4 are merged. S1D, S2, M11b and M12 are in review.
 | 8 | PR 22B (22A); PR 30 (27 Part A; merge after 29) | PR 22B, PR 30 |
 | 9 | PR 23, PR 24, PR 25 (22B) | PR 23, PR 24, PR 25 |
 | 10 and on | PR 26 (price decided; reuses PR 24's `BROWSER`); V1 (30); E1 any time | |
+| Hardening 1 (`docs/cards/hardening-1.md`) | H1, H2, H3a, H3b; H4a, H4b, H5c, H6 (none: from `main` at `856b81d`); H5a, H5b (H4b) | H1, H2, H3a, H3b; H4a, H4b, H5a, H5b, H5c, H6 |
 
 Why this order: S1G is three lines and blocks every mobile stage 2 card, so it goes first. PR 20 merges before PR 27 so the migrations land in number order (`0006_jobs` before `0007_groups`). PR 22A needs PR 20's `start.ts`, `input.ts` and `job.ts`; PR 22B creates the `workflows` block, the `WorkflowEntrypoint` mock and the `env.ts` import that PR 23 to 25 add to, so those three wait for it and then run side by side. PR 30 merges after PR 29 for the migration order. PR 28 Part B merges after S2 so devices can get group keys.
 
