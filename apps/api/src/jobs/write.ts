@@ -82,6 +82,7 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
       "One self-contained HTML document with inline CSS and JavaScript. No external scripts, styles, fonts, images or links,",
       "no network requests, no forms that send data, no storage. It must work on a phone screen. Use only facts from the source text.",
       "No iframes, objects, embeds or inline <svg> markup (they are removed): draw with <canvas>, or build SVG with document.createElementNS. No sound.",
+      "Attributes on <html> and <body> are removed, so start your code on DOMContentLoaded, not with <body onload>. Keep data in JavaScript variables.",
       "Reply with one JSON object and nothing else:",
       '{"title":"<at most 120 characters>","html":"<the whole HTML document>"}',
     ].join("\n"),
