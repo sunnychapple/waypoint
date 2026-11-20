@@ -1,22 +1,49 @@
-import { StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { StyleSheet, Switch, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsInSpace } from "../../core/capture/sessions.ts";
+import { getSetting } from "../../core/db/settings.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { countLabel, formatClock } from "../../core/format.ts";
 import { useQuery } from "../../platform/db.ts";
+import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts";
 import { Body, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 export default function SpaceScreen() {
   const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const data = useQuery((db) => ({ space: getSpace(db, id), sessions: sessionsInSpace(db, id) }), id);
+  const data = useQuery(
+    (db) => ({
+      space: getSpace(db, id),
+      sessions: sessionsInSpace(db, id),
+      synced: isSpaceSynced(db, id),
+      planRequired: getSetting(db, SYNC_PLAN_KEY) === "1",
+    }),
+    id,
+  );
   const name = data.space?.name ?? "";
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const startSync = () => {
+    setBusy(true);
+    setFailed(false);
+    turnOnSync(id)
+      .catch(() => setFailed(true))
+      .finally(() => setBusy(false));
+  };
 
   return (
     <Screen>
       <Title>{name}</Title>
+      <Row
+        title="Sync with my other devices"
+        right={<Switch value={data.synced} disabled={data.synced || busy} onValueChange={startSync} />}
+      />
+      {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
+      {failed ? <Body>Sync could not start. Try again.</Body> : null}
       {data.sessions.length === 0 ? (
         <Body>Nothing here yet. Things you save to {name} show up here.</Body>
       ) : (

@@ -24,4 +24,8 @@ describe("push", () => {
     expect(actionForPush({ kind: "device_request" })).toEqual({ kind: "none" });
     expect(actionForPush({})).toEqual({ kind: "none" });
   });
+  it("a silent sync push names its group", () => {
+    expect(actionForPush({ kind: "sync", ref: "grp_1" })).toEqual({ kind: "sync", groupId: "grp_1" });
+    expect(actionForPush({ kind: "sync" })).toEqual({ kind: "none" });
+  });
 });
