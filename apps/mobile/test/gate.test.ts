@@ -33,4 +33,12 @@ describe("decideGate", () => {
   it("waits while Clerk is not loaded and the time limits have not passed", () => {
     expect(decideGate(base)).toBe("wait");
   });
+
+  it("shows sign-in once Clerk has loaded signed out, even for a phone that signed in before and waited", () => {
+    expect(decideGate({ ...base, clerkLoaded: true, clerkSignedIn: false, signedInBefore: true, waitedMs: 5000 })).toBe("sign_in");
+  });
+
+  it("a signed-in result wins after a long wait on a phone that signed in before", () => {
+    expect(decideGate({ ...base, clerkLoaded: true, clerkSignedIn: true, signedInBefore: true, waitedMs: 15000 })).toBe("app");
+  });
 });

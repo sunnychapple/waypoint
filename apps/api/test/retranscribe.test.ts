@@ -189,4 +189,36 @@ describe("retranscribe job", () => {
     expect(f.store.read().monthly).toBe(100);
     expect(audioLeft(f.objects)).toEqual([]);
   });
+
+  test("a part replaced after done with more audio than the quote allows: Whisper is not called on it and the result is no_upload", async () => {
+    const f = await makeJobFixture("retranscribe", { credits: 1, minutes: 1, input: null });
+    await f.bucket.put("tmp/audio/job_1/0", new Uint8Array(600_001));
+    const { ai, calls } = fakeWhisper(() => whisperReply("x", 1));
+    expect(await makeTranscript(deps(f, ai), f.input, { chunks: 1, bytes: 3 })).toMatchObject({ ok: false, reason: "no_upload" });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("past the deadline: no Whisper call and the result is deadline", async () => {
+    const f = await makeJobFixture("retranscribe", { credits: 10, minutes: 10, input: null });
+    await withParts(f);
+    const { ai, calls } = fakeWhisper(() => whisperReply("x", 1));
+    const late = { ...deps(f, ai), now: () => f.input.deadline + 1 };
+    expect(await makeTranscript(late, f.input, { chunks: 2, bytes: 5 })).toMatchObject({ ok: false, reason: "deadline" });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("10 credits quoted for 3 minutes is 3 a minute (rounded down): 150 s is charged 9", async () => {
+    const f = await makeJobFixture("retranscribe", { credits: 10, minutes: 3, input: null });
+    await withParts(f);
+    const { ai } = fakeWhisper(() => whisperReply("x", 150));
+    expect(await makeTranscript(deps(f, ai), f.input, { chunks: 1, bytes: 3 })).toMatchObject({ ok: true, credits: 9 });
+  });
+
+  test("a part with no duration counts as 300 s: with 1 minute quoted the next part is not read", async () => {
+    const f = await makeJobFixture("retranscribe", { credits: 1, minutes: 1, input: null });
+    await withParts(f);
+    const { ai, calls } = fakeWhisper(() => whisperReply("x", null));
+    expect(await makeTranscript(deps(f, ai), f.input, { chunks: 2, bytes: 5 })).toMatchObject({ ok: true, credits: 1 });
+    expect(calls).toHaveLength(1);
+  });
 });

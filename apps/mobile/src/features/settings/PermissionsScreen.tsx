@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { AppState, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getMicPermission, requestMicPermission, type MicPermission } from "../../../modules/waypoint-audio/index.ts";
@@ -26,12 +26,18 @@ export default function PermissionsScreen() {
   const colors = useColors();
   const [mic, setMic] = useState<MicPermission | null>(null);
 
-  // Refreshes when the screen opens or comes back, since the person may have changed it in iOS Settings.
-  useFocusEffect(
-    useCallback(() => {
-      getMicPermission().then(setMic, () => setMic(null));
-    }, []),
-  );
+  // Refreshes when the screen opens or comes back, and when the app comes back from iOS Settings
+  // (the screen is not blurred while the app is in the background, so focus alone misses that).
+  const refresh = useCallback(() => {
+    getMicPermission().then(setMic, () => setMic(null));
+  }, []);
+  useFocusEffect(refresh);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => subscription.remove();
+  }, [refresh]);
 
   async function allowMic() {
     if (mic === "undetermined") {
@@ -70,14 +76,9 @@ export default function PermissionsScreen() {
     <Screen>
       <BackButton />
       <Title>Permissions</Title>
-      <Row title="Microphone" subtitle="Record classes and talks" right={micRight} onPress={() => undefined} />
-      <Row
-        title="Speech recognition"
-        subtitle="Write down recordings on this iPhone"
-        right={<Caption>Asked when you first use it</Caption>}
-        onPress={() => undefined}
-      />
-      <Row title="Camera" subtitle="Snap pages" right={<Caption>Asked when you first use it</Caption>} onPress={() => undefined} />
+      <Row title="Microphone" subtitle="Record classes and talks" right={micRight} />
+      <Row title="Speech recognition" subtitle="Write down recordings on this iPhone" right={<Caption>Asked when you first use it</Caption>} />
+      <Row title="Camera" subtitle="Snap pages" right={<Caption>Asked when you first use it</Caption>} />
       <Caption style={styles.center}>Change any of these in Settings.</Caption>
     </Screen>
   );

@@ -59,6 +59,11 @@ describe("spaces", () => {
     expect(nameError(() => createSpace(db, deps(), "my NOTES"))).toBe("taken");
   });
 
+  it("createSpace throws taken for an accented name that exists in another case", () => {
+    createSpace(db, deps(), "Écologie");
+    expect(nameError(() => createSpace(db, deps(), "écologie"))).toBe("taken");
+  });
+
   it("listSpaces orders by last_used_at, newest first, then by name", () => {
     createSpace(db, deps(100), "Beta");
     createSpace(db, deps(100), "Alpha");

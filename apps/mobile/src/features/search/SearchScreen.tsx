@@ -61,8 +61,9 @@ export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ query: string; hits: Hit[] } | null>(null);
   const latest = useQuery(latestSession);
-  // Changes after every write, so a finished index run refreshes the results on screen.
+  // A finished index run changes these counts, which re-runs the search below. Other writes do not.
   const index = useQuery((db) => indexStatus(db, getModel().modelVersion));
+  const { chunks, vectors } = index;
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -90,7 +91,7 @@ export default function SearchScreen() {
       .catch(() => {
         if (id === requestId.current) setResults({ query, hits: [] });
       });
-  }, [query, index]);
+  }, [query, chunks, vectors]);
 
   const empty = text.trim() === "" && latest === null;
   const current = results !== null && results.query === query ? results : null;

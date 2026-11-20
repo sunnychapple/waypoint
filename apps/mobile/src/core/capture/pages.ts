@@ -122,6 +122,7 @@ export function titleFromText(text: string | null, fallback: string): string {
   const chars = [...line];
   if (chars.length <= 60) return line;
   const cut = chars.slice(0, 60).join("");
+  if (chars[60] === " ") return cut.trimEnd(); // the 60th character ends a word
   const lastSpace = cut.lastIndexOf(" ");
   return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd();
 }

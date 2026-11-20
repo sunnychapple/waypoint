@@ -32,4 +32,13 @@ describe("labels", () => {
   it("dateLine gives the weekday and month-day in caps for 2026-11-19", () => {
     expect(dateLine(Date.UTC(2026, 10, 19, 12, 0), 0)).toBe("THURSDAY, NOV 19");
   });
+
+  it("dateLine uses the offset: 23:30 UTC on Nov 18 is already Nov 19 in UTC+10", () => {
+    expect(dateLine(Date.UTC(2026, 10, 18, 23, 30), UTC_PLUS_10)).toBe("THURSDAY, NOV 19");
+  });
+
+  it("usedLabel gives nothing for a time in the future", () => {
+    const now = at(2026, 11, 19, 12, 0);
+    expect(usedLabel(at(2026, 11, 20, 12, 0), now, UTC_PLUS_10)).toBeNull();
+  });
 });

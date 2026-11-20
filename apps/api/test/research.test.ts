@@ -6,10 +6,12 @@ import type { ConfigKv } from "../src/config/load.ts";
 import { ModelError } from "../src/jobs/model.ts";
 import {
   findSources,
+  isWebUrl,
   mapLimited,
   PAGE_CHARS,
   PLAN_SYSTEM,
   planQueries,
+  READ_CONCURRENCY,
   readPage,
   RESEARCH_CAPS,
   READ_SYSTEM,
@@ -20,7 +22,7 @@ import {
   type SearchBinding,
 } from "../src/jobs/research.ts";
 import type { ChatMessage } from "../src/tasks/instant.ts";
-import { fakeSteps, makeJobFixture } from "./helpers/jobs.ts";
+import { fakeSteps, JOB_NOW, makeJobFixture } from "./helpers/jobs.ts";
 import { configEntries } from "./helpers/tasks.ts";
 
 // Compile-time checks: the Ai, Browser Run and R2 bindings are accepted where the research job expects them.
@@ -317,9 +319,8 @@ describe("research job", () => {
     expect(bare.f.objects.has("results/job_1")).toBe(false);
   });
 
-  test("depth deep asks the planner for 6 queries and reads at most 20 pages", async () => {
+  test("depth deep asks the planner for 6 queries, reads at most 20 pages and settles the deep price, 125", async () => {
     const { f, ai, page, deps } = await build(
-      // The fixture wallet holds 100 monthly credits, so the quote is 40 here; the price is not what this test checks.
       { credits: 40, depth: "deep", input: { text: "", prompt: "Why is the sky blue?" } },
       {
         reply: (system, user) =>
@@ -327,11 +328,14 @@ describe("research job", () => {
         search: async (query) => Response.json({ items: Array.from({ length: 8 }, (_, i) => ({ url: `https://${query}.example/${i}`, title: `T ${i}` })) }),
       },
     );
-    expect(await runResearchJob(deps, fakeSteps().steps, f.input)).toBe(true);
+    // The fixture holds 40 of its 100 monthly credits; grant 100 more and hold the deep price under a second id.
+    f.store.apply({ type: "grant", id: "more", bucket: "monthly", credits: 100, ref: "test" }, JOB_NOW);
+    f.store.apply({ type: "hold", id: "job:u1:deep", hold_id: "job:u1:deep", user_id: "u1", task: "research", credits: 125, expires_at: JOB_NOW + 3_600_000 }, JOB_NOW);
+    expect(await runResearchJob(deps, fakeSteps().steps, { ...f.input, credits: 125, hold_id: "job:u1:deep" })).toBe(true);
     expect((ai.calls[0]?.inputs.messages as ChatMessage[])[0]?.content).toBe(PLAN_SYSTEM.replace("{n}", "6"));
     expect(page.calls).toHaveLength(20);
     expect(ai.calls[ai.calls.length - 1]?.inputs.max_tokens).toBe(3000);
-    expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 40 });
+    expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 125 });
   });
 
   test("a zero-retention user: no search, no model call, the job fails and the hold is released", async () => {
@@ -356,5 +360,58 @@ describe("research job", () => {
       standard: { queries: 3, results: 5, pages: 8, writeTokens: 1_500 },
       deep: { queries: 6, results: 8, pages: 20, writeTokens: 3_000 },
     });
+  });
+
+  test("isWebUrl takes public http and https pages and refuses credentials, IP addresses, localhost and local-only names", () => {
+    for (const url of ["https://a.example/sky", "http://b.example.org/x?y=1", "https://Sub.Example.COM./"]) expect(isWebUrl(url), url).toBe(true);
+    for (const url of [
+      "ftp://a.example/",
+      "https://user:pw@a.example/",
+      "https://user@a.example/",
+      "http://localhost:8080/admin",
+      "http://localhost./",
+      "http://intranet/",
+      "http://127.0.0.1/",
+      "http://169.254.169.254/latest/meta-data",
+      "http://10.0.0.5/",
+      "http://0x7f.1/",
+      "http://2130706433/",
+      "http://[::1]/",
+      "http://[fd00::1]/",
+      "http://printer.local/",
+      "http://db.internal/",
+      "http://app.localhost/",
+      "http://nas.home.arpa/",
+      "not a url",
+    ]) {
+      expect(isWebUrl(url), url).toBe(false);
+    }
+  });
+
+  test("findSources leaves out search results that are not public web pages", async () => {
+    const { deps } = await build({}, {
+      search: async () =>
+        Response.json({ items: [{ url: "http://169.254.169.254/latest/meta-data", title: "Meta" }, { url: "https://a.example/sky", title: "Sky A" }] }),
+    });
+    const sources = await findSources(deps, ["sky"], RESEARCH_CAPS.standard);
+    expect(sources.map((s) => s.url)).toEqual(["https://a.example/sky"]);
+  });
+
+  test("a run reads at most READ_CONCURRENCY (3) pages at a time", async () => {
+    let open = 0;
+    let peak = 0;
+    const { f, deps } = await build({}, {
+      search: async (query) => Response.json({ items: Array.from({ length: 8 }, (_, i) => ({ url: `https://${query.length}.example/${i}`, title: `T ${i}` })) }),
+      page: async (url) => {
+        open += 1;
+        peak = Math.max(peak, open);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        open -= 1;
+        return Response.json({ success: true, result: `Text of ${url}` });
+      },
+    });
+    expect(await runResearchJob(deps, fakeSteps().steps, f.input)).toBe(true);
+    expect(READ_CONCURRENCY).toBe(3);
+    expect(peak).toBe(3);
   });
 });

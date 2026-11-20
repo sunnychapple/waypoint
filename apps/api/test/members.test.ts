@@ -382,4 +382,18 @@ describe("DELETE /v1/groups/:id/members/:user and the group's sockets", () => {
     expect(await leftAt(w.db, G1, "u2")).toBe(NOW);
     expect(await keyVersion(w.db, G1)).toBe(2);
   });
+
+  test("removing a member calls the group room's disconnect with that user's id, once, for that group", async () => {
+    const w = await groupWorld();
+    const calls: [string, string][] = [];
+    const GROUP_ROOM = {
+      idFromName: (name: string) => name,
+      get: (name: string) => ({ disconnect: async (id: string) => void calls.push([name, id]) }),
+    };
+    const path = `/v1/groups/${G1}/members/u2`;
+    const init = await signedInit(w.d.u1, { method: "DELETE", path, now: NOW, idempotencyKey: crypto.randomUUID() });
+    const res = await appFor(userOf("u1")).request(path, init, { DB: w.db, GROUP_ROOM });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([[G1, "u2"]]);
+  });
 });

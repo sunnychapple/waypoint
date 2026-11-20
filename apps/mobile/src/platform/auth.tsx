@@ -58,17 +58,20 @@ export function useEmailCode() {
   };
 }
 
-// Native Sign in with Apple. Returns false when the person cancels or Clerk refuses.
-export function useAppleSignIn(): () => Promise<boolean> {
+export type AppleResult = "ok" | "cancelled" | "error";
+
+// Native Sign in with Apple. Clerk returns no session when the person cancels, and throws when Apple or Clerk
+// refuses or the network is down.
+export function useAppleSignIn(): () => Promise<AppleResult> {
   const { startAppleAuthenticationFlow } = useSignInWithApple();
   return async () => {
     try {
       const { createdSessionId, setActive } = await startAppleAuthenticationFlow();
-      if (!createdSessionId || !setActive) return false;
+      if (!createdSessionId || !setActive) return "cancelled";
       await setActive({ session: createdSessionId });
-      return true;
+      return "ok";
     } catch {
-      return false;
+      return "error";
     }
   };
 }

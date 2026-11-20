@@ -14,10 +14,15 @@ describe("readSse", () => {
     await readSse(bodyOf([bytes.slice(0, 5), bytes.slice(5, at), bytes.slice(at)]), (e) => { got.push(e); return true; });
     expect(got).toEqual([{ event: "delta", data: '{"text":"café"}' }]);
   });
-  it("multi data lines, comments, ids, empty blocks, last block", async () => {
+  it("multi data lines, comments, ids, empty blocks; a last block with no blank line is dropped", async () => {
     const got: SseEvent[] = [];
     await readSse(bodyOf([enc(": hi\nid: 1\nevent: a\ndata: x\ndata: y\n\nevent: b\n\ndata: z")]), (e) => { got.push(e); return true; });
-    expect(got).toEqual([{ event: "a", data: "x\ny" }, { event: "message", data: "z" }]);
+    expect(got).toEqual([{ event: "a", data: "x\ny" }]);
+  });
+  it("reads CRLF and CR line endings, including a CRLF split across chunks", async () => {
+    const got: SseEvent[] = [];
+    await readSse(bodyOf([enc('event: delta\r\ndata: {"a":1}\r'), enc("\n\r\nevent: done\rdata: 2\r\r")]), (e) => { got.push(e); return true; });
+    expect(got).toEqual([{ event: "delta", data: '{"a":1}' }, { event: "done", data: "2" }]);
   });
   it("stops when onEvent returns false", async () => {
     let cancelled = false;

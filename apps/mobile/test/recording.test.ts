@@ -134,4 +134,27 @@ describe("recording", () => {
       { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
     ]);
   });
+
+  it("recoverSessions sets the length and end time from the saved audio parts", () => {
+    insertSession("crashed", "recording", "live", 5000);
+    savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 300_000, file: "a0.m4a" });
+    savePart(db, deps(), "crashed", { index: 1, startMs: 320_000, durationMs: 40_000, file: "a1.m4a" });
+    insertSession("empty", "paused", "waiting", 7000);
+    recoverSessions(db, { sessionId: "", state: "idle" });
+    expect(getSession(db, "crashed")).toMatchObject({ recordedMs: 340_000, endedAt: 5000 + 360_000 });
+    expect(getSession(db, "empty")).toMatchObject({ recordedMs: 0, endedAt: 7000 });
+  });
+
+  it("savePart stores the part index as its position", () => {
+    const session = startRecordingSession(db, deps(), homeId, false);
+    savePart(db, deps(), session.id, { index: 3, startMs: 900_000, durationMs: 1000, file: "a3.m4a" });
+    expect(db.get<{ position: number }>("SELECT position FROM captures WHERE file = 'a3.m4a'")?.position).toBe(3);
+  });
+
+  it("pendingTranscriptions includes interrupted sessions that are waiting", () => {
+    insertSession("crashed", "recording", "live");
+    savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 20_000, file: "c0.m4a" });
+    recoverSessions(db, { sessionId: "", state: "idle" });
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
 });

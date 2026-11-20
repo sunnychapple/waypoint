@@ -16,5 +16,6 @@ export type SqlStore = {
   transactionSync<T>(fn: () => T): T;
 };
 
-// D1 with batch: the statements run in one transaction; if one fails, none is applied. D1Database satisfies this type.
-export type BatchDb = Db & { batch(statements: DbStatement[]): Promise<unknown[]> };
+// D1 with batch: the statements run in one transaction; if one fails, none is applied. Each result has the
+// statement's change count. D1Database satisfies this type.
+export type BatchDb = Db & { batch(statements: DbStatement[]): Promise<{ meta: { changes: number } }[]> };
