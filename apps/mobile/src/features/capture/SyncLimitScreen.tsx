@@ -25,7 +25,13 @@ export default function SyncLimitScreen() {
     else setFailure(result);
   }
 
-  const problem = failure === null || failure === "price_changed" ? null : failureCopy(failure);
+  // failureCopy's offline words are about questions for later; here nothing was charged, so say that.
+  const problem =
+    failure === null || failure === "price_changed"
+      ? null
+      : failure.kind === "offline"
+        ? { title: "You're offline", body: "Connect to the internet, then try again." }
+        : failureCopy(failure);
   return (
     <Screen>
       <Title>{copy.title}</Title>
