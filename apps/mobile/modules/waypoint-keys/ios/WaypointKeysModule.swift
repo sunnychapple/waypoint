@@ -37,7 +37,7 @@ private func coded<T>(_ body: () throws -> T) throws -> T {
   do {
     return try body()
   } catch let error as KeysModuleError {
-    throw Exception(name: "WaypointKeys", description: error.code, code: error.code)
+    throw Exception(name: "WaypointKeys", description: error.message, code: error.code)
   } catch let error as KeysError {
     throw Exception(name: "WaypointKeys", description: "\(error)", code: "\(error)")
   } catch {
