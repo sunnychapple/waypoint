@@ -31,6 +31,7 @@ function RootStack() {
         <Stack.Screen name="recover" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />
         <Stack.Screen name="settings-storage" />
+        <Stack.Screen name="settings-cloud" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="new-space" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="space/[id]" options={{ presentation: "card" }} />

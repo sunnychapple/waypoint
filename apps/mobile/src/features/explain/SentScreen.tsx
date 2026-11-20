@@ -6,7 +6,7 @@ import { shortDate } from "../../core/store/plans.ts";
 import { useQuery } from "../../platform/db.ts";
 import { Caption, OnDeviceNote, PrimaryButton, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-import { CloudLine } from "./CloudLine.tsx";
+import { CloudLine } from "../../ui/CloudLine.tsx";
 
 // "What was sent" for one cloud task: exactly the text that left the phone, from sent_log.
 export default function SentScreen() {
