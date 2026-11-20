@@ -3532,7 +3532,7 @@ export const renderSlides = (title: string, slides: SlideIn[], slideStartsMs: nu
 
 Checks without Xcode: `npm run test:swift -w @waypoint/mobile`, root `npm install`, `npm run typecheck`, `npm test`, `npm run export:ios -w @waypoint/mobile`.
 
-Device check (run once Xcode is installed; a dev screen `src/app/dev/video.tsx` that renders three slides over an M22b narration): the `.mp4` plays in the Files app with each slide changing when its narration starts; 15 slides of 30 s each render in under 30 seconds on the oldest test iPhone; text never runs off a slide.
+Device check (run once Xcode is installed; a dev screen `src/app/dev/video.tsx` that renders three slides over an M22b narration): the `.mp4` plays in the Files app with each slide changing when its narration starts; 15 slides of 30 s each render in under 30 seconds on the oldest test iPhone; text never runs off a slide. Also the four fix-round items of PR #120, which only a device shows: the video ends when the narration ends (no silent tail, `endSession(atSourceTime:)`); when slide 1 starts at 0 ms the title slide still shows for at least one frame; a narration file that cannot be read gives `no_audio`, not `write_failed`; paragraphs on a slide are spaced apart.
 
 Not in this PR: the job and the player (M24b).
 

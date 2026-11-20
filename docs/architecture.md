@@ -22,7 +22,7 @@ Sync and sharing cross the trust boundary only as locked data. A cloud task cros
 | D1 | The directory: accounts, devices, groups, memberships, invites, links, purchases, jobs, activity. No note content. |
 | R2 | Locked note snapshots and media, sealed task results, shared-link data, the voice pack download. |
 | KV | Price table, model routes, router config, feature flags, minimum native version, voice pack pointer. Also Zephyr's bundle store. |
-| Queues | Push fan-out, usage events, App Store notices, cleanup. |
+| Queues | Push fan-out and usage events. (App Store and Clerk notices are applied by their webhook routes; cleanup runs on the hourly cron.) |
 | Workflows | Long jobs: web research, overview scripts, the second transcript, reading a link. |
 | Workers AI | Every cloud model call by default: open models in three tiers, the Clef router, Whisper for the second transcript, MeloTTS as the fallback voice. |
 | AI Gateway | Every model call goes through it: per-account rate limits, logging off per request, zero-retention switch for outside models. |
@@ -91,7 +91,7 @@ One versioned REST surface on the API Worker plus one socket per group. Every re
 | Instant tasks | `POST /v1/tasks/quote`, `POST /v1/tasks/explain` (stream), `POST /v1/tasks/more-detail` (stream), `POST /v1/tasks/double-check`, `POST /v1/tasks/read-link` | Wallet, router, Workers AI through AI Gateway, Browser Run |
 | Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id`, `PUT /v1/jobs/:id/audio/:n`, `POST /v1/jobs/:id/audio/done` | Workflows, wallet, R2 |
 | Wallet | `GET /v1/wallet` (balance, plan, entitlements), `GET /v1/wallet/ledger` | Wallet |
-| Privacy | `PUT /v1/settings/zero-retention` (Plus only) | D1 |
+| Privacy | `PUT /v1/settings/zero-retention` (Plus only; signed, H12) | D1 |
 | Purchases | `POST /v1/purchases/apple`, `POST /webhooks/apple`, `POST /webhooks/clerk` | Wallet, D1, Queues |
 | Cloud activity | `GET /v1/activity` | D1: task, size, credits, route, time. The text sent is kept only on the device. |
 
@@ -101,7 +101,7 @@ Rules every endpoint follows:
 - **402 when credits run out.** The reply carries the shortfall. The app shows Out of credits and retries the same request after a purchase.
 - **One error shape:** `code`, `message`, `retry_after`.
 - **No readable notes outside a task.** The server never accepts readable note content except inside a task request.
-- **Device signatures** (`docs/security.md` section 7; decided 19 Nov 2026): the writes that change keys, devices, group membership or money carry a signature from an approved device. This includes every paid task and job and `POST /v1/purchases/apple`. So a person must have a registered, approved device before they can spend or buy credits; the app registers its first device right after sign-in. A session alone can read and can quote.
+- **Device signatures** (`docs/security.md` section 7; decided 19 Nov 2026): the writes that change keys, devices, group membership or money carry a signature from an approved device. This includes every paid task and job, `POST /v1/purchases/apple` and the zero-retention switch (H12). So a person must have a registered, approved device before they can spend or buy credits; the app registers its first device right after sign-in. A session alone can read and can quote.
 
 A quote:
 
@@ -123,7 +123,7 @@ Instant task and account rules decided on 19 Nov 2026 (cards in `docs/cards/wave
 - More detail and double-check send the word, the transcript excerpt and the explanation shown. Double-check answers in one JSON reply, not a stream.
 - The 25 starter credits go to the purchased bucket (they never expire), granted once per user from Clerk's `user.created` webhook.
 - Clerk's `user.deleted` deletes the user's D1 row and, by cascade, their directory rows (entitlements, devices with their key envelopes and pairings, recovery, memberships, jobs, activity, push tokens, stored replies). The wallet is kept as the money record and holds no personal data; its credits are forfeited. Groups the user created, their room data and R2 objects are not cleaned up yet (open question in `docs/build-plan.md`).
-- Every cloud task, instant or job, sends one usage event (`UsageEvent` in `apps/api/src/usage.ts`: task, outcome, credits, tier, model, retention, router, bytes sent, token counts; id = the hold id) to the usage queue. Its consumer writes the `activity` row (route = tier) and an Analytics Engine data point with no user id.
+- Every cloud task, instant or job, sends one usage event (`UsageEvent` in `apps/api/src/usage.ts`: task, outcome, credits, tier, model, retention, router, bytes sent, token counts; id = the hold id) to the usage queue. Its consumer writes the `activity` row (route = tier) and an Analytics Engine data point with no user id. A failed or cancelled task gets its row too, with 0 credits.
 
 Job rules decided on 19 Nov 2026 (cards in `docs/cards/wave-3-jobs.md` for PR 20 and 21, `docs/cards/wave-3-workflows.md` for PR 22 to 25):
 
