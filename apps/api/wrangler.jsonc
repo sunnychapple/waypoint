@@ -13,7 +13,7 @@
   ],
   "kv_namespaces": [{ "binding": "CONFIG", "id": "02c5f9f97df549c5af5aa583c1606b96" }],
   "vars": {
-    "CLERK_ISSUER": "https://clerk.example.com",
+    "CLERK_ISSUER": "https://renewing-bat-5625.clerk.accounts.dev",
     "CLERK_AUTHORIZED_PARTIES": "",
     "AI_GATEWAY_ID": "waypoint",
     "APNS_KEY_ID": "XXXXXXXXXX",
