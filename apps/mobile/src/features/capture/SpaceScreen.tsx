@@ -43,7 +43,7 @@ export default function SpaceScreen() {
         right={<Switch value={data.synced} disabled={data.synced || busy} onValueChange={startSync} />}
       />
       {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
-      {failed ? <Body>Sync could not start. Try again.</Body> : null}
+      {failed ? <Body>Couldn't start sync. Try again.</Body> : null}
       {data.sessions.length === 0 ? (
         <Body>Nothing here yet. Things you save to {name} show up here.</Body>
       ) : (

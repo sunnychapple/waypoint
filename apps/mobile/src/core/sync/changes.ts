@@ -298,9 +298,13 @@ function retryPending(db: SqlDb, groupId: string, space: string, waitFor: string
 
 export type Outgoing = { id: string; groupId: string; kind: string; body: string; blobCaptureId: string | null };
 
-// In the order collectChanges queued them.
-export function nextOutgoing(db: SqlDb, limit = 50): Outgoing[] {
-  return db.all<Outgoing>("SELECT id, group_id AS groupId, kind, body, blob_capture_id AS blobCaptureId FROM outbox ORDER BY seq LIMIT ?", [limit]);
+// In the order collectChanges queued them. With a group id, only that group's entries, so one group's backlog cannot
+// hide another group's entries from the batch.
+export function nextOutgoing(db: SqlDb, limit = 50, groupId?: string): Outgoing[] {
+  const select = "SELECT id, group_id AS groupId, kind, body, blob_capture_id AS blobCaptureId FROM outbox";
+  return groupId === undefined
+    ? db.all<Outgoing>(`${select} ORDER BY seq LIMIT ?`, [limit])
+    : db.all<Outgoing>(`${select} WHERE group_id = ? ORDER BY seq LIMIT ?`, [groupId, limit]);
 }
 
 export function sent(db: SqlDb, id: string): void {

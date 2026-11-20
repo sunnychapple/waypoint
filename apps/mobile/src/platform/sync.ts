@@ -24,11 +24,19 @@ import {
   type Outgoing,
   type SyncChange,
 } from "../core/sync/changes.ts";
-import { getDeviceKeys, lockContent, lockFile, unlockContent, unlockFile } from "../../modules/waypoint-keys/index.ts";
+import {
+  KEY_REUSED_MESSAGE,
+  KEY_STALE_MESSAGE,
+  idempotencyKeyFor,
+  missingKeyVersions,
+  retryPlan,
+  syncedMediaPath,
+} from "../core/sync/rules.ts";
+import { getDeviceKeys, heldGroupKeyVersions, lockContent, lockFile, unlockContent, unlockFile } from "../../modules/waypoint-keys/index.ts";
 import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
 import { getDb, writeDb } from "./db.ts";
-import { currentUserId, useDeviceStatus } from "./device.ts";
+import { currentUserId, restoreApprovedUser, useDeviceStatus } from "./device.ts";
 import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
 
 // The background task for silent "sync" pushes (defined at module scope, as expo-task-manager requires).
@@ -36,15 +44,15 @@ export const SYNC_TASK = "waypoint-sync";
 // Set (to "1") when the server refused a file for a free plan (plan_required); the space screen says so.
 export const SYNC_PLAN_KEY = "sync_plan_required";
 const MEDIA_AT_ONCE = 3;
-const RECONNECT_MS = [2_000, 5_000, 15_000, 30_000] as const;
 // While the app is open, locally made changes are sent this often (no pull: the socket says when there is more).
 const SEND_EVERY_MS = 5_000;
-const KEY_STALE = "key version is not current";
 // React Native's WebSocket takes a third argument with the headers (the DOM typings declare two).
 const SocketWithHeaders: new (url: string, protocols: undefined, options: { headers: Record<string, string> }) => WebSocket = WebSocket;
 
 type Opened = { change: SyncChange; deviceId: string };
-type Link = { ws: WebSocket | null; attempts: number; timer: ReturnType<typeof setTimeout> | null };
+type Link = { ws: WebSocket | null; openedAt: number | null; attempts: number; timer: ReturnType<typeof setTimeout> | null };
+// An outbox entry's locked bytes, kept in memory until it is sent, with the key version and Idempotency-Key they went under.
+type Sealed = { keyVersion: number; key: string; locked: string };
 
 let foreground = false;
 let sendTimer: ReturnType<typeof setInterval> | null = null;
@@ -52,6 +60,10 @@ const links = new Map<string, Link>();
 // One run per group at a time: a later request waits for the one running, so no change is dropped.
 const queues = new Map<string, Promise<void>>();
 const waiting = new Map<string, number>();
+// A pull that is queued but has not started yet: a change that arrives meanwhile is covered by it (no second run).
+const pullQueued = new Map<string, Promise<void>>();
+const sealed = new Map<string, Sealed>();
+const sealings = new Map<string, number>();
 
 const blobKey = (groupId: string, blobId: string): string => `groups/${groupId}/media/${blobId}`;
 
@@ -124,19 +136,48 @@ async function mediaKeyFor(captureId: string, user: string, groupId: string, key
   return blobKey(groupId, blobId);
 }
 
-// Sends one outbox entry. Each change is locked with the group key under context("change", group, device, kind)
-// (docs/security.md section 11); only the locked bytes and the blob key leave the phone. Throws on any failure, so
-// the caller stops at it (later entries may be its children).
+// The locked bytes of an entry: the cached ones while they are for the current key version, otherwise a new locking
+// under a new Idempotency-Key. Each change is locked under context("change", group, device, kind) (docs/security.md
+// section 11); only the locked bytes and the blob key leave the phone.
+async function sealEntry(user: string, group: StoredGroup, deviceId: string, entry: Outgoing, relock: boolean): Promise<Sealed> {
+  const cached = sealed.get(entry.id);
+  if (cached !== undefined && cached.keyVersion === group.keyVersion && !relock) return cached;
+  const locking = sealings.get(entry.id) ?? 0;
+  sealings.set(entry.id, locking + 1);
+  const locked = await lockContent(user, group.id, group.keyVersion, "change", [group.id, deviceId, entry.kind], entry.body);
+  const next: Sealed = { keyVersion: group.keyVersion, key: idempotencyKeyFor(entry.id, group.keyVersion, locking), locked };
+  sealed.set(entry.id, next);
+  return next;
+}
+
+// Sends one outbox entry, the same bytes under the same key on a retry. A 409 that says the key was reused for other
+// bytes is a bug signal: the cached bytes are dropped and the entry is locked again once, under a new key. A stale key
+// version throws: the caller takes the new key, and the next run locks under it. Throws on any failure, so the caller
+// stops at it (later entries may be its children).
 async function sendEntry(user: string, group: StoredGroup, deviceId: string, entry: Outgoing): Promise<void> {
   const blob = entry.blobCaptureId === null ? null : await mediaKeyFor(entry.blobCaptureId, user, group.id, group.keyVersion);
-  const locked = await lockContent(user, group.id, group.keyVersion, "change", [group.id, deviceId, entry.kind], entry.body);
-  await api.postChange(group.id, { device_id: deviceId, key_version: group.keyVersion, kind: entry.kind, locked_bytes: locked, blob_key: blob }, entry.id);
-  sent(getDb(), entry.id);
+  let relock = false;
+  for (;;) {
+    const current = await sealEntry(user, group, deviceId, entry, relock);
+    try {
+      await api.postChange(group.id, { device_id: deviceId, key_version: current.keyVersion, kind: entry.kind, locked_bytes: current.locked, blob_key: blob }, current.key);
+    } catch (error) {
+      if (!relock && error instanceof ApiCallError && error.status === 409 && error.message === KEY_REUSED_MESSAGE) {
+        relock = true;
+        continue;
+      }
+      throw error;
+    }
+    sent(getDb(), entry.id);
+    sealed.delete(entry.id);
+    sealings.delete(entry.id);
+    return;
+  }
 }
 
 async function sendPending(user: string, group: StoredGroup, deviceId: string): Promise<void> {
   for (;;) {
-    const batch = nextOutgoing(getDb(), 50).filter((e) => e.groupId === group.id);
+    const batch = nextOutgoing(getDb(), 50, group.id);
     if (batch.length === 0) return;
     for (const entry of batch) await sendEntry(user, group, deviceId, entry);
   }
@@ -159,6 +200,16 @@ async function pullAll(user: string, groupId: string, deviceId: string): Promise
     const page = await api.changes(groupId, lastSeq(getDb(), groupId));
     const last = page.changes[page.changes.length - 1];
     if (last === undefined) return;
+    // A change sealed under a key this iPhone does not hold yet (a removal, a new device, an invite) is not skipped:
+    // the keys are fetched, and this pull stops with last seq where it was.
+    const absent = missingKeyVersions(
+      page.changes.map((c) => c.key_version),
+      heldGroupKeyVersions(user, groupId),
+    );
+    if (absent.length > 0) {
+      await ensureKeys(groupId, { now: true }).catch(() => undefined);
+      return;
+    }
     const opened: Opened[] = [];
     for (const change of page.changes) {
       const unlocked = await openChange(user, groupId, change);
@@ -171,13 +222,15 @@ async function pullAll(user: string, groupId: string, deviceId: string): Promise
   }
 }
 
-// Captures whose file is still on the server: download, unlock into their session folder, then set the file.
+// Captures whose file is still on the server: download, unlock into their session's synced folder, then set the file.
+// The folder is apart from this iPhone's recordings, so a remote id can never overwrite one (rules.ts).
 async function downloadMedia(user: string, groupId: string, c: { id: string; blob_id: string; session_id: string; kind: string }): Promise<void> {
-  const relative = `sessions/${c.session_id}/${c.id}.${c.kind === "audio" ? "m4a" : "jpg"}`;
+  const relative = syncedMediaPath(c.session_id, c.id, c.kind);
+  if (relative === null) return;
   const locked = blobTempPath(`${c.blob_id}-in`);
   try {
     await new File(Paths.document, locked).write(await api.blob(c.blob_id));
-    new Directory(Paths.document, "sessions", c.session_id).create({ idempotent: true, intermediates: true });
+    new Directory(Paths.document, "sessions", c.session_id, "synced").create({ idempotent: true, intermediates: true });
     await unlockFile(user, groupId, c.blob_id, locked, relative);
     writeDb((db) => db.run("UPDATE captures SET file = ? WHERE id = ?", [relative, c.id]));
   } catch {
@@ -199,24 +252,36 @@ async function fetchMedia(user: string, groupId: string): Promise<void> {
   }
 }
 
-// One send (and, when asked, a pull and the media down). Never throws: a failure waits for the next run.
+// One send (and, when asked, a pull and the media down). Never throws: a failure waits for the next run. The send and
+// the pull fail apart, so a failed send does not hold back the group's incoming changes in the same run.
 async function runOnce(groupId: string, pull: boolean): Promise<void> {
+  // This run starts now, so a request made from here on queues a run of its own (it may carry newer changes).
+  if (pull) pullQueued.delete(groupId);
+  const user = currentUserId();
+  const keys = user === null ? null : getDeviceKeys(user);
+  const group = getGroup(getDb(), groupId);
+  // Only a group mapped to a space syncs: an unmapped one (a push for a group this iPhone has no space for) is left alone.
+  if (user === null || keys === null || group === null || group.leftAt !== null || !syncedGroupIds(getDb()).includes(groupId)) return;
   try {
-    const user = currentUserId();
-    const keys = user === null ? null : getDeviceKeys(user);
-    const group = getGroup(getDb(), groupId);
-    if (user === null || keys === null || group === null || group.leftAt !== null) return;
     collectChanges(getDb(), { now: Date.now, newId: randomUUID, deviceId: keys.deviceId });
     await sendPending(user, group, keys.deviceId);
-    if (!pull) return;
+  } catch (error) {
+    await afterFailure(groupId, error);
+  }
+  if (!pull) return;
+  try {
     await pullAll(user, groupId, keys.deviceId);
     await fetchMedia(user, groupId);
   } catch (error) {
-    // The group's key moved on (a member was removed): take the new key now; the outbox waits for it.
-    if (error instanceof ApiCallError && error.status === 409 && error.message === KEY_STALE) {
-      await refreshGroups().catch(() => undefined);
-      await ensureKeys(groupId, { now: false }).catch(() => undefined);
-    }
+    await afterFailure(groupId, error);
+  }
+}
+
+// The group's key moved on (a member was removed): take the new key now; the outbox waits for it.
+async function afterFailure(groupId: string, error: unknown): Promise<void> {
+  if (error instanceof ApiCallError && error.status === 409 && error.message === KEY_STALE_MESSAGE) {
+    await refreshGroups().catch(() => undefined);
+    await ensureKeys(groupId, { now: false }).catch(() => undefined);
   }
 }
 
@@ -230,7 +295,16 @@ function enqueue(groupId: string, pull: boolean): Promise<void> {
 
 // Sends this iPhone's changes for a group, then pulls the group's changes. Resolves when done; never rejects.
 export function syncNow(groupId: string): Promise<void> {
-  return enqueue(groupId, true);
+  return pullSoon(groupId);
+}
+
+// A pull for the group. One that is queued and not yet started already covers this request.
+function pullSoon(groupId: string): Promise<void> {
+  const queued = pullQueued.get(groupId);
+  if (queued !== undefined) return queued;
+  const run = enqueue(groupId, true);
+  pullQueued.set(groupId, run);
+  return run;
 }
 
 // Acknowledges what was pulled, as the socket asks (PR 28).
@@ -241,9 +315,21 @@ function acknowledge(ws: WebSocket, groupId: string): void {
 function linkFor(groupId: string): Link {
   const existing = links.get(groupId);
   if (existing !== undefined) return existing;
-  const link: Link = { ws: null, attempts: 0, timer: null };
+  const link: Link = { ws: null, openedAt: null, attempts: 0, timer: null };
   links.set(groupId, link);
   return link;
+}
+
+// Tries the socket again later (rules.ts: 2, 5, 15, 30 s; a socket that stayed open 30 s starts the backoff again).
+function scheduleConnect(groupId: string, link: Link, closedAt: number): void {
+  if (link.timer !== null) return;
+  const plan = retryPlan(link.attempts, link.openedAt, closedAt);
+  link.attempts = plan.attempts;
+  link.openedAt = null;
+  link.timer = setTimeout(() => {
+    link.timer = null;
+    void connect(groupId);
+  }, plan.waitMs);
 }
 
 // One socket per synced group while the app is active. "changed" with a newer seq pulls; 4003 (membership ended)
@@ -253,12 +339,16 @@ async function connect(groupId: string): Promise<void> {
   const keys = user === null ? null : getDeviceKeys(user);
   const token = await api.token().catch(() => null);
   const link = linkFor(groupId);
-  if (!foreground || keys === null || token === null || link.ws !== null) return;
+  if (!foreground || keys === null || link.ws !== null || link.timer !== null) return;
+  if (token === null) {
+    scheduleConnect(groupId, link, Date.now()); // signed out, or the token is not there yet: try again later
+    return;
+  }
   const ws = new SocketWithHeaders(api.syncSocketUrl(groupId, keys.deviceId), undefined, { headers: { Authorization: `Bearer ${token}` } });
   link.ws = ws;
   ws.onopen = () => {
-    link.attempts = 0;
-    void enqueue(groupId, true).then(() => acknowledge(ws, groupId));
+    link.openedAt = Date.now();
+    void pullSoon(groupId).then(() => acknowledge(ws, groupId));
   };
   ws.onmessage = (event) => {
     if (typeof event.data !== "string") return;
@@ -269,7 +359,7 @@ async function connect(groupId: string): Promise<void> {
       return;
     }
     if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
-      void enqueue(groupId, true).then(() => acknowledge(ws, groupId));
+      void pullSoon(groupId).then(() => acknowledge(ws, groupId));
     }
   };
   ws.onclose = (event) => {
@@ -280,12 +370,7 @@ async function connect(groupId: string): Promise<void> {
       return;
     }
     if (event.code === 4000) return;
-    const wait = RECONNECT_MS[Math.min(link.attempts, RECONNECT_MS.length - 1)];
-    link.attempts += 1;
-    link.timer = setTimeout(() => {
-      link.timer = null;
-      void connect(groupId);
-    }, wait);
+    scheduleConnect(groupId, link, Date.now());
   };
 }
 
@@ -340,10 +425,12 @@ function groupFromPush(data: unknown): string | null {
   return null;
 }
 
+// Defined at module scope and imported by the root layout, so it exists when iOS wakes the app with no screen up.
+// The person comes from the stored identity (device.ts); when that is not known, nothing is done.
 TaskManager.defineTask(SYNC_TASK, async ({ data, error }) => {
   if (error !== null) return;
   const groupId = groupFromPush(data);
-  if (groupId !== null) await syncNow(groupId);
+  if (groupId !== null && restoreApprovedUser() !== null) await syncNow(groupId);
 });
 
 // Called once in (tabs)/_layout.tsx: runs the sync while the app is active, and registers the silent push task.
@@ -352,9 +439,10 @@ export function useSync(): void {
   useEffect(() => {
     if (status !== "approved") return;
     void Notifications.registerTaskAsync(SYNC_TASK).catch(() => undefined);
+    // Only "background" closes the sockets: Control Center or an alert ("inactive") leaves the sync running.
     const onState = (state: AppStateStatus) => {
       if (state === "active") startForeground();
-      else stopForeground();
+      else if (state === "background") stopForeground();
     };
     if (AppState.currentState === "active") startForeground();
     const subscription = AppState.addEventListener("change", onState);
