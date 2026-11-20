@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createSpace,
   ensureDefaultSpace,
+  freeSpaceName,
   getSavingTo,
   listSpaces,
+  renameSpace,
   setSavingTo,
   SpaceNameError,
 } from "../src/core/db/spaces.ts";
@@ -57,6 +59,37 @@ describe("spaces", () => {
   it("createSpace throws taken for a name that exists in another case", () => {
     ensureDefaultSpace(db, deps());
     expect(nameError(() => createSpace(db, deps(), "my NOTES"))).toBe("taken");
+  });
+
+  it("freeSpaceName gives the base when nothing has it, then numbers it", () => {
+    expect(freeSpaceName(db, "Shared space", null)).toBe("Shared space");
+    createSpace(db, deps(), "Shared space");
+    expect(freeSpaceName(db, "Shared space", null)).toBe("Shared space 2");
+    createSpace(db, deps(), "Shared space 2");
+    expect(freeSpaceName(db, "Shared space", null)).toBe("Shared space 3");
+  });
+
+  it("freeSpaceName ignores the space being renamed", () => {
+    const space = createSpace(db, deps(), "Shared space");
+    expect(freeSpaceName(db, "Shared space", space.id)).toBe("Shared space");
+  });
+
+  it("renameSpace changes the name and keeps the same space", () => {
+    const space = createSpace(db, deps(), "Shared space");
+    renameSpace(db, space.id, "  Family  ");
+    expect(listSpaces(db).map((s) => s.name)).toEqual(["Family"]);
+  });
+
+  it("renameSpace throws taken for another space's name, but accepts its own", () => {
+    ensureDefaultSpace(db, deps());
+    const space = createSpace(db, deps(), "Biology");
+    expect(nameError(() => renameSpace(db, space.id, "MY notes"))).toBe("taken");
+    expect(nameError(() => renameSpace(db, space.id, "Biology"))).toBe("no error");
+  });
+
+  it("renameSpace throws too_long for a name over 60 characters", () => {
+    const space = createSpace(db, deps(), "Biology");
+    expect(nameError(() => renameSpace(db, space.id, "a".repeat(61)))).toBe("too_long");
   });
 
   it("createSpace throws taken for an accented name that exists in another case", () => {

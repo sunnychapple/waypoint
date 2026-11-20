@@ -52,14 +52,36 @@ export function ensureDefaultSpace(db: SqlDb, deps: Deps): Space {
   return getSpace(db, id) as Space;
 }
 
-export function createSpace(db: SqlDb, deps: Deps, name: string): Space {
+// Compared in JavaScript: SQLite's NOCASE folds only A to Z, so "Écologie" and "écologie" would both be allowed.
+const foldName = (text: string): string => text.normalize("NFC").toLocaleLowerCase();
+
+// The trimmed name, or the error it gives: empty, too long, or the name of another space (not `except`).
+function checkName(db: SqlDb, name: string, except: string | null): string {
   const trimmed = name.trim();
   const length = [...trimmed].length;
   if (length === 0) throw new SpaceNameError("empty");
   if (length > NAME_MAX) throw new SpaceNameError("too_long");
-  // Compared in JavaScript: SQLite's NOCASE folds only A to Z, so "Écologie" and "écologie" would both be allowed.
-  const fold = (text: string): string => text.normalize("NFC").toLocaleLowerCase();
-  if (listSpaces(db).some((space) => fold(space.name) === fold(trimmed))) throw new SpaceNameError("taken");
+  if (listSpaces(db).some((space) => space.id !== except && foldName(space.name) === foldName(trimmed))) throw new SpaceNameError("taken");
+  return trimmed;
+}
+
+// The first free name from `base`: `base`, then `base 2`, `base 3`… (`except` is the space being renamed, if any).
+export function freeSpaceName(db: SqlDb, base: string, except: string | null): string {
+  const taken = new Set(listSpaces(db).filter((space) => space.id !== except).map((space) => foldName(space.name)));
+  for (let n = 1; ; n += 1) {
+    const name = n === 1 ? base : `${base} ${n}`;
+    if (!taken.has(foldName(name))) return name;
+  }
+}
+
+// Renames a space. Throws SpaceNameError when the name is empty, too long, or another space's.
+export function renameSpace(db: SqlDb, id: string, name: string): void {
+  const trimmed = checkName(db, name, id);
+  db.run("UPDATE spaces SET name = ? WHERE id = ?", [trimmed, id]);
+}
+
+export function createSpace(db: SqlDb, deps: Deps, name: string): Space {
+  const trimmed = checkName(db, name, null);
   const id = deps.newId();
   const now = deps.now();
   db.run("INSERT INTO spaces (id, name, is_default, created_at, last_used_at) VALUES (?, ?, 0, ?, ?)", [

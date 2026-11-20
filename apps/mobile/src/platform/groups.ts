@@ -18,6 +18,8 @@ import {
   type KeyTarget,
   type WrappedFor,
 } from "../../modules/waypoint-keys/index.ts";
+import type { SqlDb } from "../core/db/sql.ts";
+import { freeSpaceName, renameSpace } from "../core/db/spaces.ts";
 import { toBase64Url } from "../core/jobs/bytes.ts";
 import {
   firstSetDelayMs,
@@ -39,6 +41,7 @@ import {
   type Role,
   type StoredGroup,
 } from "../core/groups/groups.ts";
+import { isFallbackSpaceName } from "../core/share/spaces.ts";
 import { api } from "./api.ts";
 import { currentUserId, useDeviceStatus } from "./device.ts";
 import { getDb, writeDb } from "./db.ts";
@@ -59,6 +62,24 @@ async function nameOf(user: string, view: GroupView): Promise<string | null> {
   }
 }
 
+// A joined group's local space still has the placeholder name: it takes the group's name once that name is readable.
+function nameJoinedSpaces(db: SqlDb, views: GroupView[], names: (string | null)[]): void {
+  views.forEach((v, i) => {
+    const name = names[i] ?? "";
+    if (name === "") return;
+    const space = db.get<{ id: string; name: string }>(
+      "SELECT s.id, s.name FROM spaces s JOIN space_groups g ON g.space_id = s.id WHERE g.group_id = ?",
+      [v.id],
+    );
+    if (space === null || !isFallbackSpaceName(space.name)) return;
+    try {
+      renameSpace(db, space.id, freeSpaceName(db, name, space.id));
+    } catch {
+      // Too long for a space name: the placeholder stays.
+    }
+  });
+}
+
 // GET /v1/groups into the local rows. A group the list no longer has is marked left (its local copy stays).
 export async function refreshGroups(): Promise<void> {
   const user = currentUserId();
@@ -68,6 +89,7 @@ export async function refreshGroups(): Promise<void> {
   const now = Date.now();
   writeDb((db) => {
     views.forEach((v, i) => upsertGroup(db, v, names[i] ?? null, now, user));
+    nameJoinedSpaces(db, views, names);
     const listed = new Set(views.map((v) => v.id));
     for (const g of listGroups(db)) if (!listed.has(g.id)) markLeft(db, g.id, now);
   });
@@ -216,20 +238,17 @@ export async function createInvite(groupId: string, role: Role, historyFrom: num
   return `waypoint://invite/${token}`;
 }
 
-// Joins with an invite token, then opens the group's keys when the owner's devices have sent them.
-export async function acceptInvite(token: string): Promise<string> {
-  const view = await api.acceptInvite(token);
-  await refreshGroups();
-  await ensureKeys(view.id, { now: false });
-  return view.id;
+// Joins with an invite token. Only the server step is here: the caller maps the group locally at once.
+export async function acceptInvite(token: string): Promise<GroupView> {
+  return api.acceptInvite(token);
 }
 
-// Removes a member (or, with this person's own id, leaves). A removal makes the new key at once.
+// Removes a member (or, with this person's own id, leaves). Once the server has removed them, the rest is best effort.
 export async function removeMember(groupId: string, userId: string): Promise<void> {
   const me = currentUserId();
   await api.removeMember(groupId, userId);
-  await refreshGroups();
-  if (userId !== me) await ensureKeys(groupId, { now: true });
+  await refreshGroups().catch(() => undefined);
+  if (userId !== me) await ensureKeys(groupId, { now: true }).catch(() => undefined);
 }
 
 // Approving a new device: the envelopes for every held version of every group, for that device (at most 500).
