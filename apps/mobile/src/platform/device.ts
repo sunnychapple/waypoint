@@ -67,7 +67,7 @@ async function register(clerkUserId: string, firstTry = true): Promise<void> {
     const account = await ensureAccountKey(user, randomUUID());
     try {
       await api.registerDevice(
-        { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert } },
+        { ...base, account: { id: account.accountId, sign_pub: account.signPub, box_pub: account.boxPub, cert: account.cert, self_cert: account.selfCert } },
         registerSigner,
       );
       return approve(user, keys.deviceId);

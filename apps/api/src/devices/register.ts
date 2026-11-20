@@ -1,5 +1,5 @@
 import { RegisterDeviceRequestSchema, type DeviceView } from "@waypoint/contracts";
-import { decodePublicKey, deviceCertificateInput, fromBase64Url, importBoxKey, importVerifyKey, NEW_DEVICE, verifyP256 } from "@waypoint/crypto";
+import { decodePublicKey, deviceCertificateInput, fromBase64Url, importBoxKey, importVerifyKey, NEW_DEVICE, verifyAccountCertificate, verifyP256 } from "@waypoint/crypto";
 import { Hono } from "hono";
 import { checkSignature } from "../auth/signature.ts";
 import type { AppEnv } from "../env.ts";
@@ -56,9 +56,12 @@ export function devicesRoute(deps: { now: () => number }) {
         } catch {
           certOk = false;
         }
-        if (!certOk || req.account.id === req.id) throw new ApiFailure("bad_request", "invalid certificate");
+        // The account row's own certificate: co-members wrap group keys to this box_pub only if it verifies
+        // (docs/security.md section 6, "Account certificate").
+        const selfOk = await verifyAccountCertificate(req.account.self_cert, user.id, req.account.id, req.account.sign_pub, req.account.box_pub);
+        if (!certOk || !selfOk || req.account.id === req.id) throw new ApiFailure("bad_request", "invalid certificate");
         statements.push(
-          db.prepare(insertDevice).bind(req.account.id, user.id, "Account key", "account", req.account.sign_pub, req.account.box_pub, 1, now, "account", now, null, null),
+          db.prepare(insertDevice).bind(req.account.id, user.id, "Account key", "account", req.account.sign_pub, req.account.box_pub, 1, now, "account", now, null, req.account.self_cert),
           db.prepare(insertDevice).bind(req.id, user.id, req.name, req.platform, req.sign_pub, req.box_pub, 1, now, "device", now, req.account.id, req.account.cert),
         );
       } else {

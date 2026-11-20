@@ -1,4 +1,5 @@
 import {
+  accountCertificateInput,
   bodySha256,
   DEVICE_HEADER,
   HPKE_SUITE,
@@ -34,6 +35,11 @@ export async function makeTestDevice(id: string): Promise<TestDevice> {
     sign: async (message) =>
       new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, signing.privateKey, message)),
   };
+}
+
+// The account key's certificate for its own row (docs/security.md section 6, "Account certificate").
+export async function selfCertFor(account: TestDevice, userId: string, accountId: string = account.id): Promise<string> {
+  return toBase64Url(await account.sign(accountCertificateInput(userId, accountId, account.signPub, account.boxPub)));
 }
 
 let nonceCounter = 0;

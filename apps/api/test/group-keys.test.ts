@@ -8,6 +8,7 @@ import {
   PURPOSE_ACCOUNT_KEY,
   PURPOSE_GROUP_KEY,
   toBase64Url,
+  verifyAccountCertificate,
 } from "@waypoint/crypto";
 import { Hono } from "hono";
 import { describe, expect, test } from "vitest";
@@ -17,7 +18,7 @@ import { handleError } from "../src/errors.ts";
 import { groupKeyRoutes } from "../src/keys/routes.ts";
 import type { Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
-import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
+import { insertDevice, makeTestDevice, selfCertFor, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
 const G = "g1";
@@ -194,6 +195,17 @@ describe("S2 group keys", () => {
     expect(devices.map((x) => x.id).sort()).toEqual([...TARGETS].sort());
     expect(devices.every((x) => x.has_current_key)).toBe(true);
     expect(Object.fromEntries(devices.map((x) => [x.id, x.role]))).toEqual({ acct_u1: "owner", dev_u1: "owner", acct_u2: "editor", dev_u2: "editor" });
+  });
+
+  test("GET /v1/groups/g1/devices serves an account row's self-certificate as its cert, and it verifies under the row's own keys", async () => {
+    const w = await world();
+    const selfCert = await selfCertFor(w.d.acct_u2!, "u2");
+    await w.db.prepare("UPDATE devices SET cert = ? WHERE id = 'acct_u2'").bind(selfCert).run();
+    const res = await appFor(userOf("u1")).request(DEVICES_PATH, {}, { DB: w.db });
+    const devices = ((await res.json()) as { devices: { id: string; user_id: string; kind: string; sign_pub: string; box_pub: string; cert: string | null }[] }).devices;
+    const row = devices.find((x) => x.id === "acct_u2");
+    expect(row).toMatchObject({ kind: "account", user_id: "u2", cert: selfCert });
+    expect(await verifyAccountCertificate(selfCert, "u2", "acct_u2", row?.sign_pub ?? "", row?.box_pub ?? "")).toBe(true);
   });
 
   test("GET /v1/groups/g1/keys?device=<id> returns that device's envelopes in version order and one entry per signer, passes MyGroupKeysSchema; other user's, removed or missing device → 404", async () => {

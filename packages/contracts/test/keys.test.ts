@@ -21,7 +21,7 @@ const FIRST_DEVICE = {
   platform: "ios",
   sign_pub: SIGN_PUB,
   box_pub: BOX_PUB,
-  account: { id: "account_1", sign_pub: SIGN_PUB, box_pub: BOX_PUB, cert: CERT },
+  account: { id: "account_1", sign_pub: SIGN_PUB, box_pub: BOX_PUB, cert: CERT, self_cert: CERT },
 };
 
 const NEW_DEVICE = {
@@ -58,6 +58,11 @@ describe("RegisterDeviceRequestSchema", () => {
 
   test("an extra key fails", () => {
     expect(RegisterDeviceRequestSchema.safeParse({ ...NEW_DEVICE, extra: 1 }).success).toBe(false);
+  });
+
+  test("a first device without the account's self_cert fails", () => {
+    const { self_cert: _unused, ...account } = FIRST_DEVICE.account;
+    expect(RegisterDeviceRequestSchema.safeParse({ ...FIRST_DEVICE, account }).success).toBe(false);
   });
 
   test("DeviceViewSchema accepts a pending row (nulls) and an approved one", () => {
@@ -108,7 +113,7 @@ describe("PutRecoveryRequestSchema", () => {
 
 describe("RemoveDeviceRequestSchema", () => {
   const ROTATION = {
-    account: { id: "account_2", sign_pub: SIGN_PUB, box_pub: BOX_PUB },
+    account: { id: "account_2", sign_pub: SIGN_PUB, box_pub: BOX_PUB, self_cert: CERT },
     devices: [{ id: "device_1", cert: CERT, account_envelope: "E".repeat(10) }],
   };
 
@@ -123,6 +128,11 @@ describe("RemoveDeviceRequestSchema", () => {
 
   test("devices: [] fails", () => {
     expect(RemoveDeviceRequestSchema.safeParse({ ...ROTATION, devices: [] }).success).toBe(false);
+  });
+
+  test("a rotation without the new account's self_cert fails", () => {
+    const { self_cert: _unused, ...account } = ROTATION.account;
+    expect(RemoveDeviceRequestSchema.safeParse({ ...ROTATION, account }).success).toBe(false);
   });
 });
 

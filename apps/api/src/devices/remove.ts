@@ -1,5 +1,5 @@
 import { RemoveDeviceRequestSchema } from "@waypoint/contracts";
-import { decodePublicKey, deviceCertificateInput, fromBase64Url, importBoxKey, importVerifyKey, PURPOSE_ACCOUNT_KEY, verifyP256 } from "@waypoint/crypto";
+import { decodePublicKey, deviceCertificateInput, fromBase64Url, importBoxKey, importVerifyKey, PURPOSE_ACCOUNT_KEY, verifyAccountCertificate, verifyP256 } from "@waypoint/crypto";
 import { Hono } from "hono";
 import { requireDeviceSignature } from "../auth/signature.ts";
 import type { AppEnv } from "../env.ts";
@@ -96,6 +96,10 @@ export function removeDeviceRoute(deps: { now: () => number }) {
     } catch {
       throw new ApiFailure("bad_request", "invalid request");
     }
+    // The new account row's own certificate (docs/security.md section 6, "Account certificate").
+    if (!(await verifyAccountCertificate(req.account.self_cert, user.id, req.account.id, req.account.sign_pub, req.account.box_pub))) {
+      throw new ApiFailure("bad_request", "invalid certificate");
+    }
     const updates = [];
     for (const device of remaining) {
       const entry = sent.get(device.id);
@@ -114,10 +118,10 @@ export function removeDeviceRoute(deps: { now: () => number }) {
       guarded("UPDATE devices SET removed_at = ? WHERE user_id = ? AND kind = 'account' AND removed_at IS NULL", now, user.id),
       db
         .prepare(
-          `INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, can_approve, added_at, kind, approved_at, approved_by)
-             SELECT ?, ?, 'Account key', 'account', ?, ?, 1, ?, 'account', ?, ? WHERE ${UNCHANGED_SQL}`,
+          `INSERT INTO devices (id, user_id, name, platform, sign_pub, box_pub, can_approve, added_at, kind, approved_at, approved_by, cert)
+             SELECT ?, ?, 'Account key', 'account', ?, ?, 1, ?, 'account', ?, ?, ? WHERE ${UNCHANGED_SQL}`,
         )
-        .bind(req.account.id, user.id, req.account.sign_pub, req.account.box_pub, now, now, caller.id, ...unchanged),
+        .bind(req.account.id, user.id, req.account.sign_pub, req.account.box_pub, now, now, caller.id, req.account.self_cert, ...unchanged),
       ...updates,
       bump,
       guarded("DELETE FROM recovery WHERE user_id = ?", user.id),
