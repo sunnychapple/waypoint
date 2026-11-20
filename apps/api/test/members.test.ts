@@ -9,6 +9,7 @@ import { memberRoutes } from "../src/groups/members.ts";
 import { groupRoutes } from "../src/groups/routes.ts";
 import type { BatchDb } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
+import { fakeRoomNamespace } from "./helpers/room.ts";
 import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
@@ -348,5 +349,37 @@ describe("endExpiredMemberships", () => {
     expect(await leftAt(db, G1, "x0")).toBeNull();
     expect(await leftAt(db, G1, `x${total - 1}`)).toBe(NOW - total);
     expect(await keyVersion(db, G1)).toBe(1 + MAX_EXPIRED_PER_RUN);
+  });
+});
+
+describe("DELETE /v1/groups/:id/members/:user and the group's sockets", () => {
+  test("removing u2 closes u2's socket with 4003 and leaves u3's open", async () => {
+    const w = await groupWorld();
+    const rooms = fakeRoomNamespace(() => NOW);
+    const room = rooms.roomFor(G1);
+    const u2Socket = room.host.connect(["device:dev_u2", "user:u2", "until:never"]);
+    const u3Socket = room.host.connect(["device:dev_u3", "user:u3", "until:never"]);
+    const path = `/v1/groups/${G1}/members/u2`;
+    const init = await signedInit(w.d.u1, { method: "DELETE", path, now: NOW, idempotencyKey: crypto.randomUUID() });
+    const res = await appFor(userOf("u1")).request(path, init, { DB: w.db, GROUP_ROOM: rooms });
+    expect(res.status).toBe(200);
+    expect(u2Socket.closed).toEqual({ code: 4003, reason: "membership ended" });
+    expect(u3Socket.closed).toBeNull();
+  });
+
+  test("with a GROUP_ROOM whose get throws, the removal still returns 200 and bumps the key version", async () => {
+    const w = await groupWorld();
+    const path = `/v1/groups/${G1}/members/u2`;
+    const init = await signedInit(w.d.u1, { method: "DELETE", path, now: NOW, idempotencyKey: crypto.randomUUID() });
+    const GROUP_ROOM = {
+      idFromName: (name: string) => name,
+      get: () => {
+        throw new Error("room unavailable");
+      },
+    };
+    const res = await appFor(userOf("u1")).request(path, init, { DB: w.db, GROUP_ROOM });
+    expect(res.status).toBe(200);
+    expect(await leftAt(w.db, G1, "u2")).toBe(NOW);
+    expect(await keyVersion(w.db, G1)).toBe(2);
   });
 });

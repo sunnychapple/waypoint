@@ -2,7 +2,9 @@
 // a real wallet store on node:sqlite, and queues that record messages. PR 22A appends fakeSteps and makeJobFixture
 // below; PR 21 and PR 22 to 25 reuse this file and never redefine anything in it.
 import type { Command } from "@waypoint/ledger";
+import { putJobInput, type JobInput } from "../../src/jobs/input.ts";
 import type { JobDeps } from "../../src/jobs/job.ts";
+import type { StepConfig, Steps } from "../../src/jobs/run.ts";
 import type { JobRunInput, JobWorkflow } from "../../src/jobs/start.ts";
 import type { PushMessage } from "../../src/push/messages.ts";
 import type { BatchDb } from "../../src/storage.ts";
@@ -149,4 +151,94 @@ export async function insertJob(
     )
     .bind(job.id, job.type ?? "overview_script", job.state ?? "queued", quoted, key, job.deviceId === undefined ? "dev_phone" : job.deviceId, JOB_NOW, deadline)
     .run();
+}
+// PR 22A from here on.
+
+// Runs each step once and records its name, config and what it returned (Workflows keep step results, so tests
+// check they hold no text). failOn makes that step throw, like a step whose retries ran out.
+export function fakeSteps(failOn: string[] = []): { steps: Steps; names: string[]; configs: StepConfig[]; results: unknown[] } {
+  const names: string[] = [];
+  const configs: StepConfig[] = [];
+  const results: unknown[] = [];
+  const steps: Steps = {
+    do: async (name, config, fn) => {
+      names.push(name);
+      configs.push(config);
+      if (failOn.includes(name)) throw new Error(`step ${name} failed`);
+      const result = await fn();
+      results.push(result);
+      return result;
+    },
+  };
+  return { steps, names, configs, results };
+}
+
+export type JobFixture = Awaited<ReturnType<typeof makeJobFixture>>;
+
+// User u1 with device "device_1" (approved unless told otherwise), 100 monthly credits, a queued job "job_1" of this
+// type with its hold of `credits`, and (unless input is null) its encrypted input in the bucket.
+export async function makeJobFixture(
+  type: JobRunInput["type"],
+  options: {
+    credits?: number;
+    input?: JobInput | null;
+    device?: "approved" | "removed" | "none";
+    depth?: JobRunInput["depth"];
+    minutes?: number | null;
+  } = {},
+) {
+  const db = createTestDb();
+  await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 1, 'ba_u1')").run();
+  const device: TestDevice = await makeTestDevice("device_1");
+  const deviceState = options.device ?? "approved";
+  if (deviceState !== "none") await insertDevice(db, device, { userId: "u1", removedAt: deviceState === "removed" ? 2 : null });
+  const credits = options.credits ?? 40;
+  await db
+    .prepare("INSERT INTO jobs (id, user_id, type, state, quoted, route, created_at, device_id) VALUES ('job_1', 'u1', ?, 'queued', ?, 'strong', ?, ?)")
+    .bind(type, credits, JOB_NOW, deviceState === "none" ? null : "device_1")
+    .run();
+  const store = createWalletStore(createTestStore());
+  store.apply({ type: "grant", id: "seed", bucket: "monthly", credits: 100, ref: "test" }, JOB_NOW);
+  store.apply(
+    { type: "hold", id: "job:u1:k1", hold_id: "job:u1:k1", user_id: "u1", task: type, credits, expires_at: JOB_NOW + 3_600_000 },
+    JOB_NOW,
+  );
+  const { bucket, objects } = memoryBucket();
+  const sent = options.input === undefined ? { text: "Osmosis moves water across a membrane.", prompt: null } : options.input;
+  const inputKey = sent === null ? null : await putJobInput(bucket, "job_1", sent);
+  const usage: UsageEvent[] = [];
+  const pushes: PushMessage[] = [];
+  const deps = {
+    db,
+    bucket,
+    wallet: { apply: async (command: Command) => store.apply(command, JOB_NOW) },
+    usage: { send: async (event: UsageEvent) => void usage.push(event) },
+    push: { send: async (message: PushMessage) => void pushes.push(message) },
+    now: () => JOB_NOW,
+  } satisfies JobDeps;
+  const input: JobRunInput = {
+    v: 1,
+    job_id: "job_1",
+    type,
+    user_id: "u1",
+    billing_account_id: "ba_u1",
+    credits,
+    hold_id: "job:u1:k1",
+    settle_id: "job_settle:u1:k1",
+    release_id: "job_release:u1:k1",
+    deadline: JOB_NOW + 600_000,
+    tier: "strong",
+    model: "@cf/test/strong",
+    retention: "standard",
+    zero_retention: false,
+    depth: options.depth ?? null,
+    minutes: options.minutes ?? null,
+    input_key: inputKey,
+    bytes_sent: 38,
+  };
+  const jobRow = async () =>
+    db
+      .prepare("SELECT state, spent, finished_at, expires_at, result_key FROM jobs WHERE id = 'job_1'")
+      .first<{ state: string; spent: number | null; finished_at: number | null; expires_at: number | null; result_key: string | null }>();
+  return { db, store, bucket, objects, device, deps, input, usage, pushes, jobRow };
 }

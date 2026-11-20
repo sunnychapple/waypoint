@@ -5,6 +5,7 @@ import { checkSignature } from "../auth/signature.ts";
 import type { AppEnv } from "../env.ts";
 import { ApiFailure } from "../errors.ts";
 import { idempotent } from "../idempotency.ts";
+import { sendPush } from "../push/messages.ts";
 import { DEVICE_COLUMNS } from "./view.ts";
 
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -79,6 +80,16 @@ export function devicesRoute(deps: { now: () => number }) {
       } catch (error) {
         if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) throw new ApiFailure("conflict", "device id taken");
         throw error;
+      }
+      if (req.account === undefined) {
+        // Flow 7: tell the user's approved devices that a new device is waiting for the 6-digit code (S1F).
+        const approvers = await db
+          .prepare("SELECT id FROM devices WHERE user_id = ? AND kind = 'device' AND approved_at IS NOT NULL AND removed_at IS NULL ORDER BY id")
+          .bind(user.id)
+          .all<{ id: string }>();
+        for (const approver of approvers.results) {
+          await sendPush(c.env.PUSH_QUEUE, { user_id: user.id, kind: "device_request", ref: req.id, device_id: approver.id });
+        }
       }
       const device = await db.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE id = ?`).bind(req.id).first<DeviceView>();
       return c.json({ device }, 201);
