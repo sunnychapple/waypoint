@@ -319,7 +319,8 @@ async function syncGroups(): Promise<void> {
         // A group with no key on this iPhone, which holds the account key: its keys may be waiting in the account row's
         // envelopes (a recovery whose first read failed). Read those first; ensureKeys then wraps them for this iPhone.
         if (user !== null && account !== null && g.leftAt === null && heldGroupKeyVersions(user, g.id).length === 0) {
-          await readGroup(user, g.id, account.accountId);
+          // A failed read must not stop ensureKeys, which may need to make a first set for a later version.
+          await readGroup(user, g.id, account.accountId).catch(() => undefined);
         }
         await ensureKeys(g.id, { now: false });
       } catch {
