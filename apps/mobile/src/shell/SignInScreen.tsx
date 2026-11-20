@@ -53,7 +53,9 @@ export default function SignInScreen() {
           cornerRadius={14}
           style={styles.apple}
           onPress={() => {
-            void signInWithApple();
+            void signInWithApple().then((result) => {
+              setMessage(result === "error" ? "Couldn't sign in with Apple. Check your connection and try again." : null);
+            });
           }}
         />
 

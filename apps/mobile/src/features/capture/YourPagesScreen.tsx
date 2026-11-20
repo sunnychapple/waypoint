@@ -39,6 +39,14 @@ export default function YourPagesScreen() {
     deleteFile(file);
   }
 
+  // The × sits on the thumbnail, so a missed tap must not delete a page straight away.
+  function confirmRemove(captureId: string, index: number) {
+    Alert.alert(`Remove page ${index + 1}?`, "This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: () => remove(captureId) },
+    ]);
+  }
+
   function discard() {
     writeDb((db) => deleteSessionRow(db, id));
     deleteSessionFiles(id);
@@ -46,7 +54,7 @@ export default function YourPagesScreen() {
   }
 
   function confirmDiscard() {
-    Alert.alert(`Delete ${countLabel(pages.length, "page", "pages")}?`, "This can't be undone.", [
+    Alert.alert(pages.length === 1 ? "Delete this page?" : `Delete ${pages.length} pages?`, "This can't be undone.", [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: discard },
     ]);
@@ -100,7 +108,8 @@ export default function YourPagesScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Remove page ${index + 1}`}
-              onPress={() => remove(page.id)}
+              onPress={() => confirmRemove(page.id, index)}
+              hitSlop={11}
               style={[styles.removeBadge, { backgroundColor: colors.ink }]}
             >
               <SymbolView name="xmark" tintColor={colors.bg} size={10} />

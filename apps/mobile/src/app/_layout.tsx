@@ -9,10 +9,17 @@ function RootStack() {
   if (gate === "wait") return null;
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+      {/* Test screens for the native modules: development builds only, and only when signed in. */}
+      <Stack.Protected guard={__DEV__ && gate === "app"}>
+        <Stack.Screen name="dev/audio" />
+        <Stack.Screen name="dev/model" />
+        <Stack.Screen name="dev/pages" />
+      </Stack.Protected>
       <Stack.Protected guard={gate === "app"}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
+        <Stack.Screen name="plans" />
         <Stack.Screen name="update" options={{ presentation: "modal" }} />
         <Stack.Screen name="device-waiting" options={{ presentation: "modal" }} />
         <Stack.Screen name="settings-permissions" />

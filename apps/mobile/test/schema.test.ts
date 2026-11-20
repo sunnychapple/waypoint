@@ -132,6 +132,35 @@ describe("schema", () => {
     expect(db.get<{ capture_id: string | null }>("SELECT capture_id FROM cards WHERE id = 'c1'")?.capture_id).toBeNull();
   });
 
+  it("rejects a negative recorded_ms, a negative segment start and a capture kind of 'video'", () => {
+    addSpace();
+    expect(() =>
+      db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at, recorded_ms) VALUES ('x', 's1', 'recording', 't', 'saved', 1, -1)"),
+    ).toThrow();
+    addSession();
+    expect(() => db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('x1', -1, 10, 'hi', 'device')")).toThrow();
+    expect(() => db.run("INSERT INTO captures (id, session_id, kind, t, file) VALUES ('v1', 'x1', 'video', 0, 'v.mov')")).toThrow();
+  });
+
+  it("rejects a card made_by other than device_model or quiz_miss, and a search vector with dim 0", () => {
+    addSpace();
+    addSession();
+    expect(() =>
+      db.run("INSERT INTO cards (id, session_id, kind, front, back, made_by, created_at, due_at, fsrs) VALUES ('c1', 'x1', 'term', 'f', 'b', 'cloud', 1, 1, '{}')"),
+    ).toThrow();
+    db.run("INSERT INTO chunks (session_id, source, t_start, t_end, text) VALUES ('x1', 'transcript', 0, 10, 'hello')");
+    expect(() => db.run("INSERT INTO search_index (chunk_id, model_version, dim, scale, vector) VALUES (1, 'v1', 0, 1.0, x'')")).toThrow();
+  });
+
+  it("deleting a capture deletes its chunks", () => {
+    addSpace();
+    addSession();
+    db.run("INSERT INTO captures (id, session_id, kind, t, file) VALUES ('p1', 'x1', 'page', 0, 'p1.jpg')");
+    db.run("INSERT INTO chunks (session_id, source, capture_id, t_start, t_end, text) VALUES ('x1', 'page', 'p1', 0, 0, 'page words')");
+    db.run("DELETE FROM captures WHERE id = 'p1'");
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM chunks")?.n).toBe(0);
+  });
+
   it("a search vector comes back from the BLOB byte for byte", () => {
     addSpace();
     addSession();

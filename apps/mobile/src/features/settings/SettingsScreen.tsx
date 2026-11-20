@@ -5,7 +5,7 @@ import Constants from "expo-constants";
 import { SymbolView } from "expo-symbols";
 import { downloadSpeechPack, getSpeechStatus, onSpeechPackProgress, type SpeechStatus } from "../../../modules/waypoint-audio/index.ts";
 import { getAvailability, type ModelAvailability } from "../../../modules/waypoint-model/index.ts";
-import { percentLabel } from "../../core/settings/format.ts";
+import { percentLabel, versionLabel } from "../../core/settings/format.ts";
 import { useProfile, useSignOut } from "../../platform/auth.tsx";
 import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -112,23 +112,26 @@ export default function SettingsScreen() {
         </View>
       ) : null}
 
+      <Caption style={styles.section}>ACCOUNT</Caption>
+      <Row
+        title="Plans & credits"
+        leading={<SymbolView name="creditcard" tintColor={colors.ink} size={20} />}
+        right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+        onPress={() => router.push("/plans")}
+      />
+
       <Caption style={styles.section}>ON THIS IPHONE</Caption>
       <Row
         title="Speech pack"
         right={<Caption>{speechLabel(speech, fraction)}</Caption>}
-        onPress={() => {
-          if (speech?.pack === "not_installed") downloadPack();
-        }}
+        onPress={speech?.pack === "not_installed" ? downloadPack : undefined}
       />
-      <Row title="Apple Intelligence" right={<Caption>{appleIntelligenceLabel(availability)}</Caption>} onPress={() => undefined} />
+      <Row title="Apple Intelligence" right={<Caption>{appleIntelligenceLabel(availability)}</Caption>} />
       <Link title="Permissions" onPress={() => router.push("/settings-permissions")} />
       <Link title="Storage & search" onPress={() => router.push("/settings-storage")} />
 
       <Caption style={styles.section}>ABOUT</Caption>
-      <Row
-        title={`Version ${Constants.expoConfig?.version ?? ""} (${Constants.nativeBuildVersion ?? ""})`}
-        onPress={() => undefined}
-      />
+      <Row title={versionLabel(Constants.expoConfig?.version ?? null, Constants.nativeBuildVersion)} />
 
       <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={confirmSignOut} style={styles.signOut}>
         <Text style={[styles.signOutText, { color: colors.danger }]}>Sign out</Text>

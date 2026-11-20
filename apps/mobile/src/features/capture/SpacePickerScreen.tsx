@@ -42,6 +42,7 @@ export default function SpacePickerScreen() {
               </View>
             }
             right={space.id === currentId ? <SymbolView name="checkmark" tintColor={colors.accent} size={18} /> : null}
+            selected={space.id === currentId}
             onPress={() => choose(space.id)}
           />
         );

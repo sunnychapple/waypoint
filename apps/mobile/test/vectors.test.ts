@@ -25,4 +25,10 @@ describe("vectors", () => {
   it("fuse merges two ranked lists by reciprocal rank", () => {
     expect(fuse([[1, 2, 3], [3, 1]])).toEqual([1, 3, 2]);
   });
+
+  it("fuse breaks a tie by the smaller id, and uses k = 60", () => {
+    expect(fuse([[2], [1]])).toEqual([1, 2]);
+    // With k = 60, rank 5 in both lists (2/65) beats rank 1 in one list (1/61); with k = 1 it would not (2/6 < 1/2).
+    expect(fuse([[1, 2, 3, 4, 5], [6, 7, 8, 9, 5]])).toEqual([5, 1, 6, 2, 7, 3, 8, 4, 9]);
+  });
 });

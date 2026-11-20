@@ -20,6 +20,8 @@ describe("config", () => {
     expect(isStale(1000, 1000 + CONFIG_MAX_AGE_MS - 1)).toBe(false);
     expect(isStale(1000, 1000 + CONFIG_MAX_AGE_MS)).toBe(true);
     expect(isStale(1000, 999)).toBe(true);
+    expect(isStale(Number.NaN, 1)).toBe(true);
+    expect(isStale(Number("garbage"), Date.now())).toBe(true);
   });
   it("cache, price, label", () => {
     expect(parseCachedConfig(JSON.stringify(CONFIG))).toEqual(CONFIG);

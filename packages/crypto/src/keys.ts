@@ -5,18 +5,26 @@ import { fromBase64Url } from "./bytes.ts";
 export const P256_PUBLIC_KEY_BYTES = 65;
 export const P256_SIGNATURE_BYTES = 64;
 
+// Throws unless the bytes are the 65-byte uncompressed form. Some runtimes' WebCrypto also imports the compressed
+// (0x02, 0x03) and hybrid (0x06, 0x07) forms; docs/security.md section 4 allows only 0x04.
+function checkPublicKeyShape(bytes: Uint8Array): void {
+  if (bytes.length !== P256_PUBLIC_KEY_BYTES || bytes[0] !== 0x04) throw new RangeError("not a P-256 public key");
+}
+
 export function decodePublicKey(text: string): Uint8Array {
   const bytes = fromBase64Url(text);
-  if (bytes.length !== P256_PUBLIC_KEY_BYTES || bytes[0] !== 0x04) throw new RangeError("not a P-256 public key");
+  checkPublicKeyShape(bytes);
   return bytes;
 }
 
-// Import fails (throws) if the point is not on the curve.
+// Import fails (throws) if the key is not the uncompressed form or the point is not on the curve.
 export async function importVerifyKey(raw: Uint8Array): Promise<CryptoKey> {
+  checkPublicKeyShape(raw);
   return crypto.subtle.importKey("raw", raw, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
 }
 
 export async function importBoxKey(raw: Uint8Array): Promise<CryptoKey> {
+  checkPublicKeyShape(raw);
   return crypto.subtle.importKey("raw", raw, { name: "ECDH", namedCurve: "P-256" }, true, []);
 }
 

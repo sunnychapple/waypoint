@@ -56,6 +56,7 @@ const COPY: Record<DeviceStatus, { title: string; body: string; caption: string 
   },
   checking: { title: "Setting up this iPhone", body: "Waypoint is getting this iPhone ready to use credits.", caption: "" },
   offline: { title: "You're offline", body: "Connect to the internet so Waypoint can set up this iPhone for credits.", caption: "" },
+  failed: { title: "Couldn't set up this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
   too_many_waiting: { title: "Too many devices waiting", body: "Three devices are already waiting for approval. Try again in 10 minutes.", caption: "" },
   signed_out: { title: "Sign in to use credits", body: "Credits belong to your Waypoint account.", caption: "" },
   approved: { title: "This iPhone is ready", body: "It can use credits now.", caption: "" },

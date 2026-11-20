@@ -86,4 +86,41 @@ describe("indexer", () => {
     expect(await indexSession(db, embedder, "s1", 5000)).toBe(0);
     expect(db.get<{ n: number }>("SELECT count(*) AS n FROM chunks")?.n).toBe(0);
   });
+
+  it("an all-zero vector is stored as a chunk without a vector, and the session is marked indexed", async () => {
+    addSession("s1", "saved", 100, ["silence"]);
+    expect(await indexSession(db, fakeEmbedder({ silence: [0, 0, 0] }), "s1", 5000)).toBe(1);
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM search_index")?.n).toBe(0);
+    expect(sessionsToIndex(db, 3)).toEqual([]);
+  });
+
+  it("a re-index replaces the rows and moves indexed_at forward", async () => {
+    addSession("s1", "saved", 100, ["supply and demand"]);
+    await indexSession(db, fakeEmbedder(vectors), "s1", 5000);
+    await indexSession(db, fakeEmbedder(vectors), "s1", 6000);
+    expect(db.get<{ indexed_at: number }>("SELECT indexed_at FROM sessions WHERE id = 's1'")?.indexed_at).toBe(6000);
+  });
+
+  it("writes nothing when the session is marked stale while it is being embedded", async () => {
+    addSession("s1", "saved", 100, ["supply and demand"]);
+    await indexSession(db, fakeEmbedder(vectors), "s1", 5000);
+    const embedder: Embedder = {
+      modelVersion: "test-1",
+      embed: async (texts) => {
+        db.run("UPDATE sessions SET indexed_at = NULL WHERE id = 's1'");
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    expect(await indexSession(db, embedder, "s1", 6000)).toBe(0);
+    expect(db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = 's1'")?.indexed_at).toBeNull();
+  });
+
+  it("embeds in batches of 16", async () => {
+    const segment = (i: number) => Array.from({ length: 100 }, () => `w${i}`).join(" ");
+    addSession("s1", "saved", 100, Array.from({ length: 20 }, (_, i) => segment(i)));
+    const sizes: number[] = [];
+    const embedder: Embedder = { modelVersion: "test-1", embed: async (texts) => { sizes.push(texts.length); return texts.map(() => [1, 0, 0]); } };
+    expect(await indexSession(db, embedder, "s1", 5000)).toBe(20);
+    expect(sizes).toEqual([16, 4]);
+  });
 });

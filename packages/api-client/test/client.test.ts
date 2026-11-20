@@ -158,7 +158,7 @@ describe("device signatures", () => {
   });
 
   it("matches the waypoint-v1 request vector", async () => {
-    type RequestVector = { method: string; target: string; deviceId: string; timestamp: number; nonce: string; bodySha256: string; body_utf8: string; signing_input: string; device_private_key: string; device_sign_pub: string };
+    type RequestVector = { method: string; target: string; deviceId: string; timestamp: number; nonce: string; bodySha256: string; body_utf8: string; signing_input: string; signature: string; device_private_key: string; device_sign_pub: string };
     const r = readVectors<{ request: RequestVector }>("waypoint-v1.json").request;
     const publicKey = fromBase64Url(r.device_sign_pub);
     const signer = softwareSigner(r.deviceId, keyFromScalar(r.device_private_key, publicKey));
@@ -166,6 +166,10 @@ describe("device signatures", () => {
     expect(await bodySha256(utf8(r.body_utf8))).toBe(r.bodySha256);
     const input = requestSigningInput({ ...r, nonce: signed.nonce });
     expect(await verifyP256(publicKey, fromBase64Url(signed.signature), input)).toBe(true);
+    // The published bytes: the canonical input (with the vector's own nonce) and its signature.
+    const published = requestSigningInput(r);
+    expect(Buffer.from(published).toString("hex")).toBe(r.signing_input);
+    expect(await verifyP256(publicKey, fromBase64Url(r.signature), published)).toBe(true);
   });
 });
 
@@ -187,6 +191,12 @@ describe("streamed tasks", () => {
     const signer = softwareSigner("dev_phone");
     const { client } = fakeApi([sseReply(['event: delta\ndata: {"text":"x"}\n\n', 'event: error\ndata: {"code":"internal","message":"model failed","retry_after":null}\n\n'])], { device: () => signer });
     await expect(client.moreDetail({ word: "w", transcript: "t", answer: "a" }, { key: "key_more_0000001", onDelta: () => undefined })).rejects.toMatchObject({ status: 200, code: "internal", message: "model failed" });
+  });
+
+  it("a stream cut off in the middle of its done event is a NetworkError, not a bad reply", async () => {
+    const signer = softwareSigner("dev_phone");
+    const { client } = fakeApi([sseReply(['event: delta\ndata: {"text":"x"}\n\n', 'event: done\ndata: {"credits":'])], { device: () => signer });
+    await expect(client.explain({ word: "w", transcript: "t" }, { key: "key_explain_00004", onDelta: () => undefined })).rejects.toBeInstanceOf(NetworkError);
   });
 
   it("a stream that stops before done is a NetworkError", async () => {

@@ -1,6 +1,7 @@
-// Reads server-sent events from a response body (the API writes them with hono's streamSSE, "\n" line endings):
-// blocks separated by a blank line, each with "event:" and "data:" lines; several data lines join with "\n".
-// Comment lines (":") and other fields are ignored. onEvent returning false stops reading.
+// Reads server-sent events from a response body (the API writes them with hono's streamSSE, "\n" line endings;
+// "\r\n" and "\r" are read as "\n" too): blocks separated by a blank line, each with "event:" and "data:" lines;
+// several data lines join with "\n". Comment lines (":") and other fields are ignored. A last block with no blank
+// line after it was cut off and is dropped, as the SSE spec says. onEvent returning false stops reading.
 export type SseEvent = { event: string; data: string };
 
 export async function readSse(body: ReadableStream<Uint8Array>, onEvent: (event: SseEvent) => boolean): Promise<void> {
@@ -11,8 +12,10 @@ export async function readSse(body: ReadableStream<Uint8Array>, onEvent: (event:
     for (;;) {
       const { value, done } = await reader.read();
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
-      const blocks = buffer.split("\n\n");
-      buffer = done ? "" : (blocks.pop() ?? "");
+      // A "\r" at the end may be the first half of "\r\n", so it waits for the next chunk.
+      const held = !done && buffer.endsWith("\r") ? "\r" : "";
+      const blocks = (held === "" ? buffer : buffer.slice(0, -1)).replace(/\r\n?/g, "\n").split("\n\n");
+      buffer = (blocks.pop() ?? "") + held;
       for (const block of blocks) {
         const parsed = parseBlock(block);
         if (parsed !== null && !onEvent(parsed)) return;

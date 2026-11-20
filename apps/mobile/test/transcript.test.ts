@@ -42,4 +42,14 @@ describe("transcript", () => {
       { startMs: 0, durationMs: 60_000 },
     ]);
   });
+
+  it("a segment that only touches the start edge of a part does not overlap it", () => {
+    const part = { startMs: 60_000, durationMs: 60_000 };
+    expect(partsNeedingTranscription([part], [{ tStart: 50_000, tEnd: 60_000 }])).toEqual([part]);
+  });
+
+  it("a part of exactly 10 seconds still needs transcription; one of 9,999 ms does not", () => {
+    expect(partsNeedingTranscription([{ startMs: 0, durationMs: 10_000 }], [])).toEqual([{ startMs: 0, durationMs: 10_000 }]);
+    expect(partsNeedingTranscription([{ startMs: 0, durationMs: 9_999 }], [])).toEqual([]);
+  });
 });
