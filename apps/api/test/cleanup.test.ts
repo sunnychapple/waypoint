@@ -152,6 +152,20 @@ describe("cleanup", () => {
     const counts = await cleanup({ DB: db, BUCKET: bucket }, NOW);
     const rows = await db.prepare("SELECT nonce FROM request_nonces").all<{ nonce: string }>();
     expect(rows.results).toEqual([{ nonce: "now" }]);
-    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1 });
+    expect(counts).toEqual({ results: 1, tmp_audio: 1, tmp_input: 0, idempotency: 0, request_nonces: 1, pending_blobs: 0 });
+  });
+
+  test("a blob reservation still uploading after 25 hours is deleted; one 23 hours old and a stored one 25 hours old are kept", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u1', 'clerk_u1', 0, 'u1')").run();
+    await db.prepare("INSERT INTO groups (id, kind, name_locked, created_by) VALUES ('g1', 'shared', 'sealed', 'u1')").run();
+    const insert = "INSERT INTO blobs (id, group_id, user_id, bytes, created_at, stored_at) VALUES (?, 'g1', 'u1', 100, ?, ?)";
+    await db.prepare(insert).bind("old_pending", NOW - 25 * HOUR, null).run();
+    await db.prepare(insert).bind("young_pending", NOW - 23 * HOUR, null).run();
+    await db.prepare(insert).bind("old_stored", NOW - 25 * HOUR, NOW - 25 * HOUR).run();
+    const counts = await cleanup({ DB: db, BUCKET: fakeBucket([]).bucket }, NOW);
+    expect(counts.pending_blobs).toBe(1);
+    const rows = await db.prepare("SELECT id FROM blobs ORDER BY id").all<{ id: string }>();
+    expect(rows.results).toEqual([{ id: "old_stored" }, { id: "young_pending" }]);
   });
 });
