@@ -15,11 +15,22 @@ const KIND = /^[a-z_]{1,32}$/;
 const MAX_LOCKED_BYTES = 1_048_576;
 const MAX_BLOB_KEY = 512;
 const MAX_LIMIT = 500;
+// A device is pushed at most once a minute per room; a burst of changes needs only one push.
+export const PUSH_GAP_MS = 60_000;
+
+export type AfterOptions = {
+  // Only changes written at or after this time (the reader's membership history_from). Default 0.
+  fromAt?: number;
+  // Stop before the locked bytes of the page pass this many; the first change is always returned. Default no limit.
+  maxBytes?: number;
+};
 
 export function createRoomStore(store: SqlStore): {
   append(change: NewChange, now: number): { seq: number };
-  after(seq: number, limit: number): { changes: Change[]; last_seq: number };
+  after(seq: number, limit: number, options?: AfterOptions): { changes: Change[]; last_seq: number };
   ack(deviceId: string, seq: number, now: number): void;
+  lastSeq(): number;
+  duePushes(deviceIds: string[], now: number): string[];
 } {
   store.sql.exec(
     `CREATE TABLE IF NOT EXISTS changes (
@@ -37,6 +48,13 @@ export function createRoomStore(store: SqlStore): {
        device_id TEXT PRIMARY KEY,
        last_seq INTEGER NOT NULL,
        seen_at INTEGER NOT NULL
+     )`,
+  );
+
+  store.sql.exec(
+    `CREATE TABLE IF NOT EXISTS pushes (
+       device_id TEXT PRIMARY KEY,
+       pushed_at INTEGER NOT NULL
      )`,
   );
 
@@ -83,19 +101,39 @@ export function createRoomStore(store: SqlStore): {
       });
     },
 
-    after(seq, limit) {
+    after(seq, limit, options = {}) {
       if (!Number.isSafeInteger(seq) || seq < 0) throw new RangeError("seq must be a safe integer of at least 0");
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
         throw new RangeError("limit must be 1 to 500");
       }
+      const fromAt = options.fromAt ?? 0;
+      const maxBytes = options.maxBytes ?? Number.MAX_SAFE_INTEGER;
+      if (!Number.isSafeInteger(fromAt) || fromAt < 0) throw new RangeError("fromAt must be a safe integer of at least 0");
+      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new RangeError("maxBytes must be a safe integer of at least 1");
 
-      const rows = store.sql
-        .exec(
-          "SELECT seq, device_id, key_version, kind, locked_bytes, blob_key, at FROM changes WHERE seq > ? ORDER BY seq LIMIT ?",
-          seq,
-          limit,
-        )
+      // Sizes first, so a page never loads more locked bytes than maxBytes into memory.
+      const sizes = store.sql
+        .exec("SELECT seq, length(locked_bytes) AS n FROM changes WHERE seq > ? AND at >= ? ORDER BY seq LIMIT ?", seq, fromAt, limit)
         .toArray();
+      let through = seq;
+      let total = 0;
+      for (const size of sizes) {
+        if (typeof size.seq !== "number" || typeof size.n !== "number") throw new TypeError("corrupt changes row");
+        if (through !== seq && total + size.n > maxBytes) break;
+        total += size.n;
+        through = size.seq;
+      }
+      const rows =
+        through === seq
+          ? []
+          : store.sql
+              .exec(
+                "SELECT seq, device_id, key_version, kind, locked_bytes, blob_key, at FROM changes WHERE seq > ? AND seq <= ? AND at >= ? ORDER BY seq",
+                seq,
+                through,
+                fromAt,
+              )
+              .toArray();
       const changes = rows.map((row): Change => {
         const { seq: rowSeq, device_id, key_version, kind, locked_bytes, blob_key, at } = row;
         if (
@@ -128,6 +166,29 @@ export function createRoomStore(store: SqlStore): {
         seq,
         now,
       );
+    },
+
+    lastSeq,
+
+    // Of deviceIds, the ones not pushed in the last PUSH_GAP_MS; records now as their push time.
+    duePushes(deviceIds, now) {
+      for (const id of deviceIds) {
+        if (typeof id !== "string" || !DEVICE_ID.test(id)) throw new RangeError("device_id is not valid");
+      }
+      return store.transactionSync(() => {
+        const due: string[] = [];
+        for (const id of deviceIds) {
+          const [row] = store.sql.exec("SELECT pushed_at FROM pushes WHERE device_id = ?", id).toArray();
+          if (row !== undefined && typeof row.pushed_at === "number" && row.pushed_at > now - PUSH_GAP_MS) continue;
+          store.sql.exec(
+            "INSERT INTO pushes (device_id, pushed_at) VALUES (?, ?) ON CONFLICT(device_id) DO UPDATE SET pushed_at = excluded.pushed_at",
+            id,
+            now,
+          );
+          due.push(id);
+        }
+        return due;
+      });
     },
   };
 }

@@ -198,6 +198,12 @@ describe("quote errors", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
+
+  test("GET /v1/jobs/x/events with no Authorization header gives 401 through createApp", async () => {
+    const res = await setup().request("/v1/jobs/x/events", {}, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
+  });
 });
 
 describe("explain route through createApp", () => {
@@ -325,5 +331,19 @@ describe("device signatures on the routes merged before S1A", () => {
     const res = await setup().request("/v1/x", { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }) }, env);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ reached: true });
+  });
+});
+
+describe("jobs through createApp", () => {
+  test("POST /v1/jobs signed in, with a valid key and no Waypoint headers, gives 401 device signature required", async () => {
+    const res = await setup().request("/v1/jobs", { method: "POST", headers: await authed({ "Idempotency-Key": VALID_KEY }) }, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "device signature required", retry_after: null });
+  });
+
+  test("GET /v1/jobs/x without Authorization gives 401", async () => {
+    const res = await setup().request("/v1/jobs/x", {}, env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ code: "unauthorized", message: "sign in required", retry_after: null });
   });
 });

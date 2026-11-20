@@ -44,4 +44,27 @@ describe("scheduled", () => {
     await expect(runScheduled({ DB: db, BUCKET: bucket }, walletFor, NOW)).rejects.toThrow("R2 unavailable");
     expect(commands.map((command) => command.id)).toEqual(["plus-month:t1:9"]);
   });
+
+  test("cleanup throws: an expired time-limited membership is still ended", async () => {
+    const db = createTestDb();
+    await db.prepare("INSERT INTO users (id, clerk_id, created_at, billing_account_id) VALUES ('u9', 'clerk_u9', 0, 'ba9')").run();
+    await db
+      .prepare("INSERT INTO groups (id, kind, name_locked, key_version, created_by) VALUES ('group_eeeeeeeeeeee', 'shared', 'bmFtZS1sb2NrZWQ', 4, NULL)")
+      .run();
+    await db
+      .prepare("INSERT INTO memberships (group_id, user_id, role, starts_at, ends_at, history_from, left_at) VALUES ('group_eeeeeeeeeeee', 'u9', 'viewer', 0, ?, 0, NULL)")
+      .bind(NOW - 1)
+      .run();
+    const bucket = {
+      list: async (): Promise<never> => {
+        throw new Error("R2 unavailable");
+      },
+      delete: async () => {},
+    };
+    await expect(runScheduled({ DB: db, BUCKET: bucket }, () => ({ apply: async () => ({ ok: true as const }) }), NOW)).rejects.toThrow("R2 unavailable");
+    const row = await db
+      .prepare("SELECT m.left_at, g.key_version FROM memberships m JOIN groups g ON g.id = m.group_id WHERE m.user_id = 'u9'")
+      .first<{ left_at: number; key_version: number }>();
+    expect(row).toEqual({ left_at: NOW - 1, key_version: 5 });
+  });
 });
