@@ -41,6 +41,7 @@ export type Banner = { kind: "downloading"; percent: number } | { kind: "unsuppo
 
 export type RecordingModel = {
   phase: "checking" | "denied" | "recording";
+  sessionId: string | null;
   spaceName: string;
   recorder: RecorderState;
   pauseReason: PauseReason;
@@ -238,6 +239,7 @@ export function useRecording(): RecordingModel {
 
   return {
     phase,
+    sessionId: sessionRef.current?.id ?? null,
     spaceName,
     recorder,
     pauseReason,
