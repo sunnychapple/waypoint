@@ -2,6 +2,8 @@ import type { Db } from "./storage.ts";
 
 export const RESULTS_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 export const TMP_AUDIO_KEEP_MS = 24 * 60 * 60 * 1000;
+// Locked job input (PR 20). A job deletes its own when it ends; this catches the ones whose job never ended.
+export const TMP_INPUT_KEEP_MS = 24 * 60 * 60 * 1000;
 export const IDEMPOTENCY_ROWS_KEEP_MS = 24 * 60 * 60 * 1000;
 // The card's cap: a run deletes at most MAX_LIST_PAGES pages of 1,000 objects per prefix.
 export const MAX_LIST_PAGES = 20;
@@ -44,11 +46,12 @@ export type CleanupEnv = { DB: Db; BUCKET: CleanupBucket };
 export async function cleanup(
   env: CleanupEnv,
   now: number,
-): Promise<{ results: number; tmp_audio: number; idempotency: number; request_nonces: number }> {
+): Promise<{ results: number; tmp_audio: number; tmp_input: number; idempotency: number; request_nonces: number }> {
   const results = await deleteOlderThan(env.BUCKET, "results/", now - RESULTS_KEEP_MS);
   const tmpAudio = await deleteOlderThan(env.BUCKET, "tmp/audio/", now - TMP_AUDIO_KEEP_MS);
+  const tmpInput = await deleteOlderThan(env.BUCKET, "tmp/input/", now - TMP_INPUT_KEEP_MS);
   const idempotency = await env.DB.prepare("DELETE FROM idempotency WHERE created_at < ?").bind(now - IDEMPOTENCY_ROWS_KEEP_MS).run();
   // Nonces of signed requests (S1A) whose timestamp has left the 5-minute window.
   const nonces = await env.DB.prepare("DELETE FROM request_nonces WHERE expires_at < ?").bind(now).run();
-  return { results, tmp_audio: tmpAudio, idempotency: idempotency.meta.changes, request_nonces: nonces.meta.changes };
+  return { results, tmp_audio: tmpAudio, tmp_input: tmpInput, idempotency: idempotency.meta.changes, request_nonces: nonces.meta.changes };
 }

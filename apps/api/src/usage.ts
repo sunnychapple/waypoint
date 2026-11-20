@@ -10,7 +10,8 @@ export type UsageEvent = {
   at: number;
   user_id: string;
   task: InstantTask | JobType;
-  outcome: "ok" | "model_failed";
+  // cancelled: the person cancelled a job (DELETE /v1/jobs/:id) before it finished; nothing is charged.
+  outcome: "ok" | "model_failed" | "cancelled";
   credits: number;
   tier: Tier;
   model: string;
