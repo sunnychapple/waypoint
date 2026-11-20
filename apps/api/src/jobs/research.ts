@@ -97,13 +97,21 @@ export async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (
   return results;
 }
 
-function isWebUrl(text: string): boolean {
+// A public web page: http or https, no user name or password, and a host name with a dot that is not an IP
+// address and not a local-only name. Search results are not trusted; Browser Run opens what this lets through.
+export function isWebUrl(text: string): boolean {
+  let url: URL;
   try {
-    const url = new URL(text);
-    return url.protocol === "https:" || url.protocol === "http:";
+    url = new URL(text);
   } catch {
     return false;
   }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+  if (url.username !== "" || url.password !== "") return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  // IPv6 literals keep their brackets; IPv4 literals (also 0x7f.1 or 2130706433) come out as dotted decimal.
+  if (host.startsWith("[") || /^[0-9.]+$/.test(host) || !host.includes(".")) return false;
+  return !/\.(localhost|local|internal|home\.arpa)$/.test(host);
 }
 
 // The search queries: the question itself for quick, else what the light model plans (the question if that fails).

@@ -2,6 +2,7 @@ import { OverviewScriptResultSchema } from "@waypoint/contracts";
 import { openResult, toBase64Url } from "@waypoint/crypto";
 import { describe, expect, test } from "vitest";
 import type { AiBinding, GatewayCallOptions } from "../src/ai/gateway.ts";
+import { ModelError } from "../src/jobs/model.ts";
 import { runWriteJob, makeWritten, WRITE_SPECS, WRITE_STEP, type WriteDeps } from "../src/jobs/write.ts";
 import type { ChatMessage } from "../src/tasks/instant.ts";
 import { fakeSteps, makeJobFixture } from "./helpers/jobs.ts";
@@ -124,6 +125,25 @@ describe("write job", () => {
     expect(await runWriteJob(writeDeps(f, ai), fakeSteps().steps, input)).toBe(false);
     expect(calls).toHaveLength(0);
   });
+
+  test("makeWritten with a reply that is not JSON rejects with ModelError so the step is retried", async () => {
+    const f = await makeJobFixture("overview_script");
+    const { ai } = fakeAi("not json");
+    await expect(makeWritten(writeDeps(f, ai), f.input)).rejects.toBeInstanceOf(ModelError);
+  });
+
+  test("the model call gives up at the job's deadline, not after the 10 minute cap", async () => {
+    const f = await makeJobFixture("overview_script");
+    // Waits for the call's abort signal, then rejects: the call ends only when its time limit does.
+    const ai: AiBinding = {
+      run: (_model, _inputs, options) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("timed out")));
+        }),
+    };
+    const deps = { ...writeDeps(f, ai), now: () => f.input.deadline - 500 };
+    await expect(makeWritten(deps, f.input)).rejects.toBeInstanceOf(ModelError);
+  }, 5_000);
 
   test("makeWritten for a type with no spec returns no_input without calling the model", async () => {
     const f = await makeJobFixture("retranscribe", { input: null, minutes: 3 });

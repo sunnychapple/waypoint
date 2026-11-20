@@ -10,7 +10,6 @@ final class LiveTranscriber: AudioBufferSink {
   private let lock = NSLock()
   private var locale: Locale?                       // lock
   private var analyzerFormat: AVAudioFormat?        // lock
-  private var missed = false                        // lock
   private var analyzer: SpeechAnalyzer?             // lock
   private var converter: AVAudioConverter?          // lock
   private var continuation: AsyncStream<AnalyzerInput>.Continuation? // lock
@@ -30,10 +29,7 @@ final class LiveTranscriber: AudioBufferSink {
 
   func runStarted(sessionId: String, runStartMs: Int64, format: AVAudioFormat) {
     let (locale, analyzerFormat) = lock.withLock { (self.locale, self.analyzerFormat) }
-    guard let locale, let analyzerFormat else {
-      lock.withLock { missed = true }
-      return
-    }
+    guard let locale, let analyzerFormat else { return }
     let module = SpeechSetup.makeModule(locale: locale, live: true)
     let analyzer = SpeechAnalyzer(modules: [module])
     let converter = AVAudioConverter(from: format, to: analyzerFormat)

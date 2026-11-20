@@ -19,7 +19,7 @@ import { devicesRoute } from "../src/devices/register.ts";
 import { pairingRoutes } from "../src/devices/pairing.ts";
 import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
-import type { Db } from "../src/storage.ts";
+import type { BatchDb, Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
 import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
 
@@ -49,7 +49,7 @@ function nonce(n: number): string {
 }
 
 type World = {
-  db: Db;
+  db: BatchDb;
   account: TestDevice;
   phone: TestDevice;
   phone2: TestDevice;
@@ -103,9 +103,9 @@ async function register(w: World): Promise<Response> {
   return appFor(userOf("u1")).request(path, await signedInit(w.ipad, { method: "POST", path, body, now: NOW, as: "new" }), { DB: w.db });
 }
 
-async function send(w: World, signer: TestDevice, path: string, body: unknown, options: { userId?: string; now?: number } = {}): Promise<Response> {
+async function send(w: World, signer: TestDevice, path: string, body: unknown, options: { userId?: string; now?: number; db?: BatchDb } = {}): Promise<Response> {
   const now = options.now ?? NOW;
-  return appFor(userOf(options.userId ?? "u1"), now).request(path, await signedInit(signer, { method: "POST", path, body, now }), { DB: w.db });
+  return appFor(userOf(options.userId ?? "u1"), now).request(path, await signedInit(signer, { method: "POST", path, body, now }), { DB: options.db ?? w.db });
 }
 
 async function count(db: Db, sql: string, bind: string): Promise<number> {
@@ -318,5 +318,78 @@ describe("S1C pairing and approval", () => {
       );
       expect(res.status).toBe(401);
     }
+  });
+
+  test("an approval that loses to another approval landing first: 409 'device already approved', none of its envelopes stored, the first approval kept", async () => {
+    const w = await world();
+    await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.account, "acct_1", 64);
+    const groupEnvelope = await wrap(w, PURPOSE_GROUP_KEY, groupKeyInfo("g1", 1, "ipad_1"), w.account, "acct_1", 32);
+    const otherFirst: BatchDb = {
+      prepare: (query) => w.db.prepare(query),
+      batch: async (statements) => {
+        await w.db.prepare("UPDATE devices SET approved_at = ?, approved_by = 'phone_1', account_envelope = 'FIRST' WHERE id = 'ipad_1'").bind(NOW).run();
+        return w.db.batch(statements);
+      },
+    };
+    const body = { cert, account_envelope: accountEnvelope, envelopes: [{ group_id: "g1", key_version: 1, wrapped_key: groupEnvelope }] };
+    const res = await send(w, w.account, APPROVE, body, { db: otherFirst });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toEqual({ code: "conflict", message: "device already approved", retry_after: null });
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM key_envelopes WHERE device_id = ?", "ipad_1")).toBe(0);
+    const row = await w.db.prepare("SELECT approved_by, account_envelope FROM devices WHERE id = 'ipad_1'").first();
+    expect(row).toEqual({ approved_by: "phone_1", account_envelope: "FIRST" });
+  });
+
+  test("approve with an envelope for a group the user has left: 409 'unknown group or key version', the device still waiting", async () => {
+    const w = await world();
+    await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });
+    // A group keeps an owner (migration 0007), so u2 is made an owner before u1 leaves.
+    await w.db
+      .prepare("INSERT INTO memberships (group_id, user_id, role, starts_at, history_from) VALUES ('g1', 'u2', 'owner', ?, ?)")
+      .bind(NOW, NOW)
+      .run();
+    await w.db.prepare("UPDATE memberships SET left_at = ? WHERE group_id = 'g1' AND user_id = 'u1'").bind(NOW).run();
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.account, "acct_1", 64);
+    const groupEnvelope = await wrap(w, PURPOSE_GROUP_KEY, groupKeyInfo("g1", 1, "ipad_1"), w.account, "acct_1", 32);
+    const res = await send(w, w.account, APPROVE, { cert, account_envelope: accountEnvelope, envelopes: [{ group_id: "g1", key_version: 1, wrapped_key: groupEnvelope }] });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toMatchObject({ message: "unknown group or key version" });
+    const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
+    expect(row?.approved_at).toBeNull();
+  });
+
+  test("another user's start, reveal and approve for the iPad: each gets 404 and nothing is written", async () => {
+    const w = await world();
+    await register(w);
+    const u2dev = await makeTestDevice("u2_phone");
+    await insertDevice(w.db, u2dev, { userId: "u2" });
+    expect((await send(w, u2dev, PATH, { nonce: w.phoneNonce }, { userId: "u2" })).status).toBe(404);
+    expect((await send(w, u2dev, `${PATH}/reveal`, { nonce: w.ipadNonce }, { userId: "u2" })).status).toBe(404);
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.account, "acct_1", 64);
+    const groupEnvelope = await wrap(w, PURPOSE_GROUP_KEY, groupKeyInfo("g1", 1, "ipad_1"), w.account, "acct_1", 32);
+    const approve = await send(w, u2dev, APPROVE, { cert, account_envelope: accountEnvelope, envelopes: [{ group_id: "g1", key_version: 1, wrapped_key: groupEnvelope }] }, { userId: "u2" });
+    expect(approve.status).toBe(404);
+    const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
+    expect(row?.approved_at).toBeNull();
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM device_pairings WHERE device_id = ?", "ipad_1")).toBe(1);
+    expect(await count(w.db, "SELECT COUNT(*) AS n FROM key_envelopes WHERE device_id = ?", "ipad_1")).toBe(0);
+  });
+
+  test("approve when the device already holds an envelope for that version: 409 'device already has a key for this version', still waiting", async () => {
+    const w = await world();
+    await insertDevice(w.db, w.ipad, { userId: "u1", approvedAt: null });
+    await w.db.prepare("INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES ('g1', 1, 'ipad_1', 'OLD')").run();
+    const cert = await certOf(w, w.account);
+    const accountEnvelope = await wrap(w, PURPOSE_ACCOUNT_KEY, accountKeyInfo("u1", "acct_1", "ipad_1"), w.account, "acct_1", 64);
+    const groupEnvelope = await wrap(w, PURPOSE_GROUP_KEY, groupKeyInfo("g1", 1, "ipad_1"), w.account, "acct_1", 32);
+    const res = await send(w, w.account, APPROVE, { cert, account_envelope: accountEnvelope, envelopes: [{ group_id: "g1", key_version: 1, wrapped_key: groupEnvelope }] });
+    expect(res.status).toBe(409);
+    expect(await errorOf(res)).toMatchObject({ message: "device already has a key for this version" });
+    const row = await w.db.prepare("SELECT approved_at FROM devices WHERE id = 'ipad_1'").first<{ approved_at: number | null }>();
+    expect(row?.approved_at).toBeNull();
   });
 });

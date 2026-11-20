@@ -22,7 +22,9 @@ export const DiagramDraftSchema = z.object({
   mermaid: z.string().min(1).max(6_000),
 });
 
-// A self-contained page: no external URLs in src or href (the app also blocks the network when it shows it).
+// A self-contained page. The app shows it only in a web view with the network blocked and no storage (card M25):
+// that is the control. This check only refuses the plain src/href forms of an external URL so a bad draft is
+// retried; it is not a defence (scripts, CSS url(), srcset, form actions and meta refresh all pass it).
 export const MiniAppDraftSchema = z.object({
   title: z.string().min(1).max(120),
   html: z

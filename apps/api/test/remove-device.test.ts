@@ -20,7 +20,7 @@ import type { SessionUser } from "../src/auth/users.ts";
 import { removeDeviceRoute } from "../src/devices/remove.ts";
 import type { AppEnv } from "../src/env.ts";
 import { handleError } from "../src/errors.ts";
-import type { Db } from "../src/storage.ts";
+import type { BatchDb, Db } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
 import { freshNonce, insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
 
@@ -43,7 +43,7 @@ function appFor(user: SessionUser) {
 }
 
 type World = {
-  db: Db;
+  db: BatchDb;
   account: TestDevice;
   phone: TestDevice;
   ipad: TestDevice;
@@ -96,32 +96,50 @@ async function world(): Promise<World> {
   return { db, account, phone, ipad, pending, other, next };
 }
 
-// The new account key's rotation for the one remaining device, phone_1. The options change one part at a time.
+// The new account key's rotation for the one remaining device, phone_1 (or the device given as `keep`). The options
+// change one part at a time.
 async function rotation(
   w: World,
-  options: { accountId?: string; certKey?: TestDevice; envelopeSigner?: TestDevice; envelopeSignerId?: string } = {},
+  options: { accountId?: string; certKey?: TestDevice; envelopeSigner?: TestDevice; envelopeSignerId?: string; keep?: TestDevice } = {},
 ) {
+  const keep = options.keep ?? w.phone;
   const accountId = options.accountId ?? "acct_2";
-  const cert = toBase64Url(await (options.certKey ?? w.next).sign(deviceCertificateInput("u1", "phone_1", w.phone.signPub, w.phone.boxPub)));
-  const signer = options.envelopeSigner ?? w.phone;
+  const cert = toBase64Url(await (options.certKey ?? w.next).sign(deviceCertificateInput("u1", keep.id, keep.signPub, keep.boxPub)));
+  const signer = options.envelopeSigner ?? keep;
   const envelope = toBase64Url(
     await makeEnvelope({
       purpose: PURPOSE_ACCOUNT_KEY,
-      info: accountKeyInfo("u1", accountId, "phone_1"),
-      recipientBoxPub: fromBase64Url(w.phone.boxPub),
+      info: accountKeyInfo("u1", accountId, keep.id),
+      recipientBoxPub: fromBase64Url(keep.boxPub),
       key: new Uint8Array(64).fill(5),
-      signerId: options.envelopeSignerId ?? "phone_1",
+      signerId: options.envelopeSignerId ?? keep.id,
       sign: signer.sign,
     }),
   );
   return {
     account: { id: accountId, sign_pub: w.next.signPub, box_pub: w.next.boxPub },
-    devices: [{ id: "phone_1", cert, account_envelope: envelope }],
+    devices: [{ id: keep.id, cert, account_envelope: envelope }],
   };
 }
 
-async function remove(w: World, signer: TestDevice, path: string, body?: unknown, userId = "u1"): Promise<Response> {
-  return appFor(userOf(userId)).request(path, await signedInit(signer, { method: "DELETE", path, body, now: NOW }), { DB: w.db });
+async function remove(w: World, signer: TestDevice, path: string, body?: unknown, userId = "u1", db: BatchDb = w.db): Promise<Response> {
+  return appFor(userOf(userId)).request(path, await signedInit(signer, { method: "DELETE", path, body, now: NOW }), { DB: db });
+}
+
+// Holds each db.batch until `parties` batches are waiting, then runs them one after the other: every request has
+// made its reads before any of them writes.
+function holdBatches(db: BatchDb, parties: number): BatchDb {
+  const waiting: Array<() => void> = [];
+  return {
+    prepare: (query) => db.prepare(query),
+    batch: async (statements) => {
+      await new Promise<void>((release) => {
+        waiting.push(release);
+        if (waiting.length === parties) for (const go of waiting) go();
+      });
+      return db.batch(statements);
+    },
+  };
 }
 
 // A signed DELETE whose body is sent exactly as given, for bodies that are not JSON.
@@ -298,5 +316,82 @@ describe("DELETE /v1/devices/:id", () => {
     const w = await world();
     const res = await appFor(userOf("u1")).request(PATH, { method: "DELETE", headers: { "Idempotency-Key": "no-signature-1" } }, { DB: w.db });
     expect(res.status).toBe(401);
+  });
+
+  test("two devices removing each other at once: one gets 200, the other 409, and one device, its account key and the groups' single bump remain", async () => {
+    const w = await world();
+    const held = holdBatches(w.db, 2);
+    const [phoneRemovesIpad, ipadRemovesPhone] = await Promise.all([
+      remove(w, w.phone, PATH, await rotation(w), "u1", held),
+      remove(w, w.ipad, "/v1/devices/phone_1", await rotation(w, { accountId: "acct_3", keep: w.ipad }), "u1", held),
+    ]);
+    expect([phoneRemovesIpad.status, ipadRemovesPhone.status].sort()).toEqual([200, 409]);
+    const loser = phoneRemovesIpad.status === 409 ? phoneRemovesIpad : ipadRemovesPhone;
+    expect(await errorOf(loser)).toEqual({ code: "conflict", message: "devices changed, try again", retry_after: null });
+    const live = await w.db
+      .prepare("SELECT id FROM devices WHERE user_id = 'u1' AND approved_at IS NOT NULL AND removed_at IS NULL ORDER BY kind, id")
+      .all<{ id: string }>();
+    expect(live.results).toHaveLength(2); // one account row and one device
+    const groups = await w.db.prepare("SELECT key_version FROM groups ORDER BY id").all<{ key_version: number }>();
+    expect(groups.results.map((g) => g.key_version)).toEqual([2, 2, 1]);
+  });
+
+  test("a device approved between the reads and the batch: 409 and nothing changes", async () => {
+    const w = await world();
+    const before = await snapshot(w.db);
+    const approving: BatchDb = {
+      prepare: (query) => w.db.prepare(query),
+      batch: async (statements) => {
+        await w.db.prepare("UPDATE devices SET approved_at = ? WHERE id = 'pending_1'").bind(NOW).run();
+        return w.db.batch(statements);
+      },
+    };
+    const res = await remove(w, w.phone, PATH, await rotation(w), "u1", approving);
+    expect(res.status).toBe(409);
+    expect((await errorOf(res)).message).toBe("devices changed, try again");
+    await w.db.prepare("UPDATE devices SET approved_at = NULL WHERE id = 'pending_1'").run();
+    expect(await snapshot(w.db)).toEqual(before);
+  });
+
+  test("the last device removing itself after another removal landed first: 409 and no second bump", async () => {
+    const w = await world();
+    await w.db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'ipad_1'").bind(NOW).run();
+    const removedFirst: BatchDb = {
+      prepare: (query) => w.db.prepare(query),
+      batch: async (statements) => {
+        await w.db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'phone_1'").bind(NOW).run();
+        return w.db.batch(statements);
+      },
+    };
+    const res = await remove(w, w.phone, "/v1/devices/phone_1", {}, "u1", removedFirst);
+    expect(res.status).toBe(409);
+    const groups = await w.db.prepare("SELECT key_version FROM groups ORDER BY id").all<{ key_version: number }>();
+    expect(groups.results.map((g) => g.key_version)).toEqual([1, 1, 1]);
+  });
+
+  test("removing an already removed device gets 404 and bumps nothing", async () => {
+    const w = await world();
+    expect((await remove(w, w.phone, PATH, await rotation(w))).status).toBe(200);
+    const again = await remove(w, w.phone, PATH, await rotation(w, { accountId: "acct_3" }));
+    expect(again.status).toBe(404);
+    const groups = await w.db.prepare("SELECT key_version FROM groups ORDER BY id").all<{ key_version: number }>();
+    expect(groups.results.map((g) => g.key_version)).toEqual([2, 2, 1]);
+  });
+
+  test("a group the user has left keeps its key version", async () => {
+    const w = await world();
+    await w.db.prepare("UPDATE memberships SET left_at = ? WHERE group_id = 'g2' AND user_id = 'u1'").bind(NOW).run();
+    expect((await remove(w, w.phone, PATH, await rotation(w))).status).toBe(200);
+    const groups = await w.db.prepare("SELECT key_version FROM groups ORDER BY id").all<{ key_version: number }>();
+    expect(groups.results.map((g) => g.key_version)).toEqual([2, 1, 1]);
+  });
+
+  test("the last device removing itself with an account body gets 400 and nothing changes", async () => {
+    const w = await world();
+    await w.db.prepare("UPDATE devices SET removed_at = ? WHERE id = 'ipad_1'").bind(NOW).run();
+    const before = await snapshot(w.db);
+    const res = await remove(w, w.phone, "/v1/devices/phone_1", await rotation(w));
+    expect(res.status).toBe(400);
+    expect(await snapshot(w.db)).toEqual(before);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  concat, fromBase64Url, groupKeyInfo, HPKE_SUITE, isRecoveryBlob, makeEnvelope, MAX_RESULT_BYTES, openResult, pairingCode,
+  concat, envelopeSignatureInput, fromBase64Url, groupKeyInfo, HPKE_SUITE, isRecoveryBlob, makeEnvelope, MAX_RESULT_BYTES, openResult, pairingCode,
   pairingCommitment, parseEnvelope, requestSigningInput, sealResult, toBase64Url,
 } from "../src/index.ts";
 import { readVectors } from "./helpers/vectors.ts";
@@ -85,6 +85,26 @@ describe("parseEnvelope rejects bad shapes", () => {
     await expect(makeEnvelope({ ...base, key: new Uint8Array(31), sign: async () => new Uint8Array(64) })).rejects.toThrow(RangeError);
     await expect(makeEnvelope({ ...base, key: new Uint8Array(32), sign: async () => new Uint8Array(63) })).rejects.toThrow(RangeError);
   });
+  it("makeEnvelope signs envelopeSignatureInput of its info and its body", async () => {
+    const pair = await HPKE_SUITE.kem.generateKeyPair();
+    const pub = new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(pair.publicKey));
+    const info = groupKeyInfo("g", 1, "d");
+    let recorded: Uint8Array | null = null;
+    const envelope = await makeEnvelope({
+      purpose: 1,
+      info,
+      recipientBoxPub: pub,
+      key: new Uint8Array(32),
+      signerId: "dev_signer",
+      sign: async (message) => {
+        recorded = message;
+        return new Uint8Array(64);
+      },
+    });
+    const parsed = parseEnvelope(envelope);
+    expect(recorded).toEqual(envelopeSignatureInput(info, parsed.body));
+  });
+
   it("groupKeyInfo rejects key version 0", () => {
     expect(() => groupKeyInfo("g", 0, "d")).toThrow(RangeError);
   });
@@ -105,6 +125,16 @@ describe("sealed results", () => {
     const pub = new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(pair.publicKey));
     await expect(sealResult({ jobId: "job_1", deviceId: "dev_1", deviceBoxPub: pub, plaintext: new Uint8Array(MAX_RESULT_BYTES + 1) })).rejects.toThrow(RangeError);
     await expect(sealResult({ jobId: "job 1", deviceId: "dev_1", deviceBoxPub: pub, plaintext: new Uint8Array(1) })).rejects.toThrow(RangeError);
+  });
+  it("openResult refuses a sealed result whose version byte or purpose byte is wrong", async () => {
+    const pair = await HPKE_SUITE.kem.generateKeyPair();
+    const pub = new Uint8Array(await HPKE_SUITE.kem.serializePublicKey(pair.publicKey));
+    const sealed = await sealResult({ jobId: "job_1", deviceId: "dev_1", deviceBoxPub: pub, plaintext: new Uint8Array([1, 2, 3]) });
+    for (const [at, value] of [[0, 2], [1, 1]] as const) {
+      const copy = sealed.slice();
+      copy[at] = value;
+      await expect(openResult(copy, "job_1", "dev_1", pair.privateKey)).rejects.toThrow(RangeError);
+    }
   });
 });
 

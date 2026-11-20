@@ -14,11 +14,11 @@ export const TARGETS_SQL = `
 
 export type TargetRow = { id: string; user_id: string; kind: "device" | "account"; sign_pub: string; box_pub: string; cert: string | null; role: string };
 
-export async function currentMember(db: Db, groupId: string, userId: string): Promise<{ key_version: number } | null> {
+export async function currentMember(db: Db, groupId: string, userId: string): Promise<{ key_version: number; role: string } | null> {
   return db
-    .prepare("SELECT g.key_version FROM groups g JOIN memberships m ON m.group_id = g.id WHERE g.id = ? AND m.user_id = ? AND m.left_at IS NULL")
+    .prepare("SELECT g.key_version, m.role FROM groups g JOIN memberships m ON m.group_id = g.id WHERE g.id = ? AND m.user_id = ? AND m.left_at IS NULL")
     .bind(groupId, userId)
-    .first<{ key_version: number }>();
+    .first<{ key_version: number; role: string }>();
 }
 
 export async function storeGroupKeys(
@@ -46,6 +46,13 @@ export async function storeGroupKeys(
     // target, so two devices rotating at once always collide on at least one row and only one key wins.
     if (input.keyVersion !== group.key_version) throw new ApiFailure("conflict", "unknown key version");
     if (ids.length !== targetIds.size) throw new ApiFailure("conflict", "envelopes must cover every device");
+  } else if (group.role !== "owner") {
+    // An add: only an owner (who invites new members) may wrap for another member's devices. Anyone else adds only
+    // for their own devices and account row, so a member cannot take another member's slot with a bad key
+    // (docs/security.md, section 10). 409, not 403: a full first set that arrives after another device's is refused
+    // here too, and the app answers any 409 by fetching the key that won.
+    const userOf = new Map(targets.map((t) => [t.id, t.user_id]));
+    if (ids.some((id) => userOf.get(id) !== input.userId)) throw new ApiFailure("conflict", "only an owner can add keys for another member");
   }
   const insert = "INSERT INTO key_envelopes (group_id, key_version, device_id, wrapped_key) VALUES (?, ?, ?, ?)";
   try {
