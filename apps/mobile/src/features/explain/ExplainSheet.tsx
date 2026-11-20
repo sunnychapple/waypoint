@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
 import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
-import type { SentTask } from "../../core/explain/sent.ts";
+import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useConfig } from "../../platform/config.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -20,10 +20,10 @@ export default function ExplainSheet() {
   return <ExplainBody sessionId={params.sessionId} t={Number.isFinite(t) ? t : 0} word={params.word.slice(0, 100)} />;
 }
 
-const HEADINGS: Record<SentTask, string> = { explain: "Explanation", more_detail: "More detail", double_check: "Double-check" };
-const RUNNING: Record<SentTask, string> = { explain: "Explaining…", more_detail: "Adding more detail…", double_check: "Double-checking…" };
+const HEADINGS: Record<InstantSentTask, string> = { explain: "Explanation", more_detail: "More detail", double_check: "Double-check" };
+const RUNNING: Record<InstantSentTask, string> = { explain: "Explaining…", more_detail: "Adding more detail…", double_check: "Double-checking…" };
 // Used only until the live price table (M13) has loaded.
-const FALLBACK_PRICES: Record<SentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
+const FALLBACK_PRICES: Record<InstantSentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
 
 function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; word: string }) {
   const colors = useColors();
@@ -34,7 +34,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
-  const cost = (task: SentTask): string => creditsLabel(priceOf(config, task) ?? FALLBACK_PRICES[task]);
+  const cost = (task: InstantSentTask): string => creditsLabel(priceOf(config, task) ?? FALLBACK_PRICES[task]);
 
   // A "Try again" after "already finished" starts a new paid request, so the button says what it costs.
   function actionLabel(action: FailureAction): string {

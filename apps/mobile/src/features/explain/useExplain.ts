@@ -15,7 +15,7 @@ import {
   type ThreadItem,
 } from "../../core/explain/explanations.ts";
 import { askLater } from "../../core/explain/later.ts";
-import { logSent, settleFailedSent, settleSent, type SentTask } from "../../core/explain/sent.ts";
+import { logSent, settleFailedSent, settleSent, type InstantSentTask } from "../../core/explain/sent.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
 import { doubleCheck, streamExplain, streamMoreDetail, toFailure } from "../../platform/tasks.ts";
@@ -25,8 +25,8 @@ const deps = { now: Date.now, newId: randomUUID };
 // What is running or went wrong right now. The answers so far are in explanation.thread.
 export type ExplainPhase =
   | { kind: "idle" }
-  | { kind: "running"; task: SentTask; text: string }
-  | { kind: "failed"; task: SentTask; failure: CloudFailure; text: string };
+  | { kind: "running"; task: InstantSentTask; text: string }
+  | { kind: "failed"; task: InstantSentTask; failure: CloudFailure; text: string };
 
 // One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
 // Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
@@ -37,7 +37,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
   // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.
   const [unsavedItem, setUnsavedItem] = useState<ThreadItem | null>(null);
   const [askedLater, setAskedLater] = useState(false);
-  const keys = useRef<Partial<Record<SentTask, string>>>({});
+  const keys = useRef<Partial<Record<InstantSentTask, string>>>({});
   const idRef = useRef<string | null>(null);
   const cancelled = useRef(false);
   const controller = useRef<AbortController | null>(null);
@@ -54,7 +54,7 @@ export function useExplain(sessionId: string, t: number, word: string) {
     };
   }, []);
 
-  async function run(task: SentTask): Promise<void> {
+  async function run(task: InstantSentTask): Promise<void> {
     if (excerpt === "" || phase.kind === "running") return;
     const answer = explanation === null ? null : shownAnswer(explanation);
     if (task !== "explain" && answer === null) return;
