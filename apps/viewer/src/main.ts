@@ -93,7 +93,7 @@ async function askPasscode(id: string, key: CryptoKey, note: string | null): Pro
       "error-callback": () => (token = ""),
     });
   } catch {
-    message("Couldn't load the check", "Reload the page to try again.");
+    message("Couldn't load the check", "Open the link again to try again.");
     return;
   }
   form.onsubmit = (event) => {
@@ -111,7 +111,7 @@ async function load(id: string, key: CryptoKey, headers: Record<string, string>)
   try {
     reply = await fetch(`/v1/links/${id}/data`, { headers, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
   } catch {
-    message("You're offline", "Connect to the internet and reload the page.");
+    message("You're offline", "Connect to the internet, then open the link again.");
     return;
   }
   if (reply.status === 401) {
@@ -122,7 +122,7 @@ async function load(id: string, key: CryptoKey, headers: Record<string, string>)
   }
   if (reply.status === 403) return askPasscode(id, key, "The check didn't work. Try again.");
   if (reply.status === 404) return message("This link doesn't work anymore", "It was turned off, or it expired.");
-  if (reply.status === 429) return message("Too many tries", "Wait a minute, then reload the page.");
+  if (reply.status === 429) return message("Too many tries", "Wait a minute, then open the link again.");
   if (!reply.ok) return message("Something went wrong", "Try again later.");
   const plain = await unlock(key, context("link", id), new Uint8Array(await reply.arrayBuffer()));
   let item: SharedItem | null = null;
