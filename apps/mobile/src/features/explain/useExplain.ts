@@ -1,38 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import { randomUUID } from "expo-crypto";
-import type { ExplainRequest, StreamDone } from "@waypoint/contracts";
+import type { ExplainRequest, FollowUpRequest, StreamDone } from "@waypoint/contracts";
 import { listSegments } from "../../core/capture/segments.ts";
 import { keepsKey, type CloudFailure } from "../../core/cloud/failure.ts";
 import { excerptAround } from "../../core/explain/excerpt.ts";
-import { addToThread, discardIfUnsaved, startExplanation, type Explanation } from "../../core/explain/explanations.ts";
+import {
+  addToThread,
+  discardIfUnsaved,
+  saveExplanation,
+  shownAnswer,
+  startExplanation,
+  unsaveExplanation,
+  type Explanation,
+  type ThreadItem,
+} from "../../core/explain/explanations.ts";
 import { askLater } from "../../core/explain/later.ts";
-import { logSent, settleFailedSent, settleSent } from "../../core/explain/sent.ts";
+import { logSent, settleFailedSent, settleSent, type SentTask } from "../../core/explain/sent.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
-import { streamExplain, toFailure } from "../../platform/tasks.ts";
+import { doubleCheck, streamExplain, streamMoreDetail, toFailure } from "../../platform/tasks.ts";
 
 const deps = { now: Date.now, newId: randomUUID };
 
+// What is running or went wrong right now. The answers so far are in explanation.thread.
 export type ExplainPhase =
-  | { kind: "ready" }
-  | { kind: "streaming"; text: string }
-  | { kind: "done"; text: string; retention: "standard" | "zero"; credits: number; sentId: string; unsaved: boolean }
-  | { kind: "failed"; failure: CloudFailure; text: string };
+  | { kind: "idle" }
+  | { kind: "running"; task: SentTask; text: string }
+  | { kind: "failed"; task: SentTask; failure: CloudFailure; text: string };
 
-// One tapped word: the excerpt around it, the request, and what came back. The Idempotency-Key is made when the person
-// taps Explain and kept for a "Try again" only when the request did not run (keepsKey).
+// One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
+// Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
 export function useExplain(sessionId: string, t: number, word: string) {
   const [excerpt] = useState(() => excerptAround(listSegments(getDb(), sessionId), t));
-  const [phase, setPhase] = useState<ExplainPhase>({ kind: "ready" });
+  const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [explanation, setExplanation] = useState<Explanation | null>(null);
+  // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.
+  const [unsavedItem, setUnsavedItem] = useState<ThreadItem | null>(null);
   const [askedLater, setAskedLater] = useState(false);
-  const key = useRef<string | null>(null);
+  const keys = useRef<Partial<Record<SentTask, string>>>({});
   const idRef = useRef<string | null>(null);
   const cancelled = useRef(false);
   const controller = useRef<AbortController | null>(null);
 
-  // Closing the sheet keeps only saved explanations (M16 adds Save). It also aborts a stream still running; the server
-  // settles that request anyway, and no unsaved explanation row is written after this.
+  // Closing the sheet keeps only saved explanations. It also aborts a stream still running; the server settles that
+  // request anyway, and no unsaved explanation row or thread item is written after this.
   useEffect(() => {
     cancelled.current = false;
     return () => {
@@ -43,51 +54,77 @@ export function useExplain(sessionId: string, t: number, word: string) {
     };
   }, []);
 
-  async function explain(): Promise<void> {
-    if (excerpt === "" || phase.kind === "streaming") return;
+  async function run(task: SentTask): Promise<void> {
+    if (excerpt === "" || phase.kind === "running") return;
+    const answer = explanation === null ? null : shownAnswer(explanation);
+    if (task !== "explain" && answer === null) return;
     if (!requireApprovedDevice()) return;
-    const requestKey = key.current ?? randomUUID();
-    key.current = requestKey;
-    const request: ExplainRequest = { word, transcript: excerpt };
-    writeDb((db) => logSent(db, { id: requestKey, task: "explain", sessionId, body: request, at: Date.now() }));
+    const key = keys.current[task] ?? randomUUID();
+    keys.current[task] = key;
+    const explainBody: ExplainRequest = { word, transcript: excerpt };
+    const followUp: FollowUpRequest = { word, transcript: excerpt, answer: answer ?? "" };
+    writeDb((db) => logSent(db, { id: key, task, sessionId, body: task === "explain" ? explainBody : followUp, at: Date.now() }));
     const abort = new AbortController();
     controller.current = abort;
     let text = "";
-    setPhase({ kind: "streaming", text });
-    let done: StreamDone;
+    let credits: number;
+    let retention: "standard" | "zero";
+    setPhase({ kind: "running", task, text });
+    const onDelta = (piece: string): void => {
+      text += piece;
+      setPhase({ kind: "running", task, text });
+    };
     try {
-      done = await streamExplain(request, requestKey, (piece) => {
-        text += piece;
-        setPhase({ kind: "streaming", text });
-      }, abort.signal);
+      if (task === "double_check") {
+        const reply = await doubleCheck(followUp, key);
+        text = reply.text;
+        ({ credits, retention } = reply);
+      } else {
+        const done: StreamDone =
+          task === "explain"
+            ? await streamExplain(explainBody, key, onDelta, abort.signal)
+            : await streamMoreDetail(followUp, key, onDelta, abort.signal);
+        ({ credits, retention } = done);
+      }
     } catch (error) {
       if (cancelled.current) return; // closed mid-stream: nothing more is written here
       const failure = toFailure(error);
       if (!keepsKey(failure)) {
-        writeDb((db) => settleFailedSent(db, requestKey, failure));
-        key.current = null;
+        writeDb((db) => settleFailedSent(db, key, failure));
+        delete keys.current[task];
       }
-      setPhase({ kind: "failed", failure, text });
+      setPhase({ kind: "failed", task, failure, text });
       return;
     }
     // The answer is paid for and is shown even if saving it on the iPhone fails. A save failure is not a cloud failure,
     // so the key is kept and there is no "Try again".
-    let saved: Explanation | null = null;
-    let unsaved = false;
+    const item: ThreadItem = { kind: task, text, at: Date.now(), retention, sentId: key };
+    let next: Explanation | null;
     try {
-      saved = writeDb((db) => {
-        settleSent(db, requestKey, done.credits, done.retention);
+      next = writeDb((db) => {
+        settleSent(db, key, credits, retention);
         if (cancelled.current) return null;
         const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
         idRef.current = id;
-        return addToThread(db, id, { kind: "explain", text, at: Date.now(), retention: done.retention, sentId: requestKey });
+        return addToThread(db, id, item);
       });
     } catch {
-      unsaved = true;
+      setUnsavedItem(item);
+      setPhase({ kind: "idle" });
+      return;
     }
-    key.current = unsaved ? requestKey : null;
-    if (saved !== null) setExplanation(saved);
-    setPhase({ kind: "done", text, retention: done.retention, credits: done.credits, sentId: requestKey, unsaved });
+    if (cancelled.current) return;
+    delete keys.current[task];
+    if (next !== null) setExplanation(next);
+    setUnsavedItem(null);
+    setPhase({ kind: "idle" });
+  }
+
+  function toggleSave(): void {
+    const current = explanation;
+    if (current === null) return;
+    writeDb((db) => (current.saved ? unsaveExplanation(db, current.id) : saveExplanation(db, deps, current.id)));
+    setExplanation({ ...current, saved: !current.saved });
   }
 
   function saveForLater(): void {
@@ -96,5 +133,5 @@ export function useExplain(sessionId: string, t: number, word: string) {
     setAskedLater(true);
   }
 
-  return { excerpt, phase, explanation, askedLater, explain, saveForLater };
+  return { excerpt, phase, explanation, unsavedItem, askedLater, run, toggleSave, saveForLater };
 }
