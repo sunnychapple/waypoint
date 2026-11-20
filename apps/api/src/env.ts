@@ -28,5 +28,9 @@ export type Env = {
   APPLE_ENVIRONMENTS: string; // comma-separated: Production, Sandbox
   APPLE_APP_APPLE_ID: string; // the app's numeric Apple id from App Store Connect
   WRITE_WORKFLOW: Workflow<JobRunInput>;
+  LINK_PASSCODE_PEPPER: string; // secret: wrangler secret put LINK_PASSCODE_PEPPER (32 random bytes, base64url)
+  TURNSTILE_SECRET_KEY: string; // secret: wrangler secret put TURNSTILE_SECRET_KEY
+  LINK_VIEWS: RateLimit;
+  LINK_PASSCODES: RateLimit;
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };

@@ -13,6 +13,7 @@ import { groupKeyRoutes } from "./keys/routes.ts";
 import { jobEventsRoute } from "./jobs/events.ts";
 import { jobsRoutes } from "./jobs/routes.ts";
 import { jobWorkflow } from "./jobs/start.ts";
+import { linkRoutes } from "./links/routes.ts";
 import { pairingRoutes } from "./devices/pairing.ts";
 import { handleError, handleNotFound } from "./errors.ts";
 import { requireDeviceSignature } from "./auth/signature.ts";
@@ -65,5 +66,6 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", memberRoutes({ now: deps.now }));
   app.route("/", syncRoutes({ now: deps.now }));
   app.route("/", blobRoutes({ now: deps.now }));
+  app.route("/", linkRoutes({ now: deps.now, fetch: (input, init) => fetch(input, init) }));
   return app;
 }
