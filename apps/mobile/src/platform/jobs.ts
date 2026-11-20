@@ -69,20 +69,27 @@ async function fetchResult(job: LocalJob, generation: number): Promise<boolean> 
   return true;
 }
 
-const following = new Set<string>();
+const following = new Map<string, number>(); // job id -> the notes (generation) its walk belongs to
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Walks one job to the end: follow its events, fetch and open the result, then DELETE it on the server (which also
 // deletes the result). Safe to call again at any time; one walk per job at a time. Network trouble backs off; any
 // other error stops until the next launch.
 export async function followJob(id: string): Promise<void> {
-  if (following.has(id)) return;
-  following.add(id);
   const generation = dbGeneration();
+  // A walk of other notes (signed out and in again) is ending by itself: this one starts at once.
+  if (following.get(id) === generation) return;
+  following.set(id, generation);
   try {
     for (let failures = 0; failures < 8; ) {
       if (!stillSame(generation)) return; // signed out or another person meanwhile: this walk ends
-      const job = getJob(getDb(), id);
+      let db;
+      try {
+        db = getDb();
+      } catch {
+        return; // nobody is signed in (a push while signed out): nothing to follow
+      }
+      const job = getJob(db, id);
       if (job === null) return;
       const step = nextStep(job);
       if (step === "done") return;
@@ -110,7 +117,7 @@ export async function followJob(id: string): Promise<void> {
       }
     }
   } finally {
-    following.delete(id);
+    if (following.get(id) === generation) following.delete(id);
   }
 }
 

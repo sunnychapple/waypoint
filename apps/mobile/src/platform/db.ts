@@ -75,6 +75,15 @@ function closeOpen(): void {
 let generation = 0;
 
 export function dbGeneration(): number {
+  // Opened first when it can be (the person signed in last): a read taken before the lazy open in getDb would be stale
+  // the moment that open counted, and the work holding it would drop every write.
+  if (open === null) {
+    try {
+      getDb();
+    } catch {
+      // nobody is signed in: the generation stays, and getDb throws where the work reads notes
+    }
+  }
   return generation;
 }
 
