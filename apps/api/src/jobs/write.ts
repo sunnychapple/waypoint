@@ -88,7 +88,8 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
       "Reply with one JSON object and nothing else:",
       '{"title":"<at most 120 characters>","html":"<the whole HTML document>"}',
     ].join("\n"),
-    maxTokens: 3_500,
+    // The html field may run to 60,000 characters (about 15,000 tokens); 6,000 covers a real page without letting a loop run on.
+    maxTokens: 6_000,
     user: userMessage,
     result: fromDraft(MiniAppDraftSchema),
   },

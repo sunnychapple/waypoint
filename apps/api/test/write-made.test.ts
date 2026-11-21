@@ -37,7 +37,7 @@ const CASES: {
   },
   {
     type: "mini_app",
-    maxTokens: 3500,
+    maxTokens: 6000,
     valid: { title: "Osmosis", html: "<p>Water moves across a membrane.</p>" },
     invalid: { title: "Osmosis", html: '<script src="https://cdn.example.com/x.js"></script>' },
     schema: MiniAppResultSchema,

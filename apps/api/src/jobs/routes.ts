@@ -17,11 +17,11 @@ type JobRoute = { tier: Tier; model: string; retention: "standard" | "zero" };
 // Seconds to wait after JOB_STARTS says no (its period is 60 s, wrangler.jsonc).
 export const JOB_STARTS_RETRY_AFTER = 60;
 
-// The route is picked before anything is held or run. Jobs have a fixed tier per type (routes.fixed); retranscribe
-// always uses Whisper, which is not confirmed zero-retention. null: the user has zero retention on and no route fits.
 // How many starts one key may make when earlier ones failed before their row was written (each takes a fresh hold id).
 export const MAX_START_ATTEMPTS = 5;
 
+// The route is picked before anything is held or run. Jobs have a fixed tier per type (routes.fixed); retranscribe
+// always uses Whisper, which is not confirmed zero-retention. null: the user has zero retention on and no route fits.
 export function jobRoute(config: LoadedConfig, type: CreateJobRequest["type"], zeroRetention: boolean): JobRoute | null {
   if (type === "retranscribe") return zeroRetention ? null : { tier: "light", model: WHISPER_MODEL, retention: "standard" };
   const decision = decideRoute({ task: type, zeroRetention, routes: config.routes, minConfidence: config.router.min_confidence });
