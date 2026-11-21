@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityMessage, intervalLabel, madeSummary, minutesLabel } from "../src/core/study/labels.ts";
+import { availabilityMessage, CLOUD_PRACTICE_LINE, intervalLabel, madeSummary, minutesLabel, RATING_SPOKEN } from "../src/core/study/labels.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -50,5 +50,18 @@ describe("study labels", () => {
 
   it("availabilityMessage gives the copy for unavailable", () => {
     expect(availabilityMessage("unavailable")).toBe("Flashcards can't be made on this iPhone right now.");
+  });
+
+  it("the cloud Practice set line says it uses credits", () => {
+    expect(CLOUD_PRACTICE_LINE).toBe("You can still make a Practice set with NotePath's cloud (uses credits).");
+  });
+
+  it("each rating is spoken in plain words", () => {
+    expect([1, 2, 3, 4].map((rating) => RATING_SPOKEN[rating as 1 | 2 | 3 | 4])).toEqual([
+      "Again — I didn't know it",
+      "Hard — I barely knew it",
+      "Good — I knew it",
+      "Easy — I knew it right away",
+    ]);
   });
 });

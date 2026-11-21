@@ -41,3 +41,14 @@ export function availabilityMessage(availability: Unavailable): string {
       return "Flashcards can't be made on this iPhone right now.";
   }
 }
+
+// Under the cloud Practice set button, on devices that can't make the study sets on the iPhone.
+export const CLOUD_PRACTICE_LINE = "You can still make a Practice set with NotePath's cloud (uses credits).";
+
+// What VoiceOver says for each rating button, in plain words. The visible text stays "Again", "Hard", "Good", "Easy".
+export const RATING_SPOKEN: Record<1 | 2 | 3 | 4, string> = {
+  1: "Again — I didn't know it",
+  2: "Hard — I barely knew it",
+  3: "Good — I knew it",
+  4: "Easy — I knew it right away",
+};
