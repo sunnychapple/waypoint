@@ -58,9 +58,11 @@ function allowed(kind: MadeThing, flags: MadeFlags): boolean {
 }
 
 // Jobs in progress, newest first.
-export function beingMadeItems(rows: WorkingJobRow[], flags: MadeFlags): BeingMade[] {
+// A job whose result is already saved (its finished row has the same id) is not also listed as working.
+export function beingMadeItems(rows: WorkingJobRow[], flags: MadeFlags, finishedIds: ReadonlySet<string> = new Set()): BeingMade[] {
   const items: BeingMade[] = [];
   for (const row of rows) {
+    if (finishedIds.has(row.id)) continue;
     const kind = JOB_KIND[row.type];
     if (kind === undefined || !allowed(kind, flags)) continue;
     items.push({ id: row.id, kind, sessionTitle: row.sessionTitle, createdAt: row.createdAt });
@@ -78,13 +80,17 @@ export function readyItems(rows: FinishedRow[], now: number, flags: MadeFlags): 
 }
 
 // Queries. Jobs that are queued or running and not deleted; overviews only once their voices are rendered.
-export function listWorkingJobs(db: SqlDb): WorkingJobRow[] {
+// A job still "working" after a day is stale (the server gave up on it or lost it), so it is not listed.
+export const WORKING_MAX_HOURS = 24;
+
+export function listWorkingJobs(db: SqlDb, now: number): WorkingJobRow[] {
   return db
     .all<{ id: string; type: string; session_title: string | null; created_at: number }>(
       `SELECT j.id, j.type, s.title AS session_title, j.created_at
        FROM jobs j LEFT JOIN sessions s ON s.id = j.session_id
-       WHERE j.state IN ('queued', 'running') AND j.deleted_at IS NULL AND j.type != 'retranscribe'
+       WHERE j.state IN ('queued', 'running') AND j.deleted_at IS NULL AND j.type != 'retranscribe' AND j.created_at >= ?
        ORDER BY j.created_at DESC`,
+      [now - WORKING_MAX_HOURS * 60 * 60 * 1000],
     )
     .map((r) => ({ id: r.id, type: r.type, sessionTitle: r.session_title, createdAt: r.created_at }));
 }

@@ -28,14 +28,14 @@ export default function ReviewHomeScreen() {
       total: sessions.reduce((sum, session) => sum + session.cards, 0),
       next: nextDueAt(db, now),
       recent: sessions.slice(0, 5),
-      working: listWorkingJobs(db),
+      working: listWorkingJobs(db, Date.now()),
       finished: listFinished(db, now),
       now,
     };
   }, String(now));
 
-  const working = beingMadeItems(data.working, flags);
   const ready = readyItems(data.finished, now, flags);
+  const working = beingMadeItems(data.working, flags, new Set(data.finished.map((f) => f.id)));
   const madeSections = (
     <>
       {working.length > 0 ? (

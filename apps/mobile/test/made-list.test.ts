@@ -38,6 +38,10 @@ describe("being made", () => {
     expect(beingMadeItems([job("r", "retranscribe", 5)], ALL_ON)).toEqual([]);
   });
 
+  it("leaves out a job whose result is already saved", () => {
+    expect(beingMadeItems([job("a", "research", 1), job("b", "practice", 2)], ALL_ON, new Set(["a"])).map((i) => i.id)).toEqual(["b"]);
+  });
+
   it("hides mini apps and diagrams while their flags are off", () => {
     const rows = [job("m", "mini_app", 1), job("d", "diagram", 2), job("p", "practice", 3)];
     expect(beingMadeItems(rows, ALL_OFF).map((i) => i.id)).toEqual(["p"]);
@@ -100,7 +104,9 @@ describe("queries", () => {
     addJob(db, "done", "practice", "succeeded");
     addJob(db, "gone", "diagram", "running", true);
     addJob(db, "second", "retranscribe", "running");
-    const rows = listWorkingJobs(db);
+    addJob(db, "stale", "research", "running");
+    db.run("UPDATE jobs SET created_at = 0 WHERE id = 'stale'");
+    const rows = listWorkingJobs(db, 10 + 24 * 60 * 60 * 1000 - 5);
     expect(rows.map((r) => r.id).sort()).toEqual(["q", "r"]);
     expect(rows.find((r) => r.id === "q")?.sessionTitle).toBe("Cells");
   });
