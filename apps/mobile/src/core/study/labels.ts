@@ -48,6 +48,10 @@ export const CLOUD_PRACTICE_LINE = "You can still make a Practice set with NoteP
 // Shown instead of "Try again" when the on-device model rejects the notes' language.
 export const UNSUPPORTED_LANGUAGE_LINE = "NotePath can't make this for notes in this language yet.";
 
+// Shown when the session has no text to read at all. The model is not asked in that case.
+export const NO_TEXT_TITLE = "NotePath couldn't find any words here.";
+export const NO_TEXT_BODY = "Open your notes to read the pages again, or type in the words.";
+
 // The on-device model's error code for notes in a language it doesn't support. Retrying the same notes cannot help.
 export function isUnsupportedLanguage(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "unsupported_language";

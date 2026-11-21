@@ -121,13 +121,25 @@ function plan(port: ModelPort, units: Unit[], total: number): { group: Unit[]; w
   return groups.map((group) => ({ group, want: Math.max(1, Math.ceil((total * tokensOf(group)) / all)) }));
 }
 
+// A group that fails is skipped; unsupported_language stops at once; the first other error is thrown only when no card was made.
 export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTotal: number): Promise<SourcedCard[]> {
   const call = async (text: string, n: number) => cleanCards(await port.makeCards(text, n), n);
   const out: SourcedCard[] = [];
   const seen = new Set<string>();
+  let failed = false;
+  let firstError: unknown = null;
   for (const { group, want } of plan(port, units, maxTotal)) {
     if (out.length >= maxTotal) break;
-    for (const card of await askGroup(group, want, call)) {
+    let cards: CardDraft[];
+    try {
+      cards = await askGroup(group, want, call);
+    } catch (error) {
+      if (hasCode(error, "unsupported_language")) throw error;
+      if (!failed) firstError = error;
+      failed = true;
+      continue;
+    }
+    for (const card of cards) {
       const key = sameKey(card.front);
       if (seen.has(key) || out.length >= maxTotal) continue;
       seen.add(key);
@@ -137,36 +149,96 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
       out.push({ ...card, captureId: source.captureId, t: source.t });
     }
   }
+  if (out.length === 0 && failed) throw firstError;
   return out;
 }
 
-// Words only, lower case: curly quotes, dashes, punctuation and line breaks all become single spaces, so a real quote matches the page.
-function words(text: string): string {
-  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+const STOP_WORDS = new Set("a an the of to in on at by for from with and or but is are was were be been it its this that these those they them their he she his her him as so do does did not no than then there".split(" "));
+const tokens = (text: string): string[] => { const s = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(); return s === "" ? [] : s.split(" "); };
+const stem = (word: string): string => (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word);
+const contentWords = (text: string): string[] => { const kept = tokens(text).filter((w) => !STOP_WORDS.has(w)).map(stem); return kept.length > 0 ? kept : tokens(text).map(stem); };
+const phrase = (text: string): string => ` ${tokens(text).join(" ")} `;
+
+// True when some window of the page holds at least 80% of the evidence's unique content words. The window is about 1.5 times the evidence length, so a reworded quote still matches.
+function quoteOnPage(evidence: string, pageText: string): boolean {
+  const want = [...new Set(contentWords(evidence))];
+  if (want.length === 0) return false;
+  const page = tokens(pageText).map(stem);
+  const size = Math.ceil(tokens(evidence).length * 1.5) + 2;
+  const last = Math.max(0, page.length - size);
+  for (let start = 0; start <= last; start++) {
+    const window = new Set(page.slice(start, start + size));
+    const hits = want.filter((word) => window.has(word)).length;
+    if (hits * 5 >= want.length * 4) return true;
+  }
+  return false;
 }
 
-// Grounded when the evidence appears in the group text (each side of an "…" gap on its own) and the answer appears in the evidence.
-// Matching is by whole words, so "a" does not match inside "cat". An answer that only appears elsewhere on the page does not count.
-function grounded(quiz: SourcedQuizDraft, groupText: string): boolean {
-  const text = words(groupText);
-  const answer = words(quiz.answer);
-  const evidence = words(quiz.evidence);
-  if (answer.trim() === "" || evidence.trim() === "" || !evidence.includes(answer)) return false;
-  const pieces = quiz.evidence.split(/…|\.{3}/).map(words).filter((piece) => piece.trim() !== "");
-  return pieces.length > 0 && pieces.every((piece) => text.includes(piece));
+// Grounded when the evidence is close to a passage of the page, every answer word is on the page, numbers in the answer are in the evidence,
+// at least 60% of the answer's words are in the evidence, and no wrong choice is quoted in the evidence unless the answer quotes it too.
+function grounded(quiz: SourcedQuizDraft, pageText: string): boolean {
+  const answerWords = [...new Set(contentWords(quiz.answer))];
+  const evidenceWords = contentWords(quiz.evidence);
+  if (answerWords.length === 0 || evidenceWords.length === 0) return false;
+  if (!quoteOnPage(quiz.evidence, pageText)) return false;
+  const page = new Set(tokens(pageText).map(stem));
+  if (!answerWords.every((word) => page.has(word))) return false;
+  const evidenceSet = new Set(evidenceWords);
+  if (tokens(quiz.answer).some((word) => /\p{N}/u.test(word) && !evidenceSet.has(stem(word)))) return false;
+  const inEvidence = new Set(tokens(quiz.evidence).map(stem));
+  if (answerWords.filter((word) => inEvidence.has(word)).length * 5 < answerWords.length * 3) return false;
+  const evidencePhrase = phrase(quiz.evidence);
+  const answerPhrase = phrase(quiz.answer);
+  return quiz.choices.every((choice, index) => {
+    if (index === quiz.answerIndex || tokens(choice).length === 0) return true;
+    const wrong = phrase(choice);
+    return !evidencePhrase.includes(wrong) || answerPhrase.includes(wrong);
+  });
 }
 
+// Each unit is one piece, cut when it is over the budget. When some piece has six words or more, the shorter ones are dropped.
+function quizPieces(units: Unit[], contextSize: number): Unit[] {
+  const budget = Math.min(inputBudget(contextSize), 700);
+  const pieces = units
+    .filter((unit) => unit.text.trim() !== "")
+    .flatMap((unit) => (estimateTokens(unit.text) > budget ? splitUnit(unit, budget) : [unit]));
+  return pieces.some((piece) => tokens(piece.text).length >= 6) ? pieces.filter((piece) => tokens(piece.text).length >= 6) : pieces;
+}
+
+// Pieces at even indexes first, then the odd ones, so a short quiz still covers the whole set.
+function evenThenOdd<T>(list: T[]): T[] {
+  return [...list.filter((_, index) => index % 2 === 0), ...list.filter((_, index) => index % 2 === 1)];
+}
+
+// A piece that fails is skipped; unsupported_language stops at once; the first other error is thrown only when no question was made.
 export async function makeQuizFromUnits(port: ModelPort, units: Unit[], count: number): Promise<QuizDraft[]> {
   const call = async (text: string, n: number) => cleanQuiz(await port.makeQuiz(text, n), n);
   const out: QuizDraft[] = [];
-  for (const { group, want } of plan(port, units, count)) {
-    if (out.length >= count) break;
-    const groupText = joinText(group);
-    for (const quiz of await askGroup(group, want, call)) {
+  const seen = new Set<string>();
+  let tried = 0;
+  let failed = false;
+  let firstError: unknown = null;
+  for (const piece of evenThenOdd(quizPieces(units, port.contextSize()))) {
+    if (out.length >= count || tried >= count + 3) break;
+    tried++;
+    let drafts: SourcedQuizDraft[];
+    try {
+      drafts = await askGroup([piece], 2, call);
+    } catch (error) {
+      if (hasCode(error, "unsupported_language")) throw error;
+      if (!failed) firstError = error;
+      failed = true;
+      continue;
+    }
+    for (const quiz of drafts) {
       if (out.length >= count) break;
-      if (!grounded(quiz, groupText)) continue;
+      if (!grounded(quiz, piece.text)) continue;
+      const key = sameKey(quiz.question);
+      if (seen.has(key)) continue;
+      seen.add(key);
       out.push({ question: quiz.question, choices: quiz.choices, answerIndex: quiz.answerIndex, why: quiz.why });
     }
   }
+  if (out.length === 0 && failed) throw firstError;
   return out;
 }

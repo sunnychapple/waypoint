@@ -115,7 +115,7 @@ describe("makeCardsFromUnits", () => {
 
 describe("makeQuizFromUnits", () => {
   it("spreads the count across groups and stops at it", async () => {
-    const { port, calls } = fakePort(() => [quizItem("Q1"), quizItem("Q2")]);
+    const { port, calls } = fakePort((_call, index) => [quizItem(`Q${index}a`), quizItem(`Q${index}b`)]);
     const units = [unit(big("a ")), unit(big("a b "))];  // both pages contain the answer "a"
     const quiz = await makeQuizFromUnits({ ...port, contextSize: () => 2000 }, units, 3);
     expect(calls.map((c) => c.n)).toEqual([2, 2]);
@@ -187,5 +187,101 @@ describe("makeQuizFromUnits", () => {
   it("drops a question whose answer or evidence is only punctuation", async () => {
     const { port } = fakePort(() => [quizItem("Q?", "?", "?")]);
     expect(await makeQuizFromUnits(port, [unit("What? Why?")], 5)).toEqual([]);
+  });
+});
+
+describe("quiz grounding on real wording", () => {
+  it("keeps a question whose evidence is a reworded quote of the page", async () => {
+    const { port } = fakePort(() => [quizItem("What splits?", "Mitosis", "Mitosis divides one cell into two")]);
+    const quiz = await makeQuizFromUnits(port, [unit("Mitosis splits one cell into two identical cells during growth.")], 5);
+    expect(quiz.map((q) => q.question)).toEqual(["What splits?"]);
+  });
+
+  it("drops a question whose answer is not on the page", async () => {
+    const { port } = fakePort(() => [quizItem("Which city?", "Paris", "Mitosis splits one cell")]);
+    expect(await makeQuizFromUnits(port, [unit("Mitosis splits one cell into two.")], 5)).toEqual([]);
+  });
+
+  it("drops a question whose number in the answer is not in the quote", async () => {
+    const { port } = fakePort(() => [quizItem("When did the war end?", "1783", "The war began in 1775")]);
+    expect(await makeQuizFromUnits(port, [unit("The war began in 1775 and ended in 1783.")], 5)).toEqual([]);
+  });
+
+  it("drops a question when a wrong choice appears in the quote", async () => {
+    const { port } = fakePort(() => [{ ...quizItem("What splits?", "Mitosis", "Mitosis splits one cell"), wrongChoices: ["one cell", "x2", "x3"] }]);
+    expect(await makeQuizFromUnits(port, [unit("Mitosis splits one cell into two.")], 5)).toEqual([]);
+  });
+
+  it("keeps a wrong choice that the answer also quotes", async () => {
+    const { port } = fakePort(() => [{ ...quizItem("What is it?", "Mitosis cell", "Mitosis cell splits"), wrongChoices: ["Mitosis", "x2", "x3"] }]);
+    expect(await makeQuizFromUnits(port, [unit("Mitosis cell splits in two.")], 5)).toHaveLength(1);
+  });
+
+  it("stops at the count and tries pieces in even-then-odd order", async () => {
+    const pages = ["rivers", "mountains", "forests", "deserts", "oceans", "islands", "valleys", "plains"];
+    const units = pages.map((word, index) => unit(`Page ${index} covers ${word} in detail today.`));
+    const { port, calls } = fakePort((call, index) => {
+      const page = pages.findIndex((word) => call.text.includes(`covers ${word}`));
+      return [quizItem(`What does page ${page} cover (a)?`, pages[page] ?? "", `covers ${pages[page]}`), quizItem(`What does page ${page} cover (b)?`, pages[page] ?? "", `covers ${pages[page]}`)];
+    });
+    const quiz = await makeQuizFromUnits(port, units, 5);
+    expect(quiz).toHaveLength(5);
+    expect(calls.map((c) => c.text.match(/Page (\d)/)?.[1])).toEqual(["0", "2", "4"]);
+  });
+
+  it("goes on to odd pages when the even pages give no grounded question", async () => {
+    const pages = ["rivers", "mountains", "forests", "deserts", "oceans", "islands", "valleys", "plains"];
+    const units = pages.map((word, index) => unit(`Page ${index} covers ${word} in detail today.`));
+    const { port, calls } = fakePort((call) => {
+      const page = pages.findIndex((word) => call.text.includes(`covers ${word}`));
+      return page % 2 === 0 ? [quizItem("Wrong?", "Paris", "covers Paris")] : [quizItem(`What does page ${page} cover?`, pages[page] ?? "", `covers ${pages[page]}`)];
+    });
+    const quiz = await makeQuizFromUnits(port, units, 5);
+    expect(quiz).toHaveLength(4);
+    expect(calls.map((c) => c.text.match(/Page (\d)/)?.[1])).toEqual(["0", "2", "4", "6", "1", "3", "5", "7"]);
+  });
+
+  it("keeps the questions from other pieces when one piece is declined", async () => {
+    const { port } = fakePort(
+      (call) => {
+        const word = ["rivers", "mountains", "forests"].find((w) => call.text.includes(w)) ?? "";
+        return [quizItem(`What does ${word} cover?`, word, `covers ${word}`)];
+      },
+      { fail: (_call, index) => (index === 1 ? { code: "declined" } : undefined) },
+    );
+    const units = [unit("Page covers rivers in detail today."), unit("Page covers mountains in detail today."), unit("Page covers forests in detail today.")];
+    const quiz = await makeQuizFromUnits(port, units, 5);
+    expect(quiz.map((q) => q.question)).toEqual(["What does forests cover?", "What does mountains cover?"]);
+  });
+
+  it("rethrows the first error when every piece fails", async () => {
+    const { port, calls } = fakePort(() => [], { fail: (_call, index) => ({ code: `e${index}` }) });
+    await expect(makeQuizFromUnits(port, [unit("Page covers rivers in detail."), unit("Page covers mountains in detail.")], 5)).rejects.toMatchObject({ code: "e1" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("rethrows unsupported_language at once", async () => {
+    const { port, calls } = fakePort(() => [], { fail: () => ({ code: "unsupported_language" }) });
+    await expect(makeQuizFromUnits(port, [unit("Page covers rivers in detail."), unit("Page covers mountains in detail.")], 5)).rejects.toMatchObject({
+      code: "unsupported_language",
+    });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("card groups that fail", () => {
+  it("skips a failed group and keeps the cards from the rest", async () => {
+    const { port } = fakePort(
+      (call) => [term(call.text.startsWith("a") ? "First" : "Kept")],
+      { contextSize: 2000, fail: (_call, index) => (index === 1 ? { code: "declined" } : undefined) },
+    );
+    const cards = await makeCardsFromUnits(port, [unit(big("a ")), unit(big("b "))], 5);
+    expect(cards.map((c) => c.front)).toEqual(["Kept"]);
+  });
+
+  it("rethrows unsupported_language at once", async () => {
+    const { port, calls } = fakePort(() => [], { contextSize: 2000, fail: () => ({ code: "unsupported_language" }) });
+    await expect(makeCardsFromUnits(port, [unit(big("a ")), unit(big("b "))], 5)).rejects.toMatchObject({ code: "unsupported_language" });
+    expect(calls).toHaveLength(1);
   });
 });

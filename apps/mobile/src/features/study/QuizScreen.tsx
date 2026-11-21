@@ -9,7 +9,7 @@ import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
 import type { QuizDraft } from "../../core/study/drafts.ts";
-import { isUnsupportedLanguage, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
+import { isUnsupportedLanguage, NO_TEXT_BODY, NO_TEXT_TITLE, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { usePendingText } from "../../platform/pending.ts";
@@ -27,7 +27,7 @@ export default function QuizScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [availability] = useState(getAvailability);
   const [attempt, setAttempt] = useState(0);
-  const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "ready" | "unsupported">("working");
+  const [outcome, setOutcome] = useState<"working" | "failed" | "no_text" | "ready" | "unsupported">("working");
   const [quiz, setQuiz] = useState<QuizState | null>(null);
   // True once the student is practising the ones they missed: nothing more is saved, and the first run's count stands.
   const [retrying, setRetrying] = useState(false);
@@ -49,10 +49,15 @@ export default function QuizScreen() {
           if (active) setOutcome("failed");
           return;
         }
-        const questions = await makeQuizFromUnits(PORT, studyUnits(db, sessionId), quizCount(session.kind));
+        const units = studyUnits(db, sessionId);
+        if (units.length === 0) {
+          if (active) setOutcome("no_text");
+          return;
+        }
+        const questions = await makeQuizFromUnits(PORT, units, quizCount(session.kind));
         if (!active) return;
         if (questions.length === 0) {
-          setOutcome("empty");
+          setOutcome("failed");
           return;
         }
         started.current = true;
@@ -113,25 +118,29 @@ export default function QuizScreen() {
     );
   }
 
+  if (outcome === "no_text") {
+    return (
+      <Screen>
+        <CloseButton />
+        <Title>{NO_TEXT_TITLE}</Title>
+        <Body>{NO_TEXT_BODY}</Body>
+        <PrimaryButton label="Open my notes" onPress={() => router.replace(`/session/${sessionId}`)} />
+      </Screen>
+    );
+  }
+
   if (outcome === "failed") {
     return (
       <Screen>
         <CloseButton />
         <Title>Couldn't make a quiz this time.</Title>
         <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
+        <SecondaryButton label="Make a Practice set" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
       </Screen>
     );
   }
 
-  if (outcome === "empty" || quiz === null) {
-    return (
-      <Screen>
-        <CloseButton />
-        <Title>There wasn't enough here to make a quiz.</Title>
-        {outcome === "empty" ? <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} /> : null}
-      </Screen>
-    );
-  }
+  if (quiz === null) return null;
 
   if (isDone(quiz)) {
     return (
