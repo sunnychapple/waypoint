@@ -105,7 +105,7 @@ function ExplainBody({
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
         <Title>{word}</Title>
         <Caption>
-          {timed
+          {timed && resolvedPageId === undefined
             ? `“${word}” · at ${formatOffset(t)}`
             : pageNumber === null
               ? `“${word}”`
