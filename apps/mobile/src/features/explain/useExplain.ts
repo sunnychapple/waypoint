@@ -5,21 +5,19 @@ import { listSegments } from "../../core/capture/segments.ts";
 import { keepsKey, type CloudFailure } from "../../core/cloud/failure.ts";
 import { excerptAround, pageContext, trimExcerpt } from "../../core/explain/excerpt.ts";
 import {
-  addToThread,
   discardIfUnsaved,
   getExplanation,
   pageForTerm,
   saveExplanation,
-  saveExplanationNow,
   shownAnswer,
-  startExplanation,
   unsaveExplanation,
   type Explanation,
   type ThreadItem,
 } from "../../core/explain/explanations.ts";
+import { landAnswer } from "../../core/explain/land.ts";
 import { askLater, markAnswered, reopenFlag } from "../../core/explain/later.ts";
-import { logSent, settleFailedSent, settleSent, type InstantSentTask } from "../../core/explain/sent.ts";
-import { dbGeneration, getDb, stillSame, writeDb } from "../../platform/db.ts";
+import { logSent, settleFailedSent, type InstantSentTask } from "../../core/explain/sent.ts";
+import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
 import { doubleCheck, streamExplain, streamMoreDetail, toFailure } from "../../platform/tasks.ts";
 
@@ -63,16 +61,14 @@ export function useExplain(
   const keys = useRef<Partial<Record<InstantSentTask, string>>>({});
   const idRef = useRef<string | null>(loaded?.id ?? null);
   const cancelled = useRef(false);
-  const controller = useRef<AbortController | null>(null);
 
   // Closing the sheet keeps only saved explanations. An answer is saved as soon as it arrives, so it stays unless the
-  // person removed it with Saved. It also aborts a stream still running; the server settles that request anyway, and
-  // no explanation row or thread item is written after this.
+  // person removed it with Saved. A stream still running is not aborted: it runs to the end and its answer lands, so
+  // the person is charged for an answer they get. Once closed, no React state is set.
   useEffect(() => {
     cancelled.current = false;
     return () => {
       cancelled.current = true;
-      controller.current?.abort();
       const id = idRef.current;
       if (id !== null) writeDb((db) => discardIfUnsaved(db, id));
     };
@@ -89,8 +85,6 @@ export function useExplain(
     const explainBody: ExplainRequest = { word, transcript: excerpt };
     const followUp: FollowUpRequest = { word, transcript: excerpt, answer: answer ?? "" };
     writeDb((db) => logSent(db, { id: key, task, sessionId, body: task === "explain" ? explainBody : followUp, at: Date.now() }));
-    const abort = new AbortController();
-    controller.current = abort;
     let text = "";
     let credits: number;
     let retention: "standard" | "zero";
@@ -98,7 +92,7 @@ export function useExplain(
     setPhase({ kind: "running", task, text });
     const onDelta = (piece: string): void => {
       text += piece;
-      setPhase({ kind: "running", task, text });
+      if (!cancelled.current) setPhase({ kind: "running", task, text });
     };
     try {
       if (task === "double_check") {
@@ -107,15 +101,17 @@ export function useExplain(
         ({ credits, retention } = reply);
       } else {
         const done: StreamDone =
-          task === "explain"
-            ? await streamExplain(explainBody, key, onDelta, abort.signal)
-            : await streamMoreDetail(followUp, key, onDelta, abort.signal);
+          task === "explain" ? await streamExplain(explainBody, key, onDelta) : await streamMoreDetail(followUp, key, onDelta);
         ({ credits, retention } = done);
-        if (task === "explain") setOfferResearch(done.offer_research);
+        if (task === "explain" && !cancelled.current) setOfferResearch(done.offer_research);
       }
     } catch (error) {
-      if (cancelled.current) return; // closed mid-stream: nothing more is written here
       const failure = toFailure(error);
+      if (cancelled.current) {
+        // Closed mid-stream: no state is set. A failure that does not keep its key is still settled, in the same notes.
+        if (!keepsKey(failure)) writeDbIf(generation, (db) => settleFailedSent(db, key, failure));
+        return;
+      }
       if (!keepsKey(failure)) {
         writeDb((db) => settleFailedSent(db, key, failure));
         delete keys.current[task];
@@ -128,33 +124,30 @@ export function useExplain(
     const item: ThreadItem = { kind: task, text, at: Date.now(), retention, sentId: key };
     let next: Explanation | null;
     try {
-      next = writeDb((db) => {
-        settleSent(db, key, credits, retention);
-        if (cancelled.current) return null;
-        const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word, pageRef).id;
-        idRef.current = id;
-        let updated: Explanation | null = null;
-        // One transaction: the thread item, the save and the answered flag all land, or none does.
-        db.transaction(() => {
-          updated = addToThread(db, id, item);
-          // A paid explanation is kept at once, so closing the sheet before Save cannot lose it. The person can still
-          // remove it with Saved (toggleSave); then closing the sheet discards it. Follow-ups never save.
-          if (task === "explain" && stillSame(generation)) {
-            saveExplanationNow(db, deps, id);
-            updated = { ...updated, saved: true };
-            // Explain answered a question from Questions for later: that flag is answered now. Only in the notes the
-            // flag came from.
-            if (flagId !== undefined) markAnswered(db, flagId);
-          }
-        });
-        return updated;
-      });
+      next = writeDb((db) =>
+        landAnswer(db, deps, {
+          item,
+          credits,
+          retention,
+          existingId: idRef.current,
+          closed: cancelled.current,
+          sameNotes: stillSame(generation),
+          sessionId,
+          t,
+          word,
+          captureId: pageRef,
+          flagId,
+        }),
+      );
     } catch {
+      // Closed: the answer could not be landed, and nobody is looking at the sheet any more.
+      if (cancelled.current) return;
       delete keys.current[task];
       setUnsavedItem(item);
       setPhase({ kind: "idle" });
       return;
     }
+    if (next !== null) idRef.current = next.id;
     if (cancelled.current) return;
     delete keys.current[task];
     if (next !== null) setExplanation(next);
