@@ -1,3 +1,4 @@
+import { shortDay } from "../format.ts";
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -13,6 +14,14 @@ export function usedLabel(lastUsedAt: number, now: number, timeZoneOffsetMin: nu
   if (days === 0) return "Used today";
   if (days === 1) return "Used yesterday";
   return null;
+}
+
+// "Today", "Yesterday", or the short day, by calendar day in the given offset.
+export function dayLabel(ms: number, now: number, timeZoneOffsetMin: number): string {
+  const days = localDay(now, timeZoneOffsetMin) - localDay(ms, timeZoneOffsetMin);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return shortDay(ms);
 }
 
 export function sessionsLabel(n: number): string {

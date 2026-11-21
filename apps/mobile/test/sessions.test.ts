@@ -8,6 +8,7 @@ import {
   getSession,
   latestSession,
   moveSession,
+  recentSessions,
   renameSession,
   sessionsInSpace,
 } from "../src/core/capture/sessions.ts";
@@ -111,5 +112,22 @@ describe("sessions", () => {
     for (const table of ["captures", "flags", "cards", "segments"]) {
       expect(db.get<{ n: number }>(`SELECT count(*) AS n FROM ${table}`)?.n, table).toBe(0);
     }
+  });
+});
+
+describe("recentSessions", () => {
+  it("skips the newest finished sessions, newest first, and only finished ones", () => {
+    const space = ensureDefaultSpace(db, deps());
+    insertSession("a", space.id, "saved", 10);
+    insertSession("b", space.id, "recording", 50);
+    insertSession("c", space.id, "interrupted", 40);
+    insertSession("d", space.id, "saved", 30);
+    insertSession("e", space.id, "saved", 20);
+    insertSession("f", space.id, "saved", 5);
+    // Newest first: c (40), d (30), e (20), a (10), f (5). The newest one is skipped.
+    expect(recentSessions(db, 1, 2).map((s) => s.id)).toEqual(["d", "e"]);
+    expect(recentSessions(db, 1, 5).map((s) => s.id)).toEqual(["d", "e", "a", "f"]);
+    expect(recentSessions(db, 0, 1).map((s) => s.id)).toEqual(["c"]);
+    expect(recentSessions(db, 9, 5)).toEqual([]);
   });
 });

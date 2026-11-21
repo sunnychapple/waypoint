@@ -1,14 +1,15 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { dateLine, greeting } from "../../core/capture/labels.ts";
-import { latestSession } from "../../core/capture/sessions.ts";
+import { dateLine, dayLabel, greeting } from "../../core/capture/labels.ts";
+import { latestSession, recentSessions } from "../../core/capture/sessions.ts";
 import { countLabel, formatClock } from "../../core/format.ts";
+import { countOpenFlags } from "../../core/explain/later.ts";
 import { countDue } from "../../core/study/cards.ts";
 import { minutesLabel } from "../../core/study/labels.ts";
 import { useProfile } from "../../platform/auth.tsx";
 import { useMinuteNow, useQuery } from "../../platform/db.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { SavingToPill } from "./SavingToPill.tsx";
 
@@ -20,6 +21,8 @@ export default function HomeScreen() {
   const latest = useQuery(latestSession);
   const now = useMinuteNow();
   const due = useQuery((db) => countDue(db, now), String(now));
+  const openQuestions = useQuery(countOpenFlags);
+  const recent = useQuery((db) => recentSessions(db, 1, 5), String(now));
   const offset = -new Date().getTimezoneOffset();
   const hello = greeting(new Date().getHours());
 
@@ -66,6 +69,24 @@ export default function HomeScreen() {
           <Body style={styles.centered}>Record what you hear, or snap homework and book pages.</Body>
         </View>
       )}
+
+      {openQuestions > 0 ? (
+        <Row title={`Questions for later · ${openQuestions}`} onPress={() => router.push("/later")} />
+      ) : null}
+
+      {recent.length > 0 ? (
+        <View style={styles.recent}>
+          <Caption>Recent</Caption>
+          {recent.map((session) => (
+            <Row
+              key={session.id}
+              title={session.title}
+              subtitle={`${session.spaceName} · ${dayLabel(session.startedAt, now, offset)}`}
+              onPress={() => router.push(`/session/${session.id}`)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.savingTo}>
         <Caption>Saving to</Caption>
@@ -150,6 +171,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: "500" },
   empty: { gap: 12, paddingTop: 24 },
   centered: { textAlign: "center" },
+  recent: { gap: 8 },
   savingTo: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12 },
   starts: { flexDirection: "row", gap: 12 },
   tile: { flex: 1, minHeight: 130, borderRadius: 20, padding: 16, justifyContent: "space-between" },

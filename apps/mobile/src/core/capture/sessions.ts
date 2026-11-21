@@ -94,6 +94,13 @@ export function latestSession(db: SqlDb): SessionSummary | null {
   return row ? toSummary(row) : null;
 }
 
+// The finished sessions after the newest `skip` ones, newest first, at most `limit`.
+export function recentSessions(db: SqlDb, skip: number, limit: number): SessionSummary[] {
+  return db
+    .all<SummaryDbRow>(`${SUMMARY_SELECT} WHERE ${FINISHED} ORDER BY s.started_at DESC LIMIT ? OFFSET ?`, [limit, skip])
+    .map(toSummary);
+}
+
 // Newest first. Saved and interrupted sessions only.
 export function sessionsInSpace(db: SqlDb, spaceId: string): SessionSummary[] {
   return db

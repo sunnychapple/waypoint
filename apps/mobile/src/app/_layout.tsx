@@ -60,6 +60,7 @@ function RootStack() {
         <Stack.Screen name="pages/new" />
         <Stack.Screen name="pages/[id]" />
         <Stack.Screen name="session/[id]" />
+        <Stack.Screen name="later" />
         <Stack.Screen
           name="explain"
           options={{ presentation: "formSheet", sheetAllowedDetents: [0.4, 0.75, 1], sheetInitialDetentIndex: 0, sheetGrabberVisible: true }}

@@ -76,6 +76,38 @@ export function unsaveExplanation(db: SqlDb, id: string): void {
   });
 }
 
+export type SavedExplanation = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  t: number;
+  term: string;
+  answer: string;
+  createdAt: number;
+};
+
+// Saved explanations, newest first. The answer is the first explain item of the thread, as saveExplanation stores it.
+export function savedExplanations(db: SqlDb): SavedExplanation[] {
+  return db
+    .all<{ id: string; session_id: string; session_title: string; t: number; term: string; thread: string; created_at: number }>(
+      `SELECT e.id, e.session_id, s.title AS session_title, e.t, e.term, e.thread, e.created_at
+       FROM explanations e JOIN sessions s ON s.id = e.session_id
+       WHERE e.saved = 1 ORDER BY e.created_at DESC`,
+    )
+    .map((row) => {
+      const first = ThreadSchema.parse(JSON.parse(row.thread)).find((item) => item.kind === "explain");
+      return {
+        id: row.id,
+        sessionId: row.session_id,
+        sessionTitle: row.session_title,
+        t: row.t,
+        term: row.term,
+        answer: first?.text ?? "",
+        createdAt: row.created_at,
+      };
+    });
+}
+
 // The explanation the person is looking at: what more detail and double-check send as "answer".
 export function shownAnswer(e: Explanation): string | null {
   for (let i = e.thread.length - 1; i >= 0; i--) {
