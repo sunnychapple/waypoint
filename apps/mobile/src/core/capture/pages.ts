@@ -103,10 +103,11 @@ export function editPageText(db: SqlDb, captureId: string, text: string): void {
   setPageText(db, captureId, text.trim(), "[]");
 }
 
-// Pages and photos not read yet, oldest first. An empty text ("" after a failed read) is not picked again.
+// Pages and photos not read yet, oldest first. An empty text ("" after a failed read) is not picked again. A synced page
+// with no file on this iPhone is left alone: reading it would store "" and sync that over the real text.
 export function pagesToRead(db: SqlDb, limit: number): { id: string; file: string }[] {
   return db.all<{ id: string; file: string }>(
-    "SELECT id, file FROM captures WHERE kind IN ('page', 'photo') AND found_text IS NULL ORDER BY rowid LIMIT ?",
+    "SELECT id, file FROM captures WHERE kind IN ('page', 'photo') AND found_text IS NULL AND file <> '' ORDER BY rowid LIMIT ?",
     [limit],
   );
 }
