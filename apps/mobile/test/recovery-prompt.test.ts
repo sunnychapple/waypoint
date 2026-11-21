@@ -4,6 +4,7 @@ import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import {
   RECOVERY_REMINDER_MS,
+  clearRecoveryPromptShown,
   finishedSessionCount,
   markRecoveryPromptShown,
   recoveryPromptShownAt,
@@ -61,5 +62,11 @@ describe("recovery prompt storage", () => {
     expect(recoveryPromptShownAt(db)).toBeNull();
     markRecoveryPromptShown(db, now);
     expect(recoveryPromptShownAt(db)).toBe(now);
+  });
+
+  it("forgets the last push once the words are saved", () => {
+    markRecoveryPromptShown(db, now);
+    clearRecoveryPromptShown(db);
+    expect(recoveryPromptShownAt(db)).toBeNull();
   });
 });

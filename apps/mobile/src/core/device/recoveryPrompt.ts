@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "../db/settings.ts";
+import { deleteSetting, getSetting, setSetting } from "../db/settings.ts";
 import type { SqlDb } from "../db/sql.ts";
 
 // The reminder to write down the recovery words waits for the first finished session, and comes back at most once a
@@ -34,4 +34,9 @@ export function recoveryPromptShownAt(db: SqlDb): number | null {
 
 export function markRecoveryPromptShown(db: SqlDb, now: number): void {
   setSetting(db, RECOVERY_PROMPT_KEY, String(now));
+}
+
+// The words are saved: forget the last push, so a removal that later deletes them prompts at once.
+export function clearRecoveryPromptShown(db: SqlDb): void {
+  deleteSetting(db, RECOVERY_PROMPT_KEY);
 }

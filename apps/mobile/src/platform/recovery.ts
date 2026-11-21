@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { router } from "expo-router";
+import { router, usePathname } from "expo-router";
 import { ApiCallError, NetworkError } from "@waypoint/api-client";
 import {
   certifyDevice,
@@ -12,14 +12,16 @@ import {
   type MadeRecoveryKey,
 } from "../../modules/waypoint-keys/index.ts";
 import { cleanPhrase, recoveryState, type RecoveryState } from "../core/device/recovery.ts";
+import { getRecorderStatus } from "../../modules/waypoint-audio/index.ts";
 import {
+  clearRecoveryPromptShown,
   finishedSessionCount,
   markRecoveryPromptShown,
   recoveryPromptShownAt,
   shouldPromptRecovery,
 } from "../core/device/recoveryPrompt.ts";
 import { api } from "./api.ts";
-import { dbGeneration, useQuery, writeDbIf } from "./db.ts";
+import { dbGeneration, getDb, stillSame, useQuery, writeDbIf } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { recoverGroupKeys } from "./groups.ts";
 
@@ -104,13 +106,19 @@ export async function recoverWithWords(words: string): Promise<RecoverResult> {
 
 // The words screen is a reminder, not a gate. It opens for an approved iPhone holding the account key, with no recovery
 // key on the server, once the person has a finished session, and at most once a week (shouldPromptRecovery). Checked
-// when the device is approved, when a session count changes (a session is saved), and on each return to the app.
-// Called once in (tabs)/_layout.tsx.
+// when the device is approved, when a session is saved, when the person comes back to a tab screen, and on each return
+// to the app. Never over the recorder or any other pushed screen: only while a tab root is showing. Called once in
+// (tabs)/_layout.tsx.
+const TAB_ROOTS = new Set(["/", "/spaces", "/review", "/search"]);
+let checking = false; // one check at a time: the push is never started twice
+
 export function useRecoveryPrompt(): void {
   const status = useDeviceStatus();
+  const pathname = usePathname();
   const sessions = useQuery((db) => finishedSessionCount(db));
-  const lastShownAt = useQuery((db) => recoveryPromptShownAt(db));
   const [foreground, setForeground] = useState(0);
+  const here = useRef(pathname);
+  here.current = pathname;
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setForeground((n) => n + 1);
@@ -118,26 +126,38 @@ export function useRecoveryPrompt(): void {
     return () => subscription.remove();
   }, []);
   useEffect(() => {
-    if (status !== "approved" || !canMakeRecoveryKey()) return;
-    // A check still waiting on the server when the inputs change is dropped; the new run decides with fresh inputs.
-    let cancelled = false;
+    if (status !== "approved" || sessions < 1 || checking || !TAB_ROOTS.has(pathname) || !canMakeRecoveryKey()) return;
     const generation = dbGeneration();
-    void loadRecoveryState().then((state) => {
-      if (cancelled) return;
-      const now = Date.now();
-      // "unknown" (the server could not be asked) counts as saved: nothing is shown on a guess.
-      const ask = shouldPromptRecovery({ saved: state !== "missing", sessionCount: sessions, lastShownAt, now });
-      if (!ask) return;
-      // Recorded before the screen opens, so a later check does not open it again within the week.
-      const recorded = writeDbIf(generation, (db) => {
-        markRecoveryPromptShown(db, now);
-        return true;
+    const user = currentUserId();
+    checking = true;
+    void loadRecoveryState()
+      .then((state) => {
+        // Signed out, or someone else signed in, while the server was asked: the answer is not theirs.
+        if (!stillSame(generation) || currentUserId() !== user) return;
+        if (state === "unknown") return; // the server could not be asked: nothing is shown on a guess
+        if (state !== "missing") {
+          // Saved. A later removal that deletes the blob is a new situation: it prompts at once, not after the week.
+          if (recoveryPromptShownAt(getDb()) !== null) writeDbIf(generation, (db) => clearRecoveryPromptShown(db));
+          return;
+        }
+        // Still on a tab root, and not recording, now that the answer is back.
+        if (!TAB_ROOTS.has(here.current) || getRecorderStatus().state !== "idle") return;
+        const now = Date.now();
+        // Decided on what the notes hold now, then recorded before the screen opens, in one write.
+        const recorded = writeDbIf(generation, (db) => {
+          const ask = shouldPromptRecovery({
+            saved: false,
+            sessionCount: finishedSessionCount(db),
+            lastShownAt: recoveryPromptShownAt(db),
+            now,
+          });
+          if (ask) markRecoveryPromptShown(db, now);
+          return ask;
+        });
+        if (recorded === true) router.push("/recovery-words");
+      })
+      .finally(() => {
+        checking = false;
       });
-      if (recorded !== true) return;
-      router.push("/recovery-words");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [status, sessions, lastShownAt, foreground]);
+  }, [status, sessions, foreground, pathname]);
 }
