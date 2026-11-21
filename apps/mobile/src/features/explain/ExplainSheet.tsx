@@ -115,6 +115,8 @@ function ExplainBody({
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
             <Body>{contextCopy(resolvedPageId !== undefined).missing}</Body>
+          ) : model.stillComing ? (
+            <Body>Your answer is still on its way. It will be in Questions for later.</Body>
           ) : (
             <>
               <Body style={{ color: colors.ink2 }}>{contextCopy(resolvedPageId !== undefined).sent}</Body>
