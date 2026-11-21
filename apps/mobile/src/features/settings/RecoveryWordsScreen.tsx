@@ -82,8 +82,9 @@ export default function RecoveryWordsScreen() {
       <Screen>
         <Title>Your recovery words</Title>
         <Body>
-          12 recovery words that get you back into NotePath if you lose this iPhone. Write them on paper and keep it somewhere safe, like with your school things at
-          home.
+          12 recovery words that get you back into your NotePath account if you lose this iPhone. They bring back spaces with sync turned on. Everything else stays
+          only on this iPhone, so turn on sync for a space you can't lose. Photos and audio sync on paid plans. Write them on paper and keep it somewhere safe, like
+          with your school things at home.
         </Body>
         <Caption>NotePath can't see these words and can't send them to you again.</Caption>
         {caption !== "" ? <Caption>{caption}</Caption> : null}

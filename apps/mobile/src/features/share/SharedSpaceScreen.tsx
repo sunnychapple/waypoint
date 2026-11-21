@@ -9,7 +9,7 @@ import { canInvite, canLeave, canRemove, memberLabels, type Role } from "../../c
 import { refreshGroups } from "../../platform/groups.ts";
 import { currentUserId } from "../../platform/device.ts";
 import { useQuery } from "../../platform/db.ts";
-import { leave, pendingKeyChanges, removeMember, type PendingKeyChange } from "../../platform/share.ts";
+import { leave, mySafetyCode, pendingKeyChanges, removeMember, type PendingKeyChange } from "../../platform/share.ts";
 import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -24,12 +24,14 @@ export default function SharedSpaceScreen() {
   const held = useQuery((db) => heldVersions(db, id), id);
   const spaceId = useQuery((db) => spaceForGroup(db, id), id);
   const [pending, setPending] = useState<PendingKeyChange[]>([]);
+  const [myCode, setMyCode] = useState<string | null>(null);
   const me = currentUserId() ?? "";
 
   useFocusEffect(
     useCallback(() => {
       refreshGroups().catch(() => undefined);
       pendingKeyChanges().then(setPending).catch(() => setPending([]));
+      mySafetyCode().then(setMyCode).catch(() => setMyCode(null));
     }, []),
   );
 
@@ -97,7 +99,10 @@ export default function SharedSpaceScreen() {
       {changed.map((change) => (
         <View key={change.userId} style={[styles.notice, { backgroundColor: colors.surface2 }]}>
           <Body style={{ fontWeight: "600", color: colors.ink }}>{`Check this is really ${labels.get(change.userId) ?? "A member"}`}</Body>
-          <Caption>They may have a new phone. Until you check, they can't see new notes here, and you won't see theirs. Ask them to read you this code.</Caption>
+          <Caption>
+            They may have a new phone. Until you check, they can't see new notes here, and you won't see theirs. Ask them to open this shared space and read you
+            their safety code. It should match this one.
+          </Caption>
           <Caption>Code: {change.code}</Caption>
           <PrimaryButton label="It's them" onPress={() => trust(change)} />
         </View>
@@ -118,6 +123,14 @@ export default function SharedSpaceScreen() {
           />
         );
       })}
+
+      {myCode !== null ? (
+        <View style={styles.code}>
+          <Caption>Your safety code</Caption>
+          <Body style={{ fontWeight: "600", color: colors.ink }}>{myCode}</Body>
+          <Caption>If someone here asks you to check, read them this code.</Caption>
+        </View>
+      ) : null}
 
       <Row
         title="Who can see these notes"
@@ -147,4 +160,5 @@ export default function SharedSpaceScreen() {
 const styles = StyleSheet.create({
   notice: { gap: 10, padding: 14, borderRadius: 16 },
   leave: { gap: 10, marginTop: 8 },
+  code: { gap: 6, marginTop: 8 },
 });

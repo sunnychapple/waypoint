@@ -26,7 +26,7 @@ export default function RecoveryKeyScreen() {
       <BackButton />
       <Title>Recovery words</Title>
       <Row title="Status" right={<Caption>{state === null ? "Checking…" : LABEL[state]}</Caption>} />
-      <Body>If you lose all your devices, your recovery words are the only way back into your notes.</Body>
+      <Body>If you lose all your devices, your recovery words bring back the spaces with sync turned on.</Body>
       <View style={styles.actions}>
         {canMakeRecoveryKey() ? (
           <>
