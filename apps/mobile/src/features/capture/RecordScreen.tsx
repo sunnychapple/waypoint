@@ -216,6 +216,14 @@ function BannerView({ banner }: { banner: Banner }) {
   );
 }
 
+// Stop asks first, so a mistap does not end the recording. The microphone keeps running while the alert is open.
+function confirmStop(model: Model): void {
+  Alert.alert("Stop and save this recording?", undefined, [
+    { text: "Keep recording", style: "cancel" },
+    { text: "Stop and save", onPress: model.stop },
+  ]);
+}
+
 function Dock({ model }: { model: Model }) {
   const colors = useColors();
   const paused = model.recorder === "paused";
@@ -238,7 +246,7 @@ function Dock({ model }: { model: Model }) {
           accessibilityRole="button"
           accessibilityLabel="Stop"
           disabled={model.stopping}
-          onPress={model.stop}
+          onPress={() => confirmStop(model)}
           style={[styles.stop, { backgroundColor: colors.rec, opacity: model.stopping ? 0.5 : 1 }]}
         >
           <SymbolView name="stop.fill" tintColor={colors.onRec} size={14} />
