@@ -4,7 +4,17 @@ import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
 import { cleanWord, excerptAround, splitWords } from "../src/core/explain/excerpt.ts";
-import { askLater } from "../src/core/explain/later.ts";
+import { saveExplanation, savedExplanations, startExplanation as startExp } from "../src/core/explain/explanations.ts";
+import {
+  askLater,
+  countOpenFlags,
+  dismissFlag,
+  groupFlagsBySession,
+  markAnswered,
+  openFlags,
+  questionFor,
+  wordFromQuestion,
+} from "../src/core/explain/later.ts";
 import { getSent, logSent, settleFailedSent, settleSent, utf8Length } from "../src/core/explain/sent.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
@@ -120,5 +130,81 @@ describe("explanations and sent_log", () => {
     const { db, deps } = setup();
     askLater(db, deps, "s1", 4_200.4, "osmosis");
     expect(db.get<{ t: number; question: string; state: string }>("SELECT t, question, state FROM flags")).toEqual({ t: 4200, question: 'What does "osmosis" mean?', state: "open" });
+  });
+});
+
+describe("questions for later", () => {
+  it("wordFromQuestion reads back the word askLater stores, and nothing else", () => {
+    expect(wordFromQuestion(questionFor("osmosis"))).toBe("osmosis");
+    expect(wordFromQuestion('What does "a "quoted" word" mean?')).toBe('a "quoted" word');
+    expect(wordFromQuestion("")).toBeNull();
+    expect(wordFromQuestion("Why is the sky blue?")).toBeNull();
+    expect(wordFromQuestion('What does "" mean?')).toBeNull();
+  });
+
+  it("openFlags lists open flags only, newest session first, in time order within a session", () => {
+    const { db } = setup();
+    db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at) VALUES ('s0', (SELECT id FROM spaces LIMIT 1), 'recording', 'Older', 'saved', 0)");
+    db.run("UPDATE sessions SET started_at = 100 WHERE id = 's1'");
+    db.run("INSERT INTO flags (id, session_id, t, question) VALUES ('f1', 's0', 500, '')");
+    db.run("INSERT INTO flags (id, session_id, t, question) VALUES ('f2', 's1', 900, '')");
+    db.run("INSERT INTO flags (id, session_id, t, question) VALUES ('f3', 's1', 100, 'What does \"cell\" mean?')");
+    db.run("INSERT INTO flags (id, session_id, t, question, state) VALUES ('f4', 's1', 200, '', 'answered')");
+    expect(openFlags(db).map((f) => [f.id, f.sessionTitle, f.t])).toEqual([
+      ["f3", "Bio", 100],
+      ["f2", "Bio", 900],
+      ["f1", "Older", 500],
+    ]);
+    expect(countOpenFlags(db)).toBe(3);
+  });
+
+  it("groupFlagsBySession keeps the order of the first flag of each session", () => {
+    const flag = (id: string, sessionId: string, title: string) => ({ id, sessionId, sessionTitle: title, startedAt: 0, t: 0, question: "" });
+    const groups = groupFlagsBySession([flag("a", "s2", "Two"), flag("b", "s1", "One"), flag("c", "s2", "Two")]);
+    expect(groups.map((g) => [g.sessionTitle, g.flags.map((f) => f.id)])).toEqual([
+      ["Two", ["a", "c"]],
+      ["One", ["b"]],
+    ]);
+    expect(groupFlagsBySession([])).toEqual([]);
+  });
+
+  it("markAnswered and dismissFlag change only open flags", () => {
+    const { db, deps: d } = setup();
+    askLater(db, d, "s1", 10, "osmosis");
+    askLater(db, d, "s1", 20, "cell");
+    const [first, second] = openFlags(db);
+    markAnswered(db, first!.id);
+    dismissFlag(db, second!.id);
+    expect(db.all<{ state: string }>("SELECT state FROM flags ORDER BY t").map((r) => r.state)).toEqual(["answered", "dismissed"]);
+    dismissFlag(db, first!.id); // already answered: stays answered
+    expect(db.get<{ state: string }>("SELECT state FROM flags WHERE id = ?", [first!.id])?.state).toBe("answered");
+    expect(countOpenFlags(db)).toBe(0);
+  });
+});
+
+describe("saved explanations", () => {
+  it("lists saved explanations newest first, with the first answer and the session title", () => {
+    const { db, deps: d } = setup();
+    const older = startExp(db, { now: () => 100, newId: d.newId }, "s1", 5_000, "mitosis");
+    db.run("UPDATE explanations SET thread = ? WHERE id = ?", [
+      JSON.stringify([
+        { kind: "explain", text: "Cell division.", at: 1, retention: "standard", sentId: "k1" },
+        { kind: "more_detail", text: "More.", at: 2, retention: "standard", sentId: "k2" },
+      ]),
+      older.id,
+    ]);
+    saveExplanation(db, { now: () => 100, newId: d.newId }, older.id);
+    const newer = startExp(db, { now: () => 200, newId: d.newId }, "s1", 9_000, "osmosis");
+    db.run("UPDATE explanations SET thread = ? WHERE id = ?", [
+      JSON.stringify([{ kind: "explain", text: "Water moves across a membrane.", at: 3, retention: "zero", sentId: "k3" }]),
+      newer.id,
+    ]);
+    saveExplanation(db, { now: () => 200, newId: d.newId }, newer.id);
+    startExp(db, { now: () => 300, newId: d.newId }, "s1", 1_000, "unsaved");
+
+    expect(savedExplanations(db)).toEqual([
+      { id: newer.id, sessionId: "s1", sessionTitle: "Bio", t: 9000, term: "osmosis", answer: "Water moves across a membrane.", createdAt: 200 },
+      { id: older.id, sessionId: "s1", sessionTitle: "Bio", t: 5000, term: "mitosis", answer: "Cell division.", createdAt: 100 },
+    ]);
   });
 });

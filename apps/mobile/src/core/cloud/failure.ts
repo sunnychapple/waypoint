@@ -61,7 +61,7 @@ export function failureCopy(failure: CloudFailure): FailureCopy {
     case "busy":
       return { title: "Still working on it", body: "Your last request hasn't finished yet. Try again in a moment.", actions: ["try_again"] };
     case "offline":
-      return { title: "You're offline", body: "Keep this as a question for later, and get the answer when you're back online.", actions: ["ask_later", "try_again"] };
+      return { title: "You're offline", body: "We saved your question — find it in Questions for later.", actions: ["ask_later", "try_again"] };
     case "device":
       return { title: "This iPhone isn't ready", body: "It needs to be set up before it can use credits.", actions: ["approve_device"] };
     case "signed_out":

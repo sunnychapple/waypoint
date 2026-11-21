@@ -14,7 +14,7 @@ import {
   type Explanation,
   type ThreadItem,
 } from "../../core/explain/explanations.ts";
-import { askLater } from "../../core/explain/later.ts";
+import { askLater, markAnswered } from "../../core/explain/later.ts";
 import { logSent, settleFailedSent, settleSent, type InstantSentTask } from "../../core/explain/sent.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
@@ -30,7 +30,7 @@ export type ExplainPhase =
 
 // One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
 // Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
-export function useExplain(sessionId: string, t: number, word: string) {
+export function useExplain(sessionId: string, t: number, word: string, flagId?: string | undefined) {
   const [excerpt] = useState(() => excerptAround(listSegments(getDb(), sessionId), t));
   const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [explanation, setExplanation] = useState<Explanation | null>(null);
@@ -110,7 +110,10 @@ export function useExplain(sessionId: string, t: number, word: string) {
         if (cancelled.current) return null;
         const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
         idRef.current = id;
-        return addToThread(db, id, item);
+        const updated = addToThread(db, id, item);
+        // Explain answered a question from Questions for later: that flag is answered now.
+        if (task === "explain" && flagId !== undefined) markAnswered(db, flagId);
+        return updated;
       });
     } catch {
       delete keys.current[task];

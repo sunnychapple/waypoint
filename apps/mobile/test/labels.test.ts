@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dateLine, greeting, sessionsLabel, usedLabel } from "../src/core/capture/labels.ts";
+import { dateLine, dayLabel, greeting, sessionsLabel, usedLabel } from "../src/core/capture/labels.ts";
 
 const UTC_PLUS_10 = 600;
 const at = (y: number, mo: number, d: number, h: number, mi: number) => Date.UTC(y, mo - 1, d, h, mi) - UTC_PLUS_10 * 60_000;
@@ -11,6 +11,14 @@ describe("labels", () => {
     expect(usedLabel(at(2026, 11, 18, 23, 50), now, UTC_PLUS_10)).toBe("Used yesterday");
     expect(usedLabel(at(2026, 11, 17, 23, 50), now, UTC_PLUS_10)).toBeNull();
     expect(usedLabel(at(2026, 11, 18, 23, 50), now, 0)).toBe("Used today");
+  });
+
+  it("dayLabel says Today and Yesterday by calendar day, then the short day", () => {
+    const now = at(2026, 11, 19, 0, 30);
+    expect(dayLabel(at(2026, 11, 19, 0, 10), now, UTC_PLUS_10)).toBe("Today");
+    expect(dayLabel(at(2026, 11, 18, 23, 50), now, UTC_PLUS_10)).toBe("Yesterday");
+    expect(dayLabel(at(2026, 11, 17, 23, 50), now, UTC_PLUS_10)).not.toBe("Yesterday");
+    expect(dayLabel(at(2026, 11, 17, 23, 50), now, UTC_PLUS_10)).not.toBe("Today");
   });
 
   it("sessionsLabel is singular for one and plural otherwise", () => {

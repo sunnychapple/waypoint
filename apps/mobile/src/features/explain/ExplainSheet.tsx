@@ -7,6 +7,7 @@ import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
 import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useConfig } from "../../platform/config.ts";
+import { useWallet } from "../../platform/wallet.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors, type Colors } from "../../ui/theme.ts";
 import { CloudLine } from "../../ui/CloudLine.tsx";
@@ -15,9 +16,16 @@ import { useExplain } from "./useExplain.ts";
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
 // recording or the session.
 export default function ExplainSheet() {
-  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string }>();
+  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string }>();
   const t = Number(params.t);
-  return <ExplainBody sessionId={params.sessionId} t={Number.isFinite(t) ? t : 0} word={params.word.slice(0, 100)} />;
+  return (
+    <ExplainBody
+      sessionId={params.sessionId}
+      t={Number.isFinite(t) ? t : 0}
+      word={params.word.slice(0, 100)}
+      flagId={typeof params.flagId === "string" && params.flagId !== "" ? params.flagId : undefined}
+    />
+  );
 }
 
 const HEADINGS: Record<InstantSentTask, string> = { explain: "Explanation", more_detail: "More detail", double_check: "Double-check" };
@@ -25,10 +33,11 @@ const RUNNING: Record<InstantSentTask, string> = { explain: "Explaining…", mor
 // Used only until the live price table (M13) has loaded.
 const FALLBACK_PRICES: Record<InstantSentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
 
-function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; word: string }) {
+function ExplainBody({ sessionId, t, word, flagId }: { sessionId: string; t: number; word: string; flagId?: string | undefined }) {
   const colors = useColors();
   const config = useConfig();
-  const model = useExplain(sessionId, t, word);
+  const { wallet } = useWallet();
+  const model = useExplain(sessionId, t, word, flagId);
   const [showSent, setShowSent] = useState(false);
   const { phase, explanation, unsavedItem, offerResearch } = model;
   const thread = explanation?.thread ?? [];
@@ -61,7 +70,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
       </View>
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
         <Title>{word}</Title>
-        <Caption>{`At ${formatOffset(t)} in this recording`}</Caption>
+        <Caption>{`Explain a word here · at ${formatOffset(t)}`}</Caption>
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
@@ -74,6 +83,11 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
               </Pressable>
               {showSent ? <Text style={[styles.sent, { color: colors.ink3, backgroundColor: colors.surface2 }]}>{model.excerpt}</Text> : null}
               <PrimaryButton label={`Explain · ${cost("explain")}`} icon="sparkle.magnifyingglass" onPress={() => void model.run("explain")} />
+              <Caption>
+                {wallet === null
+                  ? `Explain uses ${cost("explain")}.`
+                  : `Explain uses ${cost("explain")}. You have ${creditsLabel(wallet.balance.available)}.`}
+              </Caption>
             </>
           )
         ) : null}
@@ -134,7 +148,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
                   tone={explanation?.saved === true ? "accent" : "surface"}
                   onPress={model.toggleSave}
                 />
-                {explanation?.saved === true ? <Caption>Saved with this recording.</Caption> : null}
+                {explanation?.saved === true ? <Caption>Saved. Find it in Questions for later.</Caption> : null}
               </>
             ) : null}
           </View>
