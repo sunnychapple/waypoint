@@ -80,7 +80,7 @@ export function useUpdateRequired(): boolean {
 }
 
 // Called once in (tabs)/_layout.tsx: refreshes on launch and whenever the app comes back to the front, and opens
-// "Update Waypoint" once per launch when this build is too old.
+// "Update NotePath" once per launch when this build is too old.
 export function useConfigRefresh(): void {
   const updateRequired = useUpdateRequired();
   useEffect(() => {
