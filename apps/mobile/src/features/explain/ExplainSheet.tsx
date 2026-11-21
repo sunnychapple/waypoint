@@ -137,7 +137,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
                 {explanation?.saved === true ? <Caption>Saved with this recording.</Caption> : null}
               </>
             ) : null}
-            </View>
+          </View>
         ) : null}
       </ScrollView>
     </View>

@@ -18,6 +18,11 @@ export function formatOffset(ms: number): string {
 }
 
 // "1 page", "3 pages", "0 pages".
+// "20 Nov" or "Nov 20", in the device's own language and order.
+export function shortDay(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
 export function countLabel(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }

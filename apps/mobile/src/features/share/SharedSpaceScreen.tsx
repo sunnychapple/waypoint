@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { shortDay } from "../../core/format.ts";
 import { dateLine } from "../../core/capture/labels.ts";
 import { getGroup, heldVersions } from "../../core/groups/groups.ts";
 import { canInvite, canLeave, canRemove, memberLabels, type Role } from "../../core/share/spaces.ts";
@@ -13,7 +14,7 @@ import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton,
 import { useColors } from "../../ui/theme.ts";
 
 const ROLE_NAMES: Record<Role, string> = { owner: "Owner", editor: "Editor", viewer: "Viewer" };
-const day = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const day = shortDay;
 
 // A shared space: members, invites (owners), removing members, the security key notice, and leaving (M30a).
 export default function SharedSpaceScreen() {
@@ -88,7 +89,7 @@ export default function SharedSpaceScreen() {
       {changed.map((change) => (
         <View key={change.userId} style={[styles.notice, { backgroundColor: colors.surface2 }]}>
           <Body style={{ fontWeight: "600", color: colors.ink }}>{`Check this is really ${labels.get(change.userId) ?? "A member"}`}</Body>
-          <Caption>They may have a new phone. Their new notes won't show until you check. Ask them to read you this code.</Caption>
+          <Caption>They may have a new phone. Until you check, they can't see new notes here, and you won't see theirs. Ask them to read you this code.</Caption>
           <Caption>Code: {change.code}</Caption>
           <PrimaryButton label="It's them" onPress={() => trust(change)} />
         </View>

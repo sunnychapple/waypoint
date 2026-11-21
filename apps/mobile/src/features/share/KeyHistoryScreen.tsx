@@ -1,5 +1,6 @@
 import { StyleSheet } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { shortDay } from "../../core/format.ts";
 import { getGroup, heldVersions } from "../../core/groups/groups.ts";
 import { useQuery } from "../../platform/db.ts";
 import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
@@ -13,7 +14,7 @@ export default function KeyHistoryScreen() {
     return group === null ? null : { name: group.name, current: group.keyVersion, held: heldVersions(db, groupId) };
   }, groupId);
   if (!data) return <Screen>{null}</Screen>;
-  const day = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const day = shortDay;
   // held is oldest first.
   const periods = data.held.map((version, i) => {
     const next = data.held[i + 1];

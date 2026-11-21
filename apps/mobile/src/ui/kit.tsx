@@ -35,6 +35,12 @@ export function Caption({ children, style }: { children: ReactNode; style?: Styl
   return <Text style={[styles.caption, { color: colors.ink3 }, style]}>{children}</Text>;
 }
 
+// A screen opened from a link or a notification can be the only one in the stack: go home then.
+function goBack(): void {
+  if (router.canGoBack()) router.back();
+  else router.replace("/");
+}
+
 // The round back button at the top left of a pushed screen. Screens that need a different exit pass onPress.
 export function BackButton({ onPress }: { onPress?: () => void }) {
   const colors = useColors();
@@ -42,7 +48,7 @@ export function BackButton({ onPress }: { onPress?: () => void }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Back"
-      onPress={onPress ?? (() => router.back())}
+      onPress={onPress ?? goBack}
       style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
     >
       <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />

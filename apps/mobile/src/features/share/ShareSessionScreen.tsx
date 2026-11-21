@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { LinkPasscodeSchema } from "@waypoint/contracts";
+import { shortDay } from "../../core/format.ts";
 import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share/links.ts";
 import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
@@ -120,7 +121,7 @@ export default function ShareSessionScreen() {
         <Row
           key={link.id}
           title={link.hasPasscode ? "Passcode link" : "Link"}
-          subtitle={link.expiresAt === null ? "No expiry" : `Expires ${new Date(link.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`}
+          subtitle={link.expiresAt === null ? "No expiry" : `Expires ${shortDay(link.expiresAt)}`}
           right={
             <View style={styles.actions}>
               <SecondaryButton label="Share…" icon="square.and.arrow.up" onPress={() => share(link.url)} />
