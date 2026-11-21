@@ -2,9 +2,15 @@ import { WORD_MAX_CHARS } from "@waypoint/contracts";
 import type { SqlDb } from "../db/sql.ts";
 import { lineAt, listSegments } from "../capture/segments.ts";
 
-// Offline (or after a failed answer): keep the question as a flag at that moment.
-export function askLater(db: SqlDb, deps: { newId: () => string }, sessionId: string, t: number, word: string): void {
-  db.run("INSERT INTO flags (id, session_id, t, question) VALUES (?, ?, ?, ?)", [deps.newId(), sessionId, Math.max(0, Math.round(t)), questionFor(word)]);
+// Offline (or after a failed answer): keep the question as a flag at that moment. A word tapped on a page keeps the page.
+export function askLater(db: SqlDb, deps: { newId: () => string }, sessionId: string, t: number, word: string, captureId?: string | null): void {
+  db.run("INSERT INTO flags (id, session_id, t, question, capture_id) VALUES (?, ?, ?, ?, ?)", [
+    deps.newId(),
+    sessionId,
+    Math.max(0, Math.round(t)),
+    questionFor(word),
+    captureId ?? null,
+  ]);
 }
 
 // The question askLater stores for a word.
@@ -18,14 +24,25 @@ export function wordFromQuestion(question: string): string | null {
   return match?.[1] ?? null;
 }
 
-export type OpenFlag = { id: string; sessionId: string; sessionTitle: string; startedAt: number; t: number; question: string };
+// captureId is the page the flag was made on (null for a moment in a recording); pageNumber counts pages from 1.
+export type OpenFlag = {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  startedAt: number;
+  t: number;
+  question: string;
+  captureId: string | null;
+  pageNumber: number | null;
+};
 
 // Open flags, newest session first, then in time order within a session.
 export function openFlags(db: SqlDb): OpenFlag[] {
   return db
-    .all<{ id: string; session_id: string; session_title: string; started_at: number; t: number; question: string }>(
-      `SELECT f.id, f.session_id, s.title AS session_title, s.started_at, f.t, f.question
+    .all<{ id: string; session_id: string; session_title: string; started_at: number; t: number; question: string; capture_id: string | null; page_number: number | null }>(
+      `SELECT f.id, f.session_id, s.title AS session_title, s.started_at, f.t, f.question, f.capture_id, c.position + 1 AS page_number
        FROM flags f JOIN sessions s ON s.id = f.session_id
+       LEFT JOIN captures c ON c.id = f.capture_id
        WHERE f.state = 'open' ORDER BY s.started_at DESC, f.t`,
     )
     .map((row) => ({
@@ -35,6 +52,8 @@ export function openFlags(db: SqlDb): OpenFlag[] {
       startedAt: row.started_at,
       t: row.t,
       question: row.question,
+      captureId: row.capture_id,
+      pageNumber: row.page_number,
     }));
 }
 

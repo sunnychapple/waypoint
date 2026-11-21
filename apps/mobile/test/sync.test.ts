@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { addFlag, addPhoto, finishRecording, savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
+import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { moveSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
+import { askLater } from "../src/core/explain/later.ts";
 import { createSpace, ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { saveCards } from "../src/core/study/cards.ts";
 import {
@@ -597,5 +599,48 @@ describe("applying changes", () => {
     setLastSeq(db, G, 9, 1);
     setLastSeq(db, G, 4, 2);
     expect(lastSeq(db, G)).toBe(9);
+  });
+});
+
+describe("flags on a page (card 4)", () => {
+  // A pages session with one page, and a flag made on that page, on device a.
+  function pageFlag() {
+    const a = device("a");
+    const pages = startPagesSession(a.db, a.deps, a.space.id, "Pages");
+    const [page] = addPages(a.db, a.deps, pages.id, ["p.jpg"]);
+    askLater(a.db, a.deps, pages.id, 0, "osmosis", page);
+    const changes = send(a);
+    return { a, page: page!, session: one(changes, "upsert", "sessions"), capture: one(changes, "upsert", "captures"), flag: one(changes, "upsert", "flags") };
+  }
+
+  it("a flag with a page waits for the page and lands with it", () => {
+    const { flag, page, session, capture } = pageFlag();
+    const b = device("b");
+    expect(applyChange(b.db, G, flag, "dev_a")).toBe("deferred");
+    applyChange(b.db, G, session, "dev_a");
+    applyChange(b.db, G, capture, "dev_a");
+    expect(b.db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags")?.capture_id).toBe(page);
+    expect(count(b, "sync_pending")).toBe(0);
+  });
+
+  it("a flag from an app version before capture_id keeps this iPhone's page", () => {
+    const { flag, page, session, capture } = pageFlag();
+    const b = device("b");
+    applyChange(b.db, G, session, "dev_a");
+    applyChange(b.db, G, capture, "dev_a");
+    applyChange(b.db, G, flag, "dev_a");
+    const { capture_id: _omitted, ...rest } = flag.row;
+    expect(applyChange(b.db, G, { ...flag, at: flag.at + 1, row: { ...rest, question: "Edited" } }, "dev_a")).toBe("applied");
+    expect(b.db.get<{ question: string; capture_id: string | null }>("SELECT question, capture_id FROM flags")).toEqual({ question: "Edited", capture_id: page });
+  });
+
+  it("a flag whose page was deleted here lands with no page", () => {
+    const { flag, session, capture } = pageFlag();
+    const b = device("b");
+    applyChange(b.db, G, session, "dev_a");
+    applyChange(b.db, G, capture, "dev_a");
+    b.db.run("DELETE FROM captures");
+    expect(applyChange(b.db, G, flag, "dev_a")).toBe("applied");
+    expect(b.db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags")?.capture_id).toBeNull();
   });
 });
