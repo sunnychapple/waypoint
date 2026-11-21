@@ -6,7 +6,7 @@ import { toBase64Url } from "../core/jobs/bytes.ts";
 import { getSetting, setSetting } from "../core/db/settings.ts";
 import { expiryFor, linkUrl, markRevoked, recordLink, sharedItem, type LinkExpiry } from "../core/share/links.ts";
 import { failureCopy } from "../core/cloud/failure.ts";
-import { api } from "./api.ts";
+import { api, apiBaseUrl } from "./api.ts";
 import { createGroup } from "./groups.ts";
 import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 import { toFailure } from "./tasks.ts";
@@ -14,7 +14,6 @@ import { toFailure } from "./tasks.ts";
 // The personal group for links from a session whose space does not sync. Made once; never mapped to a space.
 const SHARED_LINKS_KEY = "shared_links_group";
 const SHARED_LINKS_NAME = "Shared links";
-const baseUrl: string = process.env.EXPO_PUBLIC_API_URL ?? "";
 
 // The group a session's link is made for: its space's group when the space syncs (the space is not changed), else the
 // "Shared links" group. Making a link never starts syncing a space.
@@ -45,7 +44,7 @@ export async function createLink(sessionId: string, options: { passcode: string 
   const now = Date.now();
   const expiresAt = expiryFor(options.expiry, now);
   await api.createLink({ id: linkId, group_id: groupId, data: locked.data, passcode: options.passcode, expires_at: expiresAt });
-  const url = linkUrl(baseUrl, linkId, locked.key);
+  const url = linkUrl(apiBaseUrl, linkId, locked.key);
   writeDbIf(generation, (db) => recordLink(db, { id: linkId, sessionId, groupId, url, hasPasscode: options.passcode !== null, expiresAt, createdAt: now }));
   return { url, cut: made.cut };
 }

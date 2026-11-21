@@ -19,3 +19,5 @@ await build({
 });
 copyFileSync("static/viewer.html", "dist/viewer.html");
 copyFileSync("static/viewer.css", "dist/viewer/viewer.css");
+// Served by Workers static assets as response headers for /viewer.html (it bypasses the Worker); not served as a file.
+copyFileSync("static/_headers", "dist/_headers");

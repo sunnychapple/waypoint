@@ -6,6 +6,8 @@ import { notificationFor, PushMessageSchema } from "./messages.ts";
 export const PUSH_QUEUE_NAME = "waypoint-push";
 export const PUSH_TTL_SECONDS = 24 * 60 * 60;
 export const PUSH_RETRY_DELAY_SECONDS = 60;
+// wrangler.jsonc ships this placeholder until the owner sets the real APNs key id.
+export const APNS_KEY_ID_PLACEHOLDER = "XXXXXXXXXX";
 
 export type PushEnv = {
   DB: Db;
@@ -19,6 +21,11 @@ export type PushDeps = { fetch: FetchLike; now: () => number; jwt: (config: Apns
 
 type TokenRow = ApnsDevice & { device_id: string };
 
+// APNs is set up by the owner. Until its key is in place, a push cannot be sent, and retrying would not change that.
+function apnsConfigured(env: PushEnv): boolean {
+  return env.APNS_PRIVATE_KEY.trim() !== "" && env.APNS_KEY_ID.trim() !== "" && env.APNS_KEY_ID !== APNS_KEY_ID_PLACEHOLDER;
+}
+
 export async function handlePushBatch(batch: QueueBatch, env: PushEnv, deps: PushDeps): Promise<void> {
   const config: ApnsConfig = {
     keyId: env.APNS_KEY_ID,
@@ -26,6 +33,7 @@ export async function handlePushBatch(batch: QueueBatch, env: PushEnv, deps: Pus
     privateKeyPem: env.APNS_PRIVATE_KEY,
     topic: env.APNS_TOPIC,
   };
+  let warnedNotConfigured = false;
   for (const message of batch.messages) {
     const parsed = PushMessageSchema.safeParse(message.body);
     if (!parsed.success) {
@@ -42,6 +50,20 @@ export async function handlePushBatch(batch: QueueBatch, env: PushEnv, deps: Pus
               push.device_id,
             );
       const { results } = await query.all<TokenRow>();
+      // Nobody to tell: done, before any APNs key is touched.
+      if (results.length === 0) {
+        message.ack();
+        continue;
+      }
+      if (!apnsConfigured(env)) {
+        // Acked, not retried: a retry cannot succeed until the owner sets APNs, and would only run again for 5 tries.
+        if (!warnedNotConfigured) {
+          console.warn("push: APNs is not configured (APNS_PRIVATE_KEY or APNS_KEY_ID); dropping pushes for this batch");
+          warnedNotConfigured = true;
+        }
+        message.ack();
+        continue;
+      }
       const jwt = await deps.jwt(config);
       const notification = notificationFor(push);
       const expiresAt = Math.floor(deps.now() / 1000) + PUSH_TTL_SECONDS;

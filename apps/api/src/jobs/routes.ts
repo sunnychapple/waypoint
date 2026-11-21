@@ -17,6 +17,9 @@ type JobRoute = { tier: Tier; model: string; retention: "standard" | "zero" };
 // Seconds to wait after JOB_STARTS says no (its period is 60 s, wrangler.jsonc).
 export const JOB_STARTS_RETRY_AFTER = 60;
 
+// How many starts one key may make when earlier ones failed before their row was written (each takes a fresh hold id).
+export const MAX_START_ATTEMPTS = 5;
+
 // The route is picked before anything is held or run. Jobs have a fixed tier per type (routes.fixed); retranscribe
 // always uses Whisper, which is not confirmed zero-retention. null: the user has zero retention on and no route fits.
 export function jobRoute(config: LoadedConfig, type: CreateJobRequest["type"], zeroRetention: boolean): JobRoute | null {
@@ -68,25 +71,35 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
       const existing = await loadJob(db, id, user.id);
       if (existing !== null) return c.json({ job: jobView(existing, now) } satisfies JobResponse, 201);
 
-      const ids = jobWalletIds(user.id, key);
       const wallet = c.env.WALLET.get(c.env.WALLET.idFromName(user.billing_account_id));
       const depth = request.type === "research" ? request.depth : null;
       const minutes = request.type === "retranscribe" ? request.minutes : null;
       const deadline = now + jobTimeLimitMs({ type: request.type, depth, minutes });
-      const held = await wallet.apply({
-        type: "hold",
-        id: ids.hold,
-        hold_id: ids.hold,
-        user_id: user.id,
-        task: request.type,
-        credits,
-        expires_at: deadline + HOLD_MARGIN_MS,
-      });
-      if (!held.ok) {
+      // A start that failed before its row was written released its hold, and a released hold never opens again under
+      // the same id. Then no job exists for this key, so the start is new: it holds under the next id in the series.
+      // command_key keeps the key the hold was made under, so cancel releases the right one.
+      let walletKey = key;
+      let ids = jobWalletIds(user.id, walletKey);
+      for (let attempt = 1; ; attempt++) {
+        const held = await wallet.apply({
+          type: "hold",
+          id: ids.hold,
+          hold_id: ids.hold,
+          user_id: user.id,
+          task: request.type,
+          credits,
+          expires_at: deadline + HOLD_MARGIN_MS,
+        });
+        if (held.ok) break;
         if ("shortfall" in held) throw new InsufficientCredits(held.shortfall);
-        if (held.reason === "hold_closed") throw new ApiFailure("conflict", "request already finished");
         if (held.reason === "hold_in_progress") throw new ApiFailure("conflict", "request in progress", 1);
-        throw new ApiFailure("internal", "something went wrong");
+        if (held.reason !== "hold_closed") throw new ApiFailure("internal", "something went wrong");
+        // Closed: the job exists (the same request run again, its reply lost) or an earlier start failed and left no row.
+        const made = await loadJob(db, id, user.id);
+        if (made !== null) return c.json({ job: jobView(made, now) } satisfies JobResponse, 201);
+        if (attempt >= MAX_START_ATTEMPTS) throw new ApiFailure("internal", "job could not start");
+        walletKey = `${key}:${attempt}`;
+        ids = jobWalletIds(user.id, walletKey);
       }
 
       const input = jobInput(request);
@@ -97,7 +110,7 @@ export function jobsRoutes(deps: { now: () => number; workflows: JobWorkflows })
           .prepare(
             "INSERT INTO jobs (id, user_id, type, state, quoted, route, model, retention, bytes_sent, command_key, device_id, created_at, deadline_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           )
-          .bind(id, user.id, request.type, credits, route.tier, route.model, route.retention, bytesSent, key, device.id, now, deadline)
+          .bind(id, user.id, request.type, credits, route.tier, route.model, route.retention, bytesSent, walletKey, device.id, now, deadline)
           .run();
         const params: JobRunInput = {
           v: 1,

@@ -63,7 +63,7 @@ describe("write job", () => {
     await runWriteJob(writeDeps(f, ai), fakeSteps().steps, f.input);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.model).toBe("@cf/test/strong");
-    expect(calls[0]?.inputs.max_tokens).toBe(2500);
+    expect(calls[0]?.inputs.max_tokens).toBe(4000);
     const messages = calls[0]?.inputs.messages as ChatMessage[];
     expect(messages[0]).toEqual({ role: "system", content: WRITE_SPECS.overview_script?.system });
     expect(messages[1]?.content).toBe(`Source text:\n${TEXT}`);
