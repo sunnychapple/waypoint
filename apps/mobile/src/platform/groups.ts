@@ -322,7 +322,15 @@ export async function recoverGroupKeys(user: string, accountId: string): Promise
       // This group stays without its keys; the others still go on.
     }
   }
+  await readMissingNames(user);
   await notifyGroupsReady();
+}
+
+// A key that arrived before its group's name is readable: the names are read again, once.
+async function readMissingNames(user: string | null): Promise<void> {
+  if (user !== null && listGroups(getDb()).some((g) => g.name === "" && heldGroupKeyVersions(user, g.id).length > 0)) {
+    await refreshGroups().catch(() => undefined);
+  }
 }
 
 // The owner's part of a keys_needed message (a member accepted an invite; platform/sync.ts): the same step syncGroups runs
@@ -393,10 +401,7 @@ async function syncGroups(): Promise<void> {
         // This group is tried again next time.
       }
     }
-    // A key that arrived before its group's name is readable: the names are read again, once.
-    if (user !== null && listGroups(getDb()).some((g) => g.name === "" && heldGroupKeyVersions(user, g.id).length > 0)) {
-      await refreshGroups().catch(() => undefined);
-    }
+    await readMissingNames(user);
     await notifyGroupsReady();
   } catch {
     // Offline or a failed call: the next launch, or the next time the app comes to the front, tries again.

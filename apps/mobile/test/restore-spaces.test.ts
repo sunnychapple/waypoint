@@ -110,6 +110,23 @@ describe("restoreGroupSpaces", () => {
     expect(mappedSpace(db, "grp_long")).toBeUndefined();
   });
 
+  it("never reuses an empty space for a shared group", () => {
+    const db = fresh();
+    const mine = createSpace(db, deps, "Biology");
+    upsertGroup(db, view("grp_shared", { kind: "shared" }), "Biology", 5, ME);
+    expect(restoreGroupSpaces(db, deps, () => true)).toEqual(["grp_shared"]);
+    expect(mappedSpace(db, "grp_shared")).not.toBe(mine.id);
+    expect(spaceNamed(db, "Biology 2")?.id).toBe(mappedSpace(db, "grp_shared"));
+  });
+
+  it("pulls a restored group from the start of its log", () => {
+    const db = fresh();
+    addGroup(db, "grp_bio", "Biology");
+    db.run("INSERT INTO sync_state (group_id, last_seq, pulled_at) VALUES ('grp_bio', 42, 1)");
+    restoreGroupSpaces(db, deps, () => true);
+    expect(db.get("SELECT 1 AS ok FROM sync_state WHERE group_id = 'grp_bio'")).toBeNull();
+  });
+
   it("lands a synced session of the group in the restored space", () => {
     const db = fresh();
     addGroup(db, "grp_bio", "Biology");
