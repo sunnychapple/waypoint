@@ -1,4 +1,14 @@
-import { appendAndNotify, closeTagged, CLOSE_MEMBERSHIP_ENDED, userTag, type PushTarget, type RoomSocket, type SocketHost } from "../../src/room/sockets.ts";
+import {
+  appendAndNotify,
+  broadcast,
+  closeTagged,
+  CLOSE_MEMBERSHIP_ENDED,
+  keysNeededMessage,
+  userTag,
+  type PushTarget,
+  type RoomSocket,
+  type SocketHost,
+} from "../../src/room/sockets.ts";
 import { createRoomStore, type AfterOptions, type NewChange } from "../../src/room/store.ts";
 import { createTestStore } from "./sql.ts";
 
@@ -59,6 +69,7 @@ export function fakeRoomNamespace(now: () => number) {
         append: async (change: NewChange, targets: PushTarget[]) => appendAndNotify(room.store, room.host, change, targets, now()),
         after: async (seq: number, limit: number, options: AfterOptions) => room.store.after(seq, limit, options),
         disconnect: async (userId: string) => closeTagged(room.host, userTag(userId), CLOSE_MEMBERSHIP_ENDED, "membership ended"),
+        keysNeeded: async (groupId: string) => broadcast(room.host, keysNeededMessage(groupId), null, now()),
         fetch: async (url: string, init: RequestInit) => {
           room.fetches.push({ url, headers: new Headers(init.headers) });
           return new Response("forwarded to the room");

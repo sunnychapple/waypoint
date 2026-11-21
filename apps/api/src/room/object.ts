@@ -7,7 +7,9 @@ import {
   CLOSE_REPLACED,
   closeTagged,
   deviceTag,
+  broadcast,
   handleSocketMessage,
+  keysNeededMessage,
   ROOM_DEVICE_HEADER,
   ROOM_UNTIL_HEADER,
   ROOM_USER_HEADER,
@@ -43,6 +45,11 @@ export class GroupRoom extends DurableObject<Env> {
 
   ack(deviceId: string, seq: number): void {
     this.room.ack(deviceId, seq, Date.now());
+  }
+
+  // Tells the group's sockets that a member needs the group key (an invite was accepted). No content, no key.
+  keysNeeded(groupId: string): void {
+    broadcast(this.ctx, keysNeededMessage(groupId), null, Date.now());
   }
 
   // Closes every socket of a user whose membership just ended.

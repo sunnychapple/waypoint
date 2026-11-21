@@ -27,5 +27,8 @@ test("BlobKeySchema accepts a media key and rejects results/x, a 15-character gr
 test("SyncServerMessageSchema parses a changed message and rejects an extra key; SyncAckMessageSchema rejects seq -1", () => {
   expect(SyncServerMessageSchema.safeParse({ type: "changed", last_seq: 3 }).success).toBe(true);
   expect(SyncServerMessageSchema.safeParse({ type: "changed", last_seq: 3, extra: 1 }).success).toBe(false);
+  expect(SyncServerMessageSchema.safeParse({ type: "keys_needed", group_id: "group_aaaaaaaaaaaa" }).success).toBe(true);
+  expect(SyncServerMessageSchema.safeParse({ type: "keys_needed", group_id: "bad id" }).success).toBe(false);
+  expect(SyncServerMessageSchema.safeParse({ type: "keys_needed", group_id: "group_aaaaaaaaaaaa", key: "x" }).success).toBe(false);
   expect(SyncAckMessageSchema.safeParse({ type: "ack", seq: -1 }).success).toBe(false);
 });

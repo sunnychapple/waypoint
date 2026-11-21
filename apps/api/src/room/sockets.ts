@@ -31,6 +31,12 @@ export function changedMessage(lastSeq: number): string {
   return JSON.stringify({ type: "changed", last_seq: lastSeq });
 }
 
+// Sent when a member accepts an invite: the owners' apps wrap the group key for that member's devices. Only the group's
+// id goes; the app checks its own role before it does anything.
+export function keysNeededMessage(groupId: string): string {
+  return JSON.stringify({ type: "keys_needed", group_id: groupId });
+}
+
 function closeQuietly(ws: RoomSocket, code: number, reason: string): void {
   try {
     ws.close(code, reason);
@@ -50,11 +56,15 @@ function endedAt(host: SocketHost, ws: RoomSocket): number | null {
   return Number.isSafeInteger(value) ? value : 0;
 }
 
-// Tells every socket except the writer device's that the room's last seq moved. A socket whose membership end has
-// passed is closed instead.
+// Tells every socket except the writer device's that the room's last seq moved.
 export function broadcastChanged(host: SocketHost, lastSeq: number, writerDeviceId: string, now: number): void {
-  const writer = new Set(host.getWebSockets(deviceTag(writerDeviceId)));
-  const message = changedMessage(lastSeq);
+  broadcast(host, changedMessage(lastSeq), writerDeviceId, now);
+}
+
+// Sends `message` to every socket, except the writer device's (null: to all of them). Sockets whose membership end has
+// passed are closed instead.
+export function broadcast(host: SocketHost, message: string, writerDeviceId: string | null, now: number): void {
+  const writer = new Set(writerDeviceId === null ? [] : host.getWebSockets(deviceTag(writerDeviceId)));
   for (const ws of host.getWebSockets()) {
     if (writer.has(ws)) continue;
     const until = endedAt(host, ws);

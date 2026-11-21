@@ -310,6 +310,18 @@ export async function recoverGroupKeys(user: string, accountId: string): Promise
   }
 }
 
+// The owner's part of a keys_needed message (a member accepted an invite; platform/sync.ts): the same step syncGroups runs
+// for this group. Only an owner wraps keys for another member's devices, so anyone else does nothing. Skipped when the
+// notes changed since it started; ensureKeys' own reads and writes check the notes as well.
+export async function wrapKeysNow(groupId: string): Promise<void> {
+  const user = currentUserId();
+  const generation = dbGeneration();
+  const group = user === null ? null : getGroup(getDb(), groupId);
+  if (user === null || group === null || group.leftAt !== null || group.role !== "owner") return;
+  if (!stillSame(generation)) return;
+  await ensureKeys(groupId, { now: false });
+}
+
 let syncing = false;
 
 // Refreshes the groups and brings their keys up to date. One run at a time; a failed run is retried on the next one,
