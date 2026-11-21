@@ -82,6 +82,8 @@ function Player({ overview, file }: { overview: Overview; file: string }) {
       player.pause();
       return;
     }
+    // At the end of the file play() alone does nothing, so start again from 0:00.
+    if (ended) await player.seekTo(0);
     setEnded(false);
     await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true });
     player.setPlaybackRate(rate);
