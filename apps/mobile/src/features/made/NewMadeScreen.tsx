@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
@@ -8,9 +8,11 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import type { MadeKind } from "../../core/made/made.ts";
 import { keyForRequest } from "../../core/research/research.ts";
+import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useQuote } from "../../platform/jobs.ts";
 import { madeText, startMade } from "../../platform/made.ts";
+import { usePendingText } from "../../platform/pending.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -43,6 +45,8 @@ export default function NewMadeScreen() {
   const params = useLocalSearchParams<{ sessionId?: string; kind?: string }>();
   const sessionId = params.sessionId ?? null;
   const kind = kindOf(params.kind);
+  // Unread pages or a transcript still being made: the text is not complete, so Make waits.
+  const { pending, skipped } = usePendingText(sessionId);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
   const available = (kind !== "mini_app" || miniAppsOn) && (kind !== "diagram" || diagramsOn);
@@ -92,6 +96,15 @@ export default function NewMadeScreen() {
       <Title>{KIND_COPY[kind].title}</Title>
       <Caption>{KIND_COPY[kind].caption}</Caption>
 
+      {pending !== null ? (
+        <View style={styles.waiting}>
+          <ActivityIndicator color={colors.accent} />
+          <Caption>{pendingCopy(pending)}</Caption>
+        </View>
+      ) : null}
+
+      {skipped !== null ? <Caption>{skippedCopy(skipped)}</Caption> : null}
+
       {hasText ? (
         <>
           <Caption>Anything to focus on?</Caption>
@@ -105,9 +118,9 @@ export default function NewMadeScreen() {
           />
           <Caption>{`${focus.length}/${JOB_PROMPT_MAX_CHARS}`}</Caption>
         </>
-      ) : (
+      ) : pending === null ? (
         <Caption>This session has no text yet.</Caption>
-      )}
+      ) : null}
 
       <QuoteBox state={quote} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
       {showSent && hasText ? (
@@ -125,7 +138,7 @@ export default function NewMadeScreen() {
       ) : null}
 
       {!available ? <Caption>{kind === "diagram" ? "Diagrams aren't available yet." : "Mini apps aren't available yet."}</Caption> : null}
-      {hasText && available ? (
+      {hasText && available && pending === null ? (
         <PrimaryButton
           label={price === null ? "Make" : `Make · ${creditsLabel(price)}`}
           icon={KIND_COPY[kind].icon}
@@ -157,6 +170,7 @@ function CircleButton({ label, icon, onPress }: { label: string; icon: "chevron.
 
 const styles = StyleSheet.create({
   topRow: { flexDirection: "row" },
+  waiting: { flexDirection: "row", alignItems: "center", gap: 10 },
   circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   input: { minHeight: 96, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 12, fontSize: 17, lineHeight: 24, textAlignVertical: "top" },
   sent: { maxHeight: 220, borderRadius: 12, padding: 12 },
