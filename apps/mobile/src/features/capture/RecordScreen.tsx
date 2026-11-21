@@ -38,8 +38,9 @@ export default function RecordScreen() {
       router.back();
       return;
     }
-    Alert.alert("Stop and save this recording?", undefined, [
+    Alert.alert("End this recording?", "Discarding deletes its audio, photos and words.", [
       { text: "Keep recording", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: model.discard },
       { text: "Stop and save", onPress: model.stop },
     ]);
   }

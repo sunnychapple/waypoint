@@ -48,6 +48,10 @@ function RootStack() {
         <Stack.Screen name="settings-storage" />
         <Stack.Screen name="settings-cloud" />
         <Stack.Screen name="space-picker" options={{ presentation: "formSheet" }} />
+        <Stack.Screen
+          name="capture"
+          options={{ presentation: "formSheet", sheetAllowedDetents: [0.5, 0.9], sheetInitialDetentIndex: 0, sheetGrabberVisible: true }}
+        />
         <Stack.Screen name="new-space" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="sync-limit" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="space/[id]" options={{ presentation: "card" }} />
