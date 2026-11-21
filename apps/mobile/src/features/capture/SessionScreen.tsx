@@ -342,7 +342,9 @@ function recordingTimeline(db: SqlDb, sessionId: string): TimelineItem[] {
     "SELECT id, t, file FROM captures WHERE session_id = ? AND kind = 'photo' ORDER BY t, id",
     [sessionId],
   );
-  return buildTimeline(lines, parts, parts.slice(1).map((part) => part.startMs), flags, photos);
+  // A part whose length was never measured (0) would make the whole part look like a gap, so its resume is skipped.
+  const resumes = parts.slice(1).filter((part, i) => parts[i]!.durationMs > 0).map((part) => part.startMs);
+  return buildTimeline(lines, parts, resumes, flags, photos);
 }
 
 const OVERVIEW_STATE: Record<OverviewState, string> = {
