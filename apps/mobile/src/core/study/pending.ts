@@ -4,9 +4,10 @@ export type Pending = "pages" | "transcript";
 
 // What a session still waits for before it can be studied: a page not read yet (found_text IS NULL), or a transcript
 // still waiting to be made. Pages come first. Null when everything is read. A page whose read failed holds "" and counts as read.
+// A synced page with no file on this iPhone is not being read here, so nothing waits for it.
 export function pendingText(db: SqlDb, sessionId: string): Pending | null {
   const unread = db.get<{ n: number }>(
-    "SELECT count(*) AS n FROM captures WHERE session_id = ? AND kind = 'page' AND found_text IS NULL",
+    "SELECT count(*) AS n FROM captures WHERE session_id = ? AND kind = 'page' AND found_text IS NULL AND file <> ''",
     [sessionId],
   );
   if ((unread?.n ?? 0) > 0) return "pages";
