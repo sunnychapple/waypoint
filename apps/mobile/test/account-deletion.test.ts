@@ -39,6 +39,12 @@ describe("accountFiles", () => {
     expect(files.files.filter((file) => file.startsWith("overviews/"))).toEqual(["overviews/ok.m4a"]);
   });
 
+  it("names a video overview's mp4 as well as audio", () => {
+    const { files } = accountFiles({ clerkUserId: "user_a", sessionIds: [], overviewFiles: ["overviews/abc-1.mp4", "overviews/abc-1.mov"] });
+    expect(files).toContain("overviews/abc-1.mp4");
+    expect(files).not.toContain("overviews/abc-1.mov");
+  });
+
   it("names nothing else when the person has no notes yet", () => {
     expect(accountFiles({ clerkUserId: "user_a", sessionIds: [], overviewFiles: [] }).sessionIds).toEqual([]);
   });
@@ -48,6 +54,7 @@ describe("deleteAccountFailure", () => {
   it("is offline when Clerk reports a network error, or the request itself failed", () => {
     expect(deleteAccountFailure({ code: "network_error", message: "x" })).toBe("offline");
     expect(deleteAccountFailure(new TypeError("Network request failed"))).toBe("offline");
+    expect(deleteAccountFailure({ code: "clerk_offline" })).toBe("offline");
   });
 
   it("asks the person to sign in again when Clerk wants a fresh verification", () => {

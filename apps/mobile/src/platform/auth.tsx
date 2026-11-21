@@ -166,21 +166,30 @@ export function useDeleteAccount(): () => Promise<DeleteAccountOutcome> {
     } catch {
       // Clerk had already ended the session with the account.
     }
-    await closeUserDb();
-    const local = accountFiles({ clerkUserId, sessionIds, overviewFiles });
-    for (const file of local.files) {
-      try {
-        deleteFile(file);
-      } catch {
-        // Already gone, or in use: the rest are still removed.
-      }
+    // From here the account is gone: whatever fails below, the person ends up signed out, never stuck on the screen.
+    try {
+      await closeUserDb(); // closed (and the Keychain cleared) before any of its files are removed
+    } catch {
+      // closeOpen already dropped it.
     }
-    for (const id of local.sessionIds) {
-      try {
-        deleteSessionFiles(id);
-      } catch {
-        // As above.
+    try {
+      const local = accountFiles({ clerkUserId, sessionIds, overviewFiles });
+      for (const file of local.files) {
+        try {
+          deleteFile(file);
+        } catch {
+          // Already gone, or in use: the rest are still removed.
+        }
       }
+      for (const id of local.sessionIds) {
+        try {
+          deleteSessionFiles(id);
+        } catch {
+          // As above.
+        }
+      }
+    } catch {
+      // Not a plain Clerk id: nothing is removed rather than something else.
     }
     return "deleted";
   };

@@ -52,7 +52,7 @@ export function notesStep(input: { clerkLoaded: boolean; clerkSignedIn: boolean 
 // never the old shared file, is named here. Ids that are not plain ids are dropped, so a name cannot reach outside.
 const DATABASE_SUFFIXES = ["", "-wal", "-shm", "-journal"] as const;
 const SESSION_ID = /^[A-Za-z0-9-]{1,64}$/;
-const OVERVIEW_FILE = /^overviews\/[A-Za-z0-9-]{1,64}\.m4a$/;
+const OVERVIEW_FILE = /^overviews\/[A-Za-z0-9-]{1,64}\.(m4a|mp4)$/;
 
 export type AccountFiles = { files: string[]; sessionIds: string[] };
 
@@ -71,12 +71,12 @@ export function accountFiles(input: { clerkUserId: string; sessionIds: readonly 
 // before a sensitive change), or anything else.
 export type DeleteFailure = "offline" | "reverify" | "failed";
 
-// Reads a Clerk error without depending on its class: a runtime network error has code "network_error"; an API error
+// Reads a Clerk error without depending on its class: a runtime network error has code "network_error" (or "clerk_offline" when Clerk knows the device is offline); an API error
 // carries codes such as "session_reverification_required" in its errors list.
 export function deleteAccountFailure(error: unknown): DeleteFailure {
   if (typeof error !== "object" || error === null) return "failed";
   const { code, errors, message } = error as { code?: unknown; errors?: unknown; message?: unknown };
-  if (code === "network_error") return "offline";
+  if (code === "network_error" || code === "clerk_offline") return "offline";
   const codes = Array.isArray(errors) ? errors.map((item) => (typeof item === "object" && item !== null ? (item as { code?: unknown }).code : undefined)) : [];
   if ([code, ...codes].some((value) => typeof value === "string" && /reverification/i.test(value))) return "reverify";
   if (typeof message === "string" && /network request failed|failed to fetch|offline|no internet/i.test(message)) return "offline";

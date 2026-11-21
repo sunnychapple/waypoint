@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { isDeleteConfirmation, type DeleteFailure } from "../../core/db/users.ts";
-import { useDeleteAccount, useSignOut } from "../../platform/auth.tsx";
+import { useDeleteAccount, useSignOut, type DeleteAccountOutcome } from "../../platform/auth.tsx";
 import { BackButton, Body, Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -27,7 +27,12 @@ export default function DeleteAccountScreen() {
     if (!enabled) return;
     setBusy(true);
     setFailure(null);
-    const outcome = await deleteAccount();
+    let outcome: DeleteAccountOutcome = "failed";
+    try {
+      outcome = await deleteAccount();
+    } catch {
+      outcome = "failed";
+    }
     // On success the session has ended: the sign-in gate takes over and this screen goes with it.
     if (outcome !== "deleted") {
       setFailure(outcome);
