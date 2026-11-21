@@ -9,3 +9,8 @@ export function listSegments(db: SqlDb, sessionId: string): SegmentLine[] {
     [sessionId],
   );
 }
+
+// The transcript line a moment falls in (tStart <= t <= tEnd) that has text, in time order; null when there is none.
+export function lineAt(segments: SegmentLine[], t: number): SegmentLine | null {
+  return segments.find((s) => s.tStart <= t && t <= s.tEnd && s.text.trim() !== "") ?? null;
+}

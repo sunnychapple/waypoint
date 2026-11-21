@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { savedExplanations, type SavedExplanation } from "../../core/explain/explanations.ts";
-import { dismissFlag, groupFlagsBySession, openFlags, wordFromQuestion, type OpenFlag } from "../../core/explain/later.ts";
+import { dismissFlag, groupFlagsBySession, openFlags, phraseForFlag, wordFromQuestion, type OpenFlag } from "../../core/explain/later.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { BackButton, Body, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
@@ -11,7 +11,14 @@ import { useColors, type Colors } from "../../ui/theme.ts";
 // explanations. Opened from Home.
 export default function LaterScreen() {
   const colors = useColors();
-  const data = useQuery((db) => ({ flags: openFlags(db), notes: savedExplanations(db) }));
+  // A flag with no word is explained by the transcript line at its time (null when there is none yet).
+  const data = useQuery((db) => {
+    const flags = openFlags(db);
+    const phrases = Object.fromEntries(
+      flags.filter((flag) => wordFromQuestion(flag.question) === null).map((flag) => [flag.id, phraseForFlag(db, flag)]),
+    );
+    return { flags, phrases, notes: savedExplanations(db) };
+  });
   const groups = groupFlagsBySession(data.flags);
   const empty = data.flags.length === 0 && data.notes.length === 0;
 
@@ -28,7 +35,7 @@ export default function LaterScreen() {
         <View key={group.sessionId} style={styles.section}>
           <Caption>{group.sessionTitle}</Caption>
           {group.flags.map((flag) => (
-            <FlagItem key={flag.id} flag={flag} colors={colors} />
+            <FlagItem key={flag.id} flag={flag} phrase={data.phrases[flag.id] ?? null} colors={colors} />
           ))}
         </View>
       ))}
@@ -45,7 +52,7 @@ export default function LaterScreen() {
   );
 }
 
-function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
+function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | null; colors: Colors }) {
   const word = wordFromQuestion(flag.question);
   return (
     <View style={styles.item}>
@@ -55,7 +62,30 @@ function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
         onPress={() => router.push(`/session/${flag.sessionId}?t=${flag.t}`)}
       />
       <View style={styles.actions}>
-        {word !== null ? (
+        {word === null && phrase !== null ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Get the answer"
+            onPress={() =>
+              router.push({
+                pathname: "/explain",
+                params: { sessionId: flag.sessionId, t: String(flag.t), word: phrase, flagId: flag.id },
+              })
+            }
+            style={styles.action}
+          >
+            <Text style={[styles.link, { color: colors.accent }]}>Get the answer</Text>
+          </Pressable>
+        ) : word === null ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open"
+            onPress={() => router.push(`/session/${flag.sessionId}?t=${flag.t}`)}
+            style={styles.action}
+          >
+            <Text style={[styles.link, { color: colors.accent }]}>Open</Text>
+          </Pressable>
+        ) : (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Explain ${word}`}
@@ -69,7 +99,7 @@ function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
           >
             <Text style={[styles.link, { color: colors.accent }]}>Explain</Text>
           </Pressable>
-        ) : null}
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Dismiss"
