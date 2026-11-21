@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import {
   apnsJwtSource,
   pemToPkcs8,
@@ -8,7 +8,7 @@ import {
   type ApnsDevice,
   type FetchLike,
 } from "../src/push/apns.ts";
-import { handlePushBatch, PUSH_QUEUE_NAME, type PushEnv } from "../src/push/consumer.ts";
+import { APNS_KEY_ID_PLACEHOLDER, handlePushBatch, PUSH_QUEUE_NAME, type PushEnv } from "../src/push/consumer.ts";
 import { notificationFor, PushMessageSchema, sendPush, type PushMessage, type PushQueue } from "../src/push/messages.ts";
 import type { QueueBatch, QueueMessage } from "../src/queue.ts";
 import type { Db } from "../src/storage.ts";
@@ -359,5 +359,64 @@ describe("sendPush", () => {
         GOOD_PUSH,
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("push consumer without APNs configured", () => {
+  // A jwt that fails the test if the consumer tries to sign with a missing key.
+  const noSigning = { fetch: stubFetch().fetch, now: () => NOW, jwt: async () => { throw new Error("signed without APNs"); } };
+
+  test("a user with no tokens is acked without signing, even when APNs is not set up", async () => {
+    const db = await dbWithTokens([]);
+    const { message, state } = queued(SAMPLE);
+    await handlePushBatch(batchOf(message), { ...envOf(db), APNS_PRIVATE_KEY: "" }, noSigning);
+    expect(state).toEqual({ acked: true, retries: [] });
+  });
+
+  test("an empty APNS_PRIVATE_KEY with a user who has tokens is acked once with a warning: no send, no sign, no retry", async () => {
+    const db = await dbWithTokens([{ user: "u1", device: "d1", token: T1, environment: "sandbox" }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const stub = stubFetch();
+      const first = queued(SAMPLE);
+      const second = queued({ ...SAMPLE, ref: "job_2" });
+      await handlePushBatch(batchOf(first.message, second.message), { ...envOf(db), APNS_PRIVATE_KEY: "" }, { ...noSigning, fetch: stub.fetch });
+      expect(first.state).toEqual({ acked: true, retries: [] });
+      expect(second.state).toEqual({ acked: true, retries: [] });
+      expect(stub.calls).toHaveLength(0);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("the placeholder APNS_KEY_ID is treated as not configured: acked with a warning, no send", async () => {
+    const db = await dbWithTokens([{ user: "u1", device: "d1", token: T1, environment: "production" }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const stub = stubFetch();
+      const { message, state } = queued(SAMPLE);
+      await handlePushBatch(batchOf(message), { ...envOf(db), APNS_KEY_ID: APNS_KEY_ID_PLACEHOLDER }, { ...noSigning, fetch: stub.fetch });
+      expect(state).toEqual({ acked: true, retries: [] });
+      expect(stub.calls).toHaveLength(0);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("with APNs configured, the same user's push is still sent and acked", async () => {
+    const db = await dbWithTokens([{ user: "u1", device: "d1", token: T1, environment: "sandbox" }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const stub = stubFetch();
+      const { message, state } = queued(SAMPLE);
+      await handlePushBatch(batchOf(message), envOf(db), depsOf(stub.fetch));
+      expect(stub.calls).toHaveLength(1);
+      expect(state).toEqual({ acked: true, retries: [] });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

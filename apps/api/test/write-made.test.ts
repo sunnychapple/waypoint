@@ -23,7 +23,7 @@ const CASES: {
 }[] = [
   {
     type: "video_slides",
-    maxTokens: 3000,
+    maxTokens: 4000,
     valid: { title: "Osmosis", slides: [SLIDE, SLIDE, SLIDE] },
     invalid: { title: "Osmosis", slides: [SLIDE, SLIDE] },
     schema: VideoSlidesResultSchema,
@@ -44,7 +44,7 @@ const CASES: {
   },
   {
     type: "practice",
-    maxTokens: 1500,
+    maxTokens: 2500,
     valid: { title: "Osmosis", questions: [MC, SA, MC] },
     invalid: { title: "Osmosis", questions: [{ ...SA, kind: "essay" }, SA, MC] },
     schema: PracticeSetResultSchema,

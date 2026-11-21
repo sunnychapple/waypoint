@@ -397,14 +397,61 @@ describe("POST /v1/jobs", () => {
     expect(await jobRow(w, await jobIdFor("u1", KEY))).toBeNull();
   });
 
-  test("a hold already used and released for this key, with no row, gives 409 request already finished", async () => {
+  // A start that failed before its row was written: its hold was released, and no job exists for the key.
+  function releasedStart(w: World, walletKey: string): void {
+    const hold = `job:u1:${walletKey}`;
+    w.store.apply({ type: "hold", id: hold, hold_id: hold, user_id: "u1", task: "overview_script", credits: 40, expires_at: JOB_NOW + 9_000_000 }, JOB_NOW);
+    w.store.apply({ type: "release", id: `job_release:u1:${walletKey}`, hold_id: hold }, JOB_NOW);
+  }
+
+  test("a start that failed before its row was written runs as new under the next hold id, and its row keeps that id", async () => {
     const w = await makeJobsWorld();
-    w.store.apply({ type: "hold", id: `job:u1:${KEY}`, hold_id: `job:u1:${KEY}`, user_id: "u1", task: "overview_script", credits: 40, expires_at: JOB_NOW + 9_000_000 }, JOB_NOW);
-    w.store.apply({ type: "release", id: `job_release:u1:${KEY}`, hold_id: `job:u1:${KEY}` }, JOB_NOW);
+    releasedStart(w, KEY);
     const res = await postJob(w, OVERVIEW);
-    expect(res.status).toBe(409);
-    expect(await errorOf(res)).toEqual({ code: "conflict", message: "request already finished", retry_after: null });
+    expect(res.status).toBe(201);
+    expect(JobResponseSchema.parse(await res.json()).job.state).toBe("queued");
+    const params: JobRunInput = w.workflow.created[0]!.params;
+    expect(params).toMatchObject({
+      hold_id: `job:u1:${KEY}:1`,
+      settle_id: `job_settle:u1:${KEY}:1`,
+      release_id: `job_release:u1:${KEY}:1`,
+    });
+    expect(holdCommands(w).at(-1)).toMatchObject({ id: `job:u1:${KEY}:1`, credits: 40 });
+    expect(await jobRow(w, await jobIdFor("u1", KEY))).toMatchObject({ state: "queued", command_key: `${KEY}:1` });
+  });
+
+  test("an input upload that fails (no row written), then the same key again, starts the job", async () => {
+    const w = await makeJobsWorld();
+    w.bucket.failPut = true;
+    expect((await postJob(w, OVERVIEW)).status).toBe(500);
     expect(await jobRow(w, await jobIdFor("u1", KEY))).toBeNull();
+    w.bucket.failPut = false;
+    const res = await postJob(w, OVERVIEW);
+    expect(res.status).toBe(201);
+    expect(JobResponseSchema.parse(await res.json()).job.state).toBe("queued");
+    expect(w.workflow.created).toHaveLength(1);
+    expect(w.workflow.created[0]!.params).toMatchObject({ hold_id: `job:u1:${KEY}:1` });
+  });
+
+  test("the same key again after a successful start returns that job, with no new hold", async () => {
+    const w = await makeJobsWorld();
+    await postJob(w, OVERVIEW);
+    const holds = holdCommands(w).length;
+    const res = await postJob(w, OVERVIEW);
+    expect(res.status).toBe(201);
+    expect(holdCommands(w)).toHaveLength(holds);
+    expect(w.workflow.created).toHaveLength(1);
+  });
+
+  test("starts that failed under every id the key can take give 500 job could not start, with no row", async () => {
+    const w = await makeJobsWorld();
+    releasedStart(w, KEY);
+    for (let n = 1; n <= 4; n++) releasedStart(w, `${KEY}:${n}`);
+    const res = await postJob(w, OVERVIEW);
+    expect(res.status).toBe(500);
+    expect(await errorOf(res)).toEqual({ code: "internal", message: "job could not start", retry_after: null });
+    expect(await jobRow(w, await jobIdFor("u1", KEY))).toBeNull();
+    expect(w.workflow.created).toHaveLength(0);
   });
 
   test("a request without Waypoint headers gives 401 device signature required", async () => {

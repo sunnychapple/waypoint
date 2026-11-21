@@ -46,7 +46,8 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
       "Reply with one JSON object and nothing else:",
       '{"title":"<at most 120 characters>","lines":[{"host":"A"|"B","text":"<one turn, at most 1200 characters>"}]}',
     ].join("\n"),
-    maxTokens: 2_500,
+    // 1,200 to 1,500 words is about 2,000 tokens of speech; the JSON, quotes and escapes add the rest.
+    maxTokens: 4_000,
     user: userMessage,
     result: fromDraft(OverviewScriptDraftSchema),
   },
@@ -58,7 +59,8 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
       "Reply with one JSON object and nothing else:",
       '{"title":"<at most 120 characters>","slides":[{"heading":"<at most 80>","bullets":["<at most 120>"],"narration":"<at most 700>"}]}',
     ].join("\n"),
-    maxTokens: 3_000,
+    // 10 slides at the schema's limits (80 + 5x120 + 700 characters each) is about 3,500 tokens of JSON.
+    maxTokens: 4_000,
     user: userMessage,
     result: fromDraft(VideoSlidesDraftSchema),
   },
@@ -97,7 +99,8 @@ export const WRITE_SPECS: Partial<Record<JobRunInput["type"], WriteSpec>> = {
       "from the source text. Reply with one JSON object and nothing else:",
       '{"title":"<at most 120 characters>","questions":[{"kind":"multiple_choice","prompt":"...","choices":["..."],"answer":<index of the right choice, from 0>,"explanation":"..."},{"kind":"short_answer","prompt":"...","answer":"...","explanation":"..."}]}',
     ].join("\n"),
-    maxTokens: 1_500,
+    // 10 questions with choices and explanations run to about 2,000 tokens of JSON.
+    maxTokens: 2_500,
     user: userMessage,
     result: fromDraft(PracticeSetDraftSchema),
   },
