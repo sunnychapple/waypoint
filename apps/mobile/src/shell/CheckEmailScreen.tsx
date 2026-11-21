@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEmailCode } from "../platform/auth.tsx";
@@ -13,21 +13,30 @@ export default function CheckEmailScreen() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false); // synchronous, so autofill or paste firing the change twice submits once
 
   // Six digits submit by themselves.
   async function verify(digits: string) {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    const result = await emailCode.verify(mode, digits);
-    setBusy(false);
+    const result = await emailCode.verify(mode, digits).finally(() => {
+      busyRef.current = false;
+      setBusy(false);
+    });
     if (result === "wrong_code") setMessage("That code didn't work. Check it and try again.");
     else if (result === "error") setMessage("Something went wrong. Check your connection and try again.");
     else setMessage(null);
   }
 
   async function resend() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    const result = await emailCode.send(params.email);
-    setBusy(false);
+    const result = await emailCode.send(params.email).finally(() => {
+      busyRef.current = false;
+      setBusy(false);
+    });
     if (result === "error") {
       setMessage("Something went wrong. Check your connection and try again.");
       return;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Linking,
@@ -28,17 +28,21 @@ export default function SignInScreen() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false); // synchronous, so Return plus a tap on Send code cannot send twice
 
   async function sendCode() {
-    if (sending) return;
+    if (sendingRef.current) return;
     const address = normalizeEmail(email);
     if (!address) {
       setMessage("Enter an email address like name@example.com");
       return;
     }
+    sendingRef.current = true;
     setSending(true);
-    const result = await emailCode.send(address);
-    setSending(false);
+    const result = await emailCode.send(address).finally(() => {
+      sendingRef.current = false;
+      setSending(false);
+    });
     if (result === "error") {
       setMessage("Couldn't send the code. Check your connection and try again.");
       return;
