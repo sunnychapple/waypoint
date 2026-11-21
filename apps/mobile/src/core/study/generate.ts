@@ -1,4 +1,4 @@
-import { cleanCards, cleanQuiz, type CardDraft, type QuizDraft } from "./drafts.ts";
+import { cleanCards, cleanQuiz, type CardDraft, type QuizDraft, type SourcedQuizDraft } from "./drafts.ts";
 
 export type ModelPort = {
   contextSize(): number;
@@ -140,13 +140,32 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
   return out;
 }
 
+// Words only, lower case: curly quotes, dashes, punctuation and line breaks all become single spaces, so a real quote matches the page.
+function words(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+
+// Grounded when the evidence appears in the group text (each side of an "…" gap on its own) and the answer appears in the evidence.
+// Matching is by whole words, so "a" does not match inside "cat". An answer that only appears elsewhere on the page does not count.
+function grounded(quiz: SourcedQuizDraft, groupText: string): boolean {
+  const text = words(groupText);
+  const answer = words(quiz.answer);
+  const evidence = words(quiz.evidence);
+  if (answer.trim() === "" || evidence.trim() === "" || !evidence.includes(answer)) return false;
+  const pieces = quiz.evidence.split(/…|\.{3}/).map(words).filter((piece) => piece.trim() !== "");
+  return pieces.length > 0 && pieces.every((piece) => text.includes(piece));
+}
+
 export async function makeQuizFromUnits(port: ModelPort, units: Unit[], count: number): Promise<QuizDraft[]> {
   const call = async (text: string, n: number) => cleanQuiz(await port.makeQuiz(text, n), n);
   const out: QuizDraft[] = [];
   for (const { group, want } of plan(port, units, count)) {
     if (out.length >= count) break;
+    const groupText = joinText(group);
     for (const quiz of await askGroup(group, want, call)) {
-      if (out.length < count) out.push(quiz);
+      if (out.length >= count) break;
+      if (!grounded(quiz, groupText)) continue;
+      out.push({ question: quiz.question, choices: quiz.choices, answerIndex: quiz.answerIndex, why: quiz.why });
     }
   }
   return out;

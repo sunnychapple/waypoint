@@ -2,10 +2,18 @@ import { z } from "zod";
 
 export type CardDraft = { kind: "term" | "problem"; front: string; back: string };
 export type QuizDraft = { question: string; choices: [string, string, string, string]; answerIndex: 0 | 1 | 2 | 3; why: string };
+// A quiz draft plus the text the model quoted as evidence and the answer as written, for the grounding check.
+export type SourcedQuizDraft = QuizDraft & { answer: string; evidence: string };
 export type HelpDraft = { steps: { title: string; detail: string }[]; answer: string };
 
 const cardSchema = z.object({ kind: z.enum(["term", "problem"]), front: z.string(), back: z.string() });
-const quizSchema = z.object({ question: z.string(), choices: z.array(z.string()), answerIndex: z.number(), why: z.string() });
+const quizSchema = z.object({
+  question: z.string(),
+  evidence: z.string(),
+  answer: z.string(),
+  wrongChoices: z.array(z.string()),
+  why: z.string(),
+});
 const helpSchema = z.object({ steps: z.array(z.unknown()), answer: z.string() });
 const stepSchema = z.object({ title: z.string(), detail: z.string() });
 
@@ -58,18 +66,39 @@ export function cleanCards(raw: unknown, max: number): CardDraft[] {
   return out;
 }
 
-export function cleanQuiz(raw: unknown, count: number): QuizDraft[] {
+// The code, not the model, sets the answer position: `random` picks it (0 to 3), and the wrong choices fill the other slots in order.
+export function cleanQuiz(raw: unknown, count: number, random: () => number = Math.random): SourcedQuizDraft[] {
   const list: unknown[] = Array.isArray(raw) ? raw : [];
-  const out: QuizDraft[] = [];
+  const out: SourcedQuizDraft[] = [];
   for (const item of list) {
     if (out.length >= count) break;
     const parsed = quizSchema.safeParse(item);
     if (!parsed.success) continue;
     const question = collapse(parsed.data.question);
-    const answerIndex = toIndex(parsed.data.answerIndex);
-    const choices = fourChoices(parsed.data.choices.map(collapse));
-    if (question === "" || answerIndex === null || choices === null) continue;
-    out.push({ question, choices, answerIndex, why: collapse(parsed.data.why) });
+    const answer = collapse(parsed.data.answer);
+    if (question === "" || answer === "") continue;
+    const seen = new Set<string>([sameKey(answer)]);
+    const wrong: string[] = [];
+    for (const text of parsed.data.wrongChoices) {
+      const choice = collapse(text);
+      const key = sameKey(choice);
+      if (choice === "" || seen.has(key)) continue;
+      seen.add(key);
+      wrong.push(choice);
+      if (wrong.length === 3) break;
+    }
+    if (wrong.length < 3) continue;
+    const answerIndex = toIndex(Math.min(3, Math.max(0, Math.floor(random() * 4)))) ?? 0;
+    const choices = fourChoices([...wrong.slice(0, answerIndex), answer, ...wrong.slice(answerIndex)]);
+    if (choices === null) continue;
+    out.push({
+      question,
+      choices,
+      answerIndex,
+      why: collapse(parsed.data.why),
+      answer,
+      evidence: collapse(parsed.data.evidence),
+    });
   }
   return out;
 }

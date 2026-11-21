@@ -4,8 +4,9 @@ import { cleanCards, cleanHelp, cleanQuiz } from "../src/core/study/drafts.ts";
 const term = (front: string, back = "A meaning.") => ({ kind: "term", front, back });
 const quiz = (overrides: Record<string, unknown> = {}) => ({
   question: "Which is right?",
-  choices: ["one", "two", "three", "four"],
-  answerIndex: 1,
+  evidence: "Two is right.",
+  answer: "two",
+  wrongChoices: ["one", "three", "four"],
   why: "Two is right.",
   ...overrides,
 });
@@ -69,30 +70,48 @@ describe("cleanQuiz", () => {
     expect(cleanQuiz("nope", 5)).toEqual([]);
   });
 
-  it("keeps a valid question with its choices, answer index and reason", () => {
-    expect(cleanQuiz([quiz()], 5)).toEqual([
-      { question: "Which is right?", choices: ["one", "two", "three", "four"], answerIndex: 1, why: "Two is right." },
+  it("keeps a valid question with four choices, the answer at the position random picks", () => {
+    expect(cleanQuiz([quiz()], 5, () => 0.3)).toEqual([
+      { question: "Which is right?", choices: ["one", "two", "three", "four"], answerIndex: 1, why: "Two is right.", answer: "two", evidence: "Two is right." },
     ]);
   });
 
-  it("drops a question without exactly four choices", () => {
-    expect(cleanQuiz([quiz({ choices: ["a", "b", "c"] }), quiz({ choices: ["a", "b", "c", "d", "e"] }), quiz()], 5)).toHaveLength(1);
+  it("puts the answer at position 0 when random gives 0", () => {
+    const [out] = cleanQuiz([quiz()], 5, () => 0);
+    expect(out).toMatchObject({ choices: ["two", "one", "three", "four"], answerIndex: 0 });
   });
 
-  it("drops a question whose choices are not distinct", () => {
-    expect(cleanQuiz([quiz({ choices: ["a", "a", "c", "d"] })], 5)).toEqual([]);
+  it("puts the answer at position 3 when random is just under 1", () => {
+    const [out] = cleanQuiz([quiz()], 5, () => 0.99);
+    expect(out).toMatchObject({ choices: ["one", "three", "four", "two"], answerIndex: 3 });
   });
 
-  it("drops a question with an empty choice", () => {
-    expect(cleanQuiz([quiz({ choices: ["a", "  ", "c", "d"] })], 5)).toEqual([]);
+  it("removes a wrong choice that equals the answer, ignoring case and punctuation", () => {
+    const [out] = cleanQuiz([quiz({ wrongChoices: ["TWO.", "one", "three", "four"] })], 5, () => 0);
+    expect(out).toMatchObject({ choices: ["two", "one", "three", "four"], answerIndex: 0 });
   });
 
-  it("drops a question whose answer index is not 0 to 3", () => {
-    expect(cleanQuiz([quiz({ answerIndex: 4 }), quiz({ answerIndex: -1 }), quiz({ answerIndex: 1.5 }), quiz({ answerIndex: 3 })], 5)).toHaveLength(1);
+  it("removes duplicate wrong choices and keeps the first three", () => {
+    const [out] = cleanQuiz([quiz({ wrongChoices: ["one", "One", "three", "four", "five"] })], 5, () => 0);
+    expect(out).toMatchObject({ choices: ["two", "one", "three", "four"] });
+  });
+
+  it("drops a question with fewer than three usable wrong choices", () => {
+    expect(cleanQuiz([quiz({ wrongChoices: ["one", "two", "three"] })], 5)).toEqual([]);
+    expect(cleanQuiz([quiz({ wrongChoices: ["one", "  ", "three"] })], 5)).toEqual([]);
+    expect(cleanQuiz([quiz({ wrongChoices: [] })], 5)).toEqual([]);
+  });
+
+  it("drops a question with an empty answer", () => {
+    expect(cleanQuiz([quiz({ answer: " " })], 5)).toEqual([]);
   });
 
   it("drops a question with an empty question text", () => {
     expect(cleanQuiz([quiz({ question: " " })], 5)).toEqual([]);
+  });
+
+  it("drops items that do not have the expected shape", () => {
+    expect(cleanQuiz([{ question: "Q", answer: "a", why: "b" }, quiz()], 5, () => 0)).toHaveLength(1);
   });
 
   it("returns at most count questions", () => {

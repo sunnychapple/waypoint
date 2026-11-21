@@ -23,10 +23,12 @@ Do not add facts that are not in the text. Write short, plain sentences at the r
 
 @Generable struct QuizDraft {
   var question: String
-  @Guide(description: "Exactly four answer choices, only one of them right")
-  var choices: [String]
-  @Guide(description: "Position of the right choice, from 0 to 3")
-  var answerIndex: Int
+  @Guide(description: "The exact words from the text that answer the question, copied word for word")
+  var evidence: String
+  @Guide(description: "The right answer, short, taken from the evidence")
+  var answer: String
+  @Guide(description: "Three wrong answers that sound possible but are not supported by the text, each different from the right answer")
+  var wrongChoices: [String]
   @Guide(description: "One sentence saying why the right answer is right")
   var why: String
 }
