@@ -129,7 +129,7 @@ describe("lineAt", () => {
     expect(lineAt(lines, 2_500)?.text).toBe("one");
   });
   it("null when the nearest line ended more than 10 s before, or there are no lines", () => {
-    expect(lineAt(lines, 11_001)).toBeNull();
+    expect(lineAt(lines, 14_000)?.text).toBe("two");
     expect(lineAt(lines, 14_001)).toBeNull();
     expect(lineAt([], 0)).toBeNull();
   });
