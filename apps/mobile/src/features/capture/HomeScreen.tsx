@@ -79,7 +79,7 @@ export default function HomeScreen() {
           icon="mic.fill"
           fill={colors.rec}
           ink={colors.onRec}
-          onPress={() => router.push("/record")}
+          onPress={() => router.push("/recording")}
         />
         <StartTile
           label="Snap pages"

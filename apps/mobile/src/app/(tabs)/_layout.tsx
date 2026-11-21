@@ -51,7 +51,7 @@ export default function TabsLayout() {
         listeners={{
           tabPress: (event) => {
             event.preventDefault();
-            router.push("/record");
+            router.push("/recording");
           },
         }}
       />
