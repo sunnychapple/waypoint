@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Clipboard, StyleSheet, TextInput, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { StyleSheet, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { inviteTokenFromText } from "../../core/share/invite-link.ts";
 import { BackButton, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -14,7 +15,7 @@ export default function PasteInviteScreen() {
 
   async function paste(): Promise<void> {
     try {
-      const copied = await Clipboard.getString();
+      const copied = await Clipboard.getStringAsync();
       setText(copied.trim());
       setError(null);
     } catch {
