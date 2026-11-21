@@ -80,6 +80,24 @@ export function renameSpace(db: SqlDb, id: string, name: string): void {
   db.run("UPDATE spaces SET name = ? WHERE id = ?", [trimmed, id]);
 }
 
+// Deletes a space that is empty and private. Throws for the default space, a space with sessions, and a space that
+// syncs or is shared (its group keeps it, and sync does not carry a space delete). "Saving to" moves to the default.
+export function deleteSpace(db: SqlDb, id: string): void {
+  db.transaction(() => {
+    const space = getSpace(db, id);
+    if (!space) throw new Error(`no such space: ${id}`);
+    if (space.isDefault) throw new Error("the default space cannot be deleted");
+    if (space.sessionCount > 0) throw new Error("the space has sessions");
+    if (db.get("SELECT 1 AS ok FROM space_groups WHERE space_id = ?", [id]) !== null) throw new Error("the space is synced or shared");
+    if (getSetting(db, SAVING_TO_KEY) === id) {
+      const home = listSpaces(db).find((s) => s.isDefault);
+      if (!home) throw new Error("no default space; call ensureDefaultSpace first");
+      setSetting(db, SAVING_TO_KEY, home.id);
+    }
+    db.run("DELETE FROM spaces WHERE id = ?", [id]);
+  });
+}
+
 export function createSpace(db: SqlDb, deps: Deps, name: string): Space {
   const trimmed = checkName(db, name, null);
   const id = deps.newId();

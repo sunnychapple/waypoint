@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createSpace,
+  deleteSpace,
   ensureDefaultSpace,
   freeSpaceName,
   getSavingTo,
+  getSpace,
   listSpaces,
   renameSpace,
   setSavingTo,
   SpaceNameError,
 } from "../src/core/db/spaces.ts";
 import { migrate } from "../src/core/db/migrate.ts";
-import { setSetting } from "../src/core/db/settings.ts";
+import { getSetting, setSetting } from "../src/core/db/settings.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
@@ -87,6 +89,18 @@ describe("spaces", () => {
     expect(nameError(() => renameSpace(db, space.id, "Biology"))).toBe("no error");
   });
 
+  it("renameSpace throws empty for a blank name and keeps the old one", () => {
+    const space = createSpace(db, deps(), "Biology");
+    expect(nameError(() => renameSpace(db, space.id, "  "))).toBe("empty");
+    expect(listSpaces(db).map((s) => s.name)).toEqual(["Biology"]);
+  });
+
+  it("renameSpace accepts a new case of its own name", () => {
+    const space = createSpace(db, deps(), "biology");
+    renameSpace(db, space.id, "Biology");
+    expect(getSpace(db, space.id)?.name).toBe("Biology");
+  });
+
   it("renameSpace throws too_long for a name over 60 characters", () => {
     const space = createSpace(db, deps(), "Biology");
     expect(nameError(() => renameSpace(db, space.id, "a".repeat(61)))).toBe("too_long");
@@ -133,5 +147,58 @@ describe("spaces", () => {
   it("setSavingTo throws for a space that does not exist", () => {
     ensureDefaultSpace(db, deps());
     expect(() => setSavingTo(db, "nope", 5000)).toThrow();
+  });
+
+  it("deleteSpace removes an empty private space", () => {
+    ensureDefaultSpace(db, deps());
+    const bio = createSpace(db, deps(), "Biology");
+    deleteSpace(db, bio.id);
+    expect(listSpaces(db).map((s) => s.name)).toEqual(["My notes"]);
+  });
+
+  it("deleteSpace throws for a space with sessions", () => {
+    ensureDefaultSpace(db, deps());
+    const bio = createSpace(db, deps(), "Biology");
+    db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at) VALUES ('a', ?, 'pages', 't', 'saved', 1)", [bio.id]);
+    expect(() => deleteSpace(db, bio.id)).toThrow("sessions");
+    expect(getSpace(db, bio.id)).not.toBeNull();
+  });
+
+  it("deleteSpace throws for the default space", () => {
+    const home = ensureDefaultSpace(db, deps());
+    expect(() => deleteSpace(db, home.id)).toThrow("default");
+    expect(getSpace(db, home.id)).not.toBeNull();
+  });
+
+  it("deleteSpace throws for a space that syncs or is shared, even when empty", () => {
+    ensureDefaultSpace(db, deps());
+    const bio = createSpace(db, deps(), "Biology");
+    db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('g1', 'personal', 'owner', 1, 0)");
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, 'g1')", [bio.id]);
+    expect(() => deleteSpace(db, bio.id)).toThrow("synced or shared");
+    expect(getSpace(db, bio.id)).not.toBeNull();
+  });
+
+  it("deleteSpace throws for a space that does not exist", () => {
+    ensureDefaultSpace(db, deps());
+    expect(() => deleteSpace(db, "nope")).toThrow("no such space");
+  });
+
+  it("deleteSpace moves Saving to back to the default space when it was the chosen one", () => {
+    const home = ensureDefaultSpace(db, deps());
+    const bio = createSpace(db, deps(), "Biology");
+    setSavingTo(db, bio.id, 5000);
+    deleteSpace(db, bio.id);
+    expect(getSavingTo(db).id).toBe(home.id);
+    expect(getSetting(db, "saving_to")).toBe(home.id);
+  });
+
+  it("deleteSpace leaves Saving to alone when another space was chosen", () => {
+    ensureDefaultSpace(db, deps());
+    const bio = createSpace(db, deps(), "Biology");
+    const chem = createSpace(db, deps(), "Chem");
+    setSavingTo(db, chem.id, 5000);
+    deleteSpace(db, bio.id);
+    expect(getSavingTo(db).id).toBe(chem.id);
   });
 });
