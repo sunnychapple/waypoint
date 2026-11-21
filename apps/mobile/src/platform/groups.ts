@@ -42,7 +42,8 @@ import {
   type StoredGroup,
 } from "../core/groups/groups.ts";
 import { isFallbackSpaceName } from "../core/share/spaces.ts";
-import { api } from "./api.ts";
+import { inviteLink } from "../core/share/invite-link.ts";
+import { api, apiBaseUrl } from "./api.ts";
 import { currentUserId, useDeviceStatus } from "./device.ts";
 import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 
@@ -237,12 +238,12 @@ export async function createGroup(kind: StoredGroup["kind"], name: string): Prom
   return id;
 }
 
-// A new invite: a random token shown once as waypoint://invite/<token>. The server gets only its SHA-256 (hex).
+// A new invite: a random token shown once, as the https link <API host>/i/<token> (it opens the app). The server gets only its SHA-256 (hex).
 export async function createInvite(groupId: string, role: Role, historyFrom: number, endsAt: number | null): Promise<string> {
   const token = toBase64Url(getRandomBytes(32));
   const tokenHash = await digestStringAsync(CryptoDigestAlgorithm.SHA256, token);
   await api.createInvite(groupId, { token_hash: tokenHash, role, history_from: historyFrom, ends_at: endsAt });
-  return `waypoint://invite/${token}`;
+  return inviteLink(apiBaseUrl, token);
 }
 
 // Joins with an invite token. Only the server step is here: the caller maps the group locally at once.
