@@ -169,7 +169,8 @@ export default function QuizScreen() {
     const after = pick(quiz, index);
     const question = quiz.questions[quiz.index];
     if (!retrying && question !== undefined && after.missed.length > quiz.missed.length) {
-      setAdded((count) => count + saveMiss(sessionId, question));
+      const saved = saveMiss(sessionId, question);
+      setAdded((count) => count + saved);
     }
     setQuiz(after);
   }
