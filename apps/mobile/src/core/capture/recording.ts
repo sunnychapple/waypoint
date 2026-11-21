@@ -1,6 +1,10 @@
+import { shortDay } from "../format.ts";
 import type { SqlDb } from "../db/sql.ts";
-import { createSession, type SessionRow } from "./sessions.ts";
+import { titleFromText } from "./pages.ts";
+import { createSession, getSession, renameSession, type SessionRow } from "./sessions.ts";
 import { partsNeedingTranscription } from "./transcript.ts";
+
+export const DEFAULT_RECORDING_TITLE = "New recording";
 
 type Deps = { now: () => number; newId: () => string };
 
@@ -8,12 +12,32 @@ type Deps = { now: () => number; newId: () => string };
 // otherwise the session waits for its audio files to be transcribed.
 export function startRecordingSession(db: SqlDb, deps: Deps, spaceId: string, speechReady: boolean): SessionRow {
   const transcript = speechReady ? "live" : "waiting";
-  const row = createSession(db, deps, { spaceId, kind: "recording", title: "New recording", state: "recording" });
+  const row = createSession(db, deps, { spaceId, kind: "recording", title: DEFAULT_RECORDING_TITLE, state: "recording" });
   db.transaction(() => {
     db.run("UPDATE sessions SET transcript = ? WHERE id = ?", [transcript, row.id]);
     db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [deps.now(), spaceId]);
   });
   return { ...row, transcript };
+}
+
+// The title of a recording nobody named: its first words, or when there are none, the day and time it started.
+export function recordingTitle(firstText: string | null, startedAt: number): string {
+  const when = new Date(startedAt);
+  const weekday = when.toLocaleDateString(undefined, { weekday: "short" });
+  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return titleFromText(firstText, `Recording · ${weekday} ${shortDay(startedAt)}, ${time}`);
+}
+
+// At stop: a recording still called by the default name takes its title from the first words written down.
+// A title the person has changed is left alone.
+export function nameRecording(db: SqlDb, sessionId: string): void {
+  const session = getSession(db, sessionId);
+  if (session === null || session.title !== DEFAULT_RECORDING_TITLE) return;
+  const words = db
+    .all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? ORDER BY t_start LIMIT 5", [sessionId])
+    .map((row) => row.text)
+    .join(" ");
+  renameSession(db, sessionId, recordingTitle(words.trim() === "" ? null : words, session.startedAt));
 }
 
 // A finished text piece from the live transcriber. A repeat of the same piece is ignored.

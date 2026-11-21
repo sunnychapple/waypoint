@@ -26,7 +26,16 @@ import { isScannerSupported, scanPages } from "../../../modules/waypoint-pages/i
 import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
 import { addPiece, EMPTY_LIVE, type LiveTranscript, type Piece } from "../../core/capture/transcript.ts";
 import { getSetting } from "../../core/db/settings.ts";
-import { addFlag, addPhoto, finishRecording, savePart, saveSegment, setPaused, startRecordingSession } from "../../core/capture/recording.ts";
+import {
+  addFlag,
+  addPhoto,
+  finishRecording,
+  nameRecording,
+  savePart,
+  saveSegment,
+  setPaused,
+  startRecordingSession,
+} from "../../core/capture/recording.ts";
 import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.ts";
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import { getSavingTo } from "../../core/db/spaces.ts";
@@ -59,6 +68,7 @@ export type RecordingModel = {
   flag: () => void;
   photo: () => void;
   stop: () => void;
+  discard: () => void;
 };
 
 type Photo = { id: string; t: number; file: string };
@@ -135,6 +145,7 @@ export function useRecording(): RecordingModel {
             writeDb((db) => {
               if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
               finishRecording(db, current.id, Date.now(), recordedMs);
+              nameRecording(db, current.id);
             }),
           () => undefined, // never started, or already stopped: the next launch's recoverSessions marks it interrupted
         )
@@ -251,6 +262,7 @@ export function useRecording(): RecordingModel {
         // Live words were lost part way through, so the audio files are written down afterwards.
         if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
         finishRecording(db, current.id, Date.now(), recordedMs);
+        nameRecording(db, current.id);
       });
       router.replace(`/session/${current.id}`);
       if (writeDb((db) => getSetting(db, SECOND_ALWAYS_KEY)) === "1") router.push(`/second-transcript?sessionId=${current.id}`);
@@ -259,6 +271,21 @@ export function useRecording(): RecordingModel {
       setStopping(false);
       Alert.alert("Couldn't stop the recording.", messageOf(error));
     }
+  }
+
+  // Stops the microphone, then deletes the session with its audio, photos and words. Nothing is kept.
+  async function discard(): Promise<void> {
+    const current = sessionRef.current;
+    if (!current || stoppingRef.current) return;
+    stoppingRef.current = true;
+    setStopping(true);
+    // A recorder that is not running has nothing to stop (the same reading as the unmount stop above).
+    await stopRecording().catch(() => undefined);
+    // Late native events for this session are ignored from here on.
+    sessionRef.current = null;
+    writeDb((db) => deleteSessionRow(db, current.id));
+    deleteSessionFiles(current.id);
+    router.back();
   }
 
   const clockMs = anchor.ms + (recorder === "recording" ? Math.max(0, now - anchor.at) : 0);
@@ -286,6 +313,7 @@ export function useRecording(): RecordingModel {
     flag,
     photo: () => void photo(),
     stop: () => void stop(),
+    discard: () => void discard(),
   };
 }
 
