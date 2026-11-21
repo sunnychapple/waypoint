@@ -45,7 +45,15 @@ export default function RecordScreen() {
     ]);
   }
 
-  if (model.phase === "checking") return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
+  if (model.phase === "checking") {
+    return (
+      <SafeAreaView edges={["top", "bottom"]} style={[styles.screen, { backgroundColor: colors.bg }]}>
+        <View style={styles.topRow}>
+          <CircleButton label="Close" icon="chevron.down" onPress={close} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (model.phase === "denied") {
     return (

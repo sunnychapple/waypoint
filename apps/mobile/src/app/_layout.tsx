@@ -22,7 +22,7 @@ function RootStack() {
       </Stack.Protected>
       <Stack.Protected guard={gate === "app"}>
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="record" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
+        <Stack.Screen name="recording" options={{ presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen name="settings" />
         <Stack.Screen name="plans" />
         <Stack.Screen name="jobs" />
