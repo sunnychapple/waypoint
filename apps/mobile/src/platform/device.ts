@@ -312,10 +312,23 @@ export function usePairing(): PairingState {
 }
 
 // An expired or failed pairing: forget this iPhone's keys and register again with a new id and commitment.
-export async function startPairingAgain(): Promise<void> {
-  const user = userId;
-  if (user === null) return;
-  await deleteDeviceKeys(user);
-  writeDb((db) => deleteSetting(db, pairingApproverKey(user)));
-  await refreshDeviceNow();
+// One run at a time: a second tap while the first is registering would delete the new keys mid-registration and leave
+// a waiting request on the server that no iPhone holds keys for. Checks first, so a request approved in the last
+// moments is not thrown away.
+let pairingAgain: Promise<void> | null = null;
+export function startPairingAgain(): Promise<void> {
+  if (pairingAgain !== null) return pairingAgain;
+  const run = (async (): Promise<void> => {
+    const user = userId;
+    if (user === null) return;
+    await refreshDeviceNow();
+    if (status === "approved") return;
+    await deleteDeviceKeys(user);
+    writeDb((db) => deleteSetting(db, pairingApproverKey(user)));
+    await refreshDeviceNow();
+  })().finally(() => {
+    pairingAgain = null;
+  });
+  pairingAgain = run;
+  return run;
 }

@@ -47,7 +47,7 @@ export default function DeviceWaitingScreen() {
         {status === "approved" ? (
           <PrimaryButton label="Continue" onPress={() => router.back()} />
         ) : (
-          <PrimaryButton label={checking ? "Checking…" : notApproved ? "Ask again" : "Check again"} onPress={() => void checkAgain()} />
+          <PrimaryButton label={checking ? "Checking…" : notApproved ? "Ask again" : "Check again"} onPress={() => void checkAgain()} disabled={checking} />
         )}
         {status === "waiting" ? <SecondaryButton label="Use my recovery words" icon="key" onPress={() => router.push("/recover")} /> : null}
         {status === "waiting" && !notApproved && notify === "ask" ? (
