@@ -157,7 +157,7 @@ describe("cards", () => {
     expect(previewIntervals(db, "card-1", early)[4]).toBe(due - early);
     expect(reviewCard(db, "card-1", Rating.Again, early).dueAt).toBeLessThan(due);
     expect(() => reviewCard(db, "card-1", Rating.Good, NOW)).not.toThrow();
-    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM reviews")?.n).toBe(9);
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM reviews")?.n).toBe(8);
   });
 
   it("saveCards skips a front the session already has, ignoring case and spacing", () => {

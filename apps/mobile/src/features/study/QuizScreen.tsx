@@ -108,7 +108,9 @@ export default function QuizScreen() {
         <Title>{`You got ${quiz.right} of ${quiz.questions.length}`}</Title>
         {!retrying && added > 0 ? <Body>{addedLine(added)}</Body> : null}
         {quiz.missed.length > 0 ? (
-          <PrimaryButton label="Practise the ones I missed" onPress={() => {
+          <PrimaryButton
+            label="Practise the ones I missed"
+            onPress={() => {
               setRetrying(true);
               setQuiz(retryMissed(quiz));
             }}
