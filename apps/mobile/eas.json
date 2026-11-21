@@ -4,5 +4,5 @@
     "development": { "developmentClient": true, "distribution": "internal", "environment": "development" },
     "production": { "autoIncrement": true, "environment": "production" }
   },
-  "submit": { "production": {} }
+  "submit": { "production": { "ios": { "ascAppId": "6837493644" } } }
 }
