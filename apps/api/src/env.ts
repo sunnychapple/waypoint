@@ -37,5 +37,6 @@ export type Env = {
   LINK_PASSCODES: RateLimit;
   ASSETS: Fetcher;
   JOB_STARTS: RateLimit;
+  ADMIN_TOKEN?: string; // secret: wrangler secret put ADMIN_TOKEN (32+ random chars; unset disables /admin/credits)
 };
 export type AppEnv = { Bindings: Env; Variables: { user: SessionUser; device: SignedDevice } };

@@ -33,6 +33,7 @@ import { syncExtraRoute } from "./sync/extra.ts";
 import { syncRoutes } from "./sync/routes.ts";
 import { walletRoutes } from "./wallet/route.ts";
 import { clerkWebhookRoute } from "./webhooks/clerk.ts";
+import { adminCreditsRoute } from "./admin/credits.ts";
 
 // The routes merged before S1A that spend or buy credits. Routes written after S1A put
 // requireDeviceSignature on the route itself instead (docs/cards/security.md, S1A).
@@ -57,6 +58,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", appleWebhookRoute({ now: deps.now, rootSha256: APPLE_ROOT_CA_G3_SHA256 }));
   app.route("/", walletRoutes(deps));
   app.route("/", clerkWebhookRoute(deps));
+  app.route("/", adminCreditsRoute());
   app.route("/", privacyRoutes({ now: deps.now }));
   app.route("/", pushTokenRoute({ now: deps.now }));
   app.route("/", devicesRoute({ now: deps.now }));

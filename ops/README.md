@@ -86,7 +86,7 @@ script after the gate passes.
 | `LINK_PASSCODE_PEPPER` | secret | 32 random bytes, base64url | Yes: only shared links |
 | `TURNSTILE_SECRET_KEY` | secret | From the Turnstile widget | Yes: only shared links |
 
-**Credits for a test.** A new account gets 25 credits and there is no admin grant. That covers Explain, more detail,
+**Credits for a test.** A new account gets 25 credits. Extra testing credits come from the owner grant below. That covers Explain, more detail,
 double-check, practice (8), diagram (18) or quick research (15), but not an overview (40), slides (50), mini app (40)
 or standard/deep research. More credits come only from a purchase (a Sandbox purchase of `waypoint.credits.1000`
 needs the App Store Connect products and the real `APPLE_BUNDLE_ID`).
@@ -94,3 +94,26 @@ needs the App Store Connect products and the real `APPLE_BUNDLE_ID`).
 Placeholders in `wrangler.jsonc` that must be real before `wrangler deploy`: the D1 `database_id`, the KV `id`, and the
 rate limit `namespace_id`s if 1001 to 1003 are taken in the account. Build the viewer first
 (`npm run build --prefix apps/viewer`): the `assets` directory is `apps/viewer/dist`.
+
+## Owner credit grant (testing)
+
+Until the App Store products exist, a TestFlight tester can get more credits only from the owner. `POST /admin/credits`
+adds purchased credits to one account. It sits outside `/v1`, is gated by the `ADMIN_TOKEN` secret, and answers 404
+for every refusal (including an unset or short token), so it looks like a missing route to anyone else.
+
+Set the secret once (32 or more characters; keep the output somewhere safe, because the script needs it too):
+
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put ADMIN_TOKEN
+```
+
+Grant credits (the Clerk user id is in the Clerk dashboard under Users; the API has no email lookup):
+
+```sh
+export NOTEPATH_ADMIN_TOKEN='<the same value>'
+node ops/grant-credits.mjs --clerk-id user_abc123 --credits 500 --reason "TestFlight"
+```
+
+`--api` defaults to `https://waypoint-api.sunnychapple30.workers.dev`. The script makes a random `--key` and prints it;
+re-running with the same `--key` grants nothing more, so a retry after a timeout is safe. Each call is one grant of
+1 to 5000 credits, logged in the wallet ledger with ref `admin`.
