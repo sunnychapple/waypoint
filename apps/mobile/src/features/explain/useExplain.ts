@@ -16,7 +16,7 @@ import {
 } from "../../core/explain/explanations.ts";
 import { askLater, markAnswered } from "../../core/explain/later.ts";
 import { logSent, settleFailedSent, settleSent, type InstantSentTask } from "../../core/explain/sent.ts";
-import { getDb, writeDb } from "../../platform/db.ts";
+import { dbGeneration, getDb, stillSame, writeDb } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
 import { doubleCheck, streamExplain, streamMoreDetail, toFailure } from "../../platform/tasks.ts";
 
@@ -61,6 +61,7 @@ export function useExplain(sessionId: string, t: number, word: string, flagId?: 
     const answer = explanation === null ? null : shownAnswer(explanation);
     if (task !== "explain" && answer === null) return;
     if (!requireApprovedDevice()) return;
+    const generation = dbGeneration();
     const key = keys.current[task] ?? randomUUID();
     keys.current[task] = key;
     const explainBody: ExplainRequest = { word, transcript: excerpt };
@@ -112,7 +113,8 @@ export function useExplain(sessionId: string, t: number, word: string, flagId?: 
         idRef.current = id;
         const updated = addToThread(db, id, item);
         // Explain answered a question from Questions for later: that flag is answered now.
-        if (task === "explain" && flagId !== undefined) markAnswered(db, flagId);
+        // Only in the notes the flag came from.
+        if (task === "explain" && flagId !== undefined && stillSame(generation)) markAnswered(db, flagId);
         return updated;
       });
     } catch {
