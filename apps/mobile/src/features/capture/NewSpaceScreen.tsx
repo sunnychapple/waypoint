@@ -1,21 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { randomUUID } from "expo-crypto";
-import { createSpace, setSavingTo, SpaceNameError } from "../../core/db/spaces.ts";
+import { getSession, moveSessionToSpace } from "../../core/capture/sessions.ts";
+import { createSpace, getSpace, setSavingTo, SpaceNameError } from "../../core/db/spaces.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { newSharedSpace } from "../../platform/share.ts";
-import { getDb, writeDb } from "../../platform/db.ts";
+import { getDb, useQuery, writeDb } from "../../platform/db.ts";
 import { Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 type Belongs = "just_me" | "shared";
 
-// Opened from the space picker (?from=picker), or from the Spaces tab (no param).
+// Opened from the space picker (?from=picker), or from the Spaces tab (no param). From the picker for a session
+// (?sessionId=) the new space is where that session moves, not "Saving to".
 export default function NewSpaceScreen() {
   const colors = useColors();
-  const { from } = useLocalSearchParams<{ from?: string }>();
+  const { from, sessionId } = useLocalSearchParams<{ from?: string; sessionId?: string }>();
   const fromPicker = from === "picker";
+  // The space the session is in now, when it is in a shared one (leaving it is confirmed, as in the picker).
+  const leaving = useQuery((db) => {
+    if (!sessionId) return null;
+    const spaceId = getSession(db, sessionId)?.spaceId ?? null;
+    if (spaceId === null || spaceGroups(db).get(spaceId)?.kind !== "shared") return null;
+    return getSpace(db, spaceId)?.name ?? "the shared space";
+  }, sessionId ?? "");
   const [name, setName] = useState("");
   const [belongs, setBelongs] = useState<Belongs>("just_me");
   const [error, setError] = useState<string | null>(null);
@@ -29,17 +39,29 @@ export default function NewSpaceScreen() {
     };
   }, []);
 
-  async function create(): Promise<void> {
+  async function create(confirmed = false): Promise<void> {
     const trimmed = name.trim();
     if (trimmed === "") {
       setError("Give it a name.");
+      return;
+    }
+    // Moving a session out of a shared space is confirmed: everyone there loses it (M30b). A brand-new space has no one
+    // else in it yet, so moving into it needs no confirmation.
+    if (fromPicker && sessionId && !confirmed && leaving !== null) {
+      Alert.alert("Move this session?", `It will be removed for everyone in ${leaving}.`, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Move", onPress: () => void create(true) },
+      ]);
       return;
     }
     if (belongs === "shared") return createShared(trimmed);
     try {
       const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, trimmed));
       if (fromPicker) {
-        writeDb((db) => setSavingTo(db, space.id, Date.now()));
+        writeDb((db) => {
+          if (sessionId) moveSessionToSpace(db, sessionId, space.id, Date.now());
+          else setSavingTo(db, space.id, Date.now());
+        });
         router.dismiss(2); // closes this sheet and the space picker under it
       } else {
         router.replace(`/space/${space.id}`); // swaps the sheet for the space (a back then a push in one tick can be lost)
@@ -65,9 +87,15 @@ export default function NewSpaceScreen() {
       const groupId = await newSharedSpace(trimmed);
       if (!mounted.current) return; // closed meanwhile: do not navigate from whatever screen is on top now
       if (fromPicker) {
-        // Saving to the new shared space, then close this sheet and the space picker under it.
+        // The session (or, without one, "Saving to") goes to the new shared space, then this sheet and the picker close.
         const row = getDb().get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId]);
-        if (row !== null) writeDb((db) => setSavingTo(db, row.space_id, Date.now()));
+        if (row !== null) {
+          const spaceId = row.space_id;
+          writeDb((db) => {
+            if (sessionId) moveSessionToSpace(db, sessionId, spaceId, Date.now());
+            else setSavingTo(db, spaceId, Date.now());
+          });
+        }
         router.dismiss(2);
       } else router.replace(`/shared/${encodeURIComponent(groupId)}`);
     } catch (e) {

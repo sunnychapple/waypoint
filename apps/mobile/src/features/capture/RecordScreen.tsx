@@ -207,7 +207,7 @@ function BannerView({ banner }: { banner: Banner }) {
   }
   return (
     <View style={[styles.card, { backgroundColor: colors.flagSoft, borderColor: colors.flag }]}>
-      <Text style={[styles.cardTitle, { color: colors.flagInk }]}>Recording now. Words appear when the speech pack finishes downloading.</Text>
+      <Text style={[styles.cardTitle, { color: colors.flagInk }]}>Recording now. Words appear when offline speech finishes downloading.</Text>
       <View style={[styles.progressTrack, { backgroundColor: colors.surface }]}>
         <View style={[styles.progressFill, { width: `${banner.percent}%`, backgroundColor: colors.flag }]} />
       </View>

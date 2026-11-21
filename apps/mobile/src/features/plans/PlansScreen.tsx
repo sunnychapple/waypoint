@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { creditsLabel } from "../../core/config/config.ts";
 import { balanceSummary, buyMessage, needLine, ownsOwnIt, restoreMessage } from "../../core/store/plans.ts";
 import { buy, loadProducts, restorePurchases, type ShopProduct } from "../../platform/store.ts";
@@ -37,6 +37,13 @@ export default function PlansScreen() {
   const [products, setProducts] = useState<ShopProduct[] | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -64,6 +71,12 @@ export default function PlansScreen() {
     setBuying(product.id);
     try {
       const result = await buy(product.info.id);
+      // Opened from a task that ran out of credits: once they are granted, go back to that task.
+      // Only if this screen is still open (leaving mid-purchase must not pop the screen underneath).
+      if (result.kind === "granted" && needLine(need) !== null && mounted.current && router.canGoBack()) {
+        router.back();
+        return;
+      }
       const text = buyMessage(result.kind, result.kind === "granted" ? result.reply.credits : 0);
       if (text !== null) setBanner({ text });
     } catch {
@@ -148,7 +161,7 @@ export default function PlansScreen() {
             {hasPlus ? (
               <Row
                 title="You have Plus"
-                subtitle="2,000 credits every month, zero retention, and audio and photo sync"
+                subtitle="2,000 credits every month, “Don't keep my text”, and audio and photo sync"
                 right={<Text style={[styles.textButtonText, { color: colors.accent }]}>Manage</Text>}
                 onPress={() => void Linking.openURL(SUBSCRIPTIONS_URL).catch(() => undefined)}
               />
@@ -157,7 +170,7 @@ export default function PlansScreen() {
                 <Row
                   key={p.id}
                   title={p.info.period === "yearly" ? "Plus yearly" : "Plus monthly"}
-                  subtitle="2,000 credits every month, zero retention, and audio and photo sync"
+                  subtitle="2,000 credits every month, “Don't keep my text”, and audio and photo sync"
                   right={priceOrSpinner(p)}
                   onPress={() => void purchase(p)}
                 />
@@ -170,7 +183,7 @@ export default function PlansScreen() {
           <>
             <Caption style={styles.section}>OWN IT</Caption>
             {hasOwnIt ? (
-              <Row title="You own it" subtitle="2,000 credits came with it, once." onPress={() => undefined} />
+              <Row title="You own it" subtitle="2,000 credits came with it, once." />
             ) : (
               ownItProducts.map((p) => (
                 <Row

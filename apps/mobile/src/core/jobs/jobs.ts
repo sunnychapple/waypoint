@@ -118,7 +118,7 @@ export const JOB_LABELS: Record<JobType, string> = {
   diagram: "Diagram",
   mini_app: "Mini app",
   practice: "Practice set",
-  retranscribe: "Second transcript",
+  retranscribe: "Better transcript",
 };
 
 // One line for the jobs list and the job screen.

@@ -106,7 +106,7 @@ export default function SessionScreen() {
   function openMenu() {
     const canSecond = session.kind === "recording" && (session.state === "saved" || session.state === "interrupted");
     Alert.alert(session.title, undefined, [
-      ...(canSecond ? [{ text: "Second transcript", onPress: () => router.push(`/second-transcript?sessionId=${id}`) }] : []),
+      ...(canSecond ? [{ text: "Better transcript", onPress: () => router.push(`/second-transcript?sessionId=${id}`) }] : []),
       // A viewer can neither take a session out of a shared space nor link to it (the server refuses both).
       ...(role === "viewer"
         ? []
@@ -221,7 +221,7 @@ export default function SessionScreen() {
 
         {second !== null ? (
           <View style={styles.switchRow}>
-            {(["On this iPhone", "Second transcript"] as const).map((label, index) => {
+            {(["On this iPhone", "Better transcript"] as const).map((label, index) => {
               const active = showSecond === (index === 1);
               return (
                 <Pressable

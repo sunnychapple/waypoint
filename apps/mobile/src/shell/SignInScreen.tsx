@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useRouter } from "expo-router";
 import { normalizeEmail } from "../core/auth/email.ts";
+import { PRIVACY_URL, TERMS_URL } from "../core/links.ts";
 import { useAppleSignIn, useEmailCode } from "../platform/auth.tsx";
 import { useColors } from "../ui/theme.ts";
 
@@ -39,10 +40,10 @@ export default function SignInScreen() {
       <View style={styles.top}>
         <Text style={[styles.wordmark, { color: colors.ink }]}>NotePath</Text>
         <Text style={[styles.headline, { color: colors.ink }]}>
-          Record the lecture. Ask about anything. <Text style={{ color: colors.accent }}>Remember</Text> it.
+          Record the class. Ask about anything. <Text style={{ color: colors.accent }}>Remember</Text> it.
         </Text>
         <Text style={[styles.body, { color: colors.ink2 }]}>
-          Capture a lecture, follow every tangent, and remember it — on your phone, privately.
+          Record a class, snap your homework pages, and turn them into notes, flashcards and quizzes.
         </Text>
       </View>
 
@@ -93,7 +94,17 @@ export default function SignInScreen() {
         {message ? <Text style={[styles.message, { color: colors.danger }]}>{message}</Text> : null}
       </View>
 
-      <Text style={[styles.footer, { color: colors.ink3 }]}>By continuing you agree to the Terms and Privacy Policy.</Text>
+      <Text style={[styles.footer, { color: colors.ink3 }]}>
+        By continuing you agree to the{" "}
+        <Text accessibilityRole="link" onPress={() => void Linking.openURL(TERMS_URL).catch(() => undefined)} style={styles.link}>
+          Terms
+        </Text>{" "}
+        and{" "}
+        <Text accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_URL).catch(() => undefined)} style={styles.link}>
+          Privacy Policy
+        </Text>
+        .
+      </Text>
     </View>
   );
 }
@@ -114,4 +125,5 @@ const styles = StyleSheet.create({
   primaryLabel: { fontSize: 17, fontWeight: "600" },
   message: { fontSize: 15, lineHeight: 20 },
   footer: { fontSize: 13, lineHeight: 18, textAlign: "center" },
+  link: { textDecorationLine: "underline" },
 });

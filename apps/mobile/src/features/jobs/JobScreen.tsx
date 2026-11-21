@@ -35,7 +35,7 @@ export default function JobScreen() {
     return (
       <Screen>
         <BackButton />
-        <Title>Cloud job</Title>
+        <Title>Being made</Title>
         <Caption>This job isn't on this iPhone.</Caption>
       </Screen>
     );
@@ -45,10 +45,10 @@ export default function JobScreen() {
   const running = job.state === "queued" || job.state === "running";
 
   function confirmCancel() {
-    Alert.alert("Cancel this job?", "Nothing is charged unless it has already finished.", [
+    Alert.alert("Stop making this?", "Nothing is charged unless it has already finished.", [
       { text: "Keep waiting", style: "cancel" },
       {
-        text: "Cancel job",
+        text: "Stop making this",
         style: "destructive",
         onPress: () =>
           void cancelJob(id).then((failure) => {
@@ -80,7 +80,7 @@ export default function JobScreen() {
       ) : null}
 
       {job.problem === "unreadable" ? (
-        <Body>The result arrived but couldn't be opened on this iPhone. This can happen after its security keys changed.</Body>
+        <Body>The result arrived but couldn't be opened on this iPhone, because who can see this space changed.</Body>
       ) : null}
       {job.problem === null && job.state === "succeeded" && job.savedAt !== null && route !== undefined ? (
         <PrimaryButton label="Open" onPress={() => router.push(route(job))} />

@@ -1,4 +1,5 @@
 import type { SqlDb } from "../db/sql.ts";
+import { markMoved } from "../sync/changes.ts";
 
 export type SessionKind = "recording" | "pages";
 export type SessionState = "recording" | "paused" | "saved" | "interrupted";
@@ -122,6 +123,15 @@ export function moveSession(db: SqlDb, id: string, spaceId: string, now: number)
     db.run("UPDATE sessions SET space_id = ? WHERE id = ?", [spaceId, id]);
     db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [now, spaceId]);
   });
+}
+
+// Moves one session into a space (the picker and the new-space sheet both use it). The rows follow the new space's
+// group, and the old group drops the session (M30b).
+export function moveSessionToSpace(db: SqlDb, id: string, spaceId: string, now: number): void {
+  const from = getSession(db, id)?.spaceId ?? null;
+  const oldGroup = from === null ? null : (db.get<{ group_id: string }>("SELECT group_id FROM space_groups WHERE space_id = ?", [from])?.group_id ?? null);
+  moveSession(db, id, spaceId, now);
+  if (from !== spaceId) markMoved(db, id, oldGroup);
 }
 
 // Removes the row; captures, flags, cards and segments go with it. The caller removes the files.
