@@ -3,27 +3,30 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { saveCards } from "../../core/study/cards.ts";
+import { saveCards, sessionCardCount } from "../../core/study/cards.ts";
 import { makeCardsFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
-import { Body, PrimaryButton, Screen, Title } from "../../ui/kit.tsx";
+import { Body, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
 
 const PORT: ModelPort = { contextSize: getContextSize, makeCards, makeQuiz };
 
 // Makes flashcards from one session on this iPhone, saves them, and goes to the first review.
+// A session that already has cards first offers to practise them, or to make more.
 export default function MakeCardsScreen() {
   const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
+  const [existing] = useState(() => sessionCardCount(getDb(), sessionId));
+  const [making, setMaking] = useState(existing === 0);
   const [availability] = useState(getAvailability);
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "empty">("working");
 
   useEffect(() => {
-    if (availability !== "available") return;
+    if (!making || availability !== "available") return;
     let active = true;
     setOutcome("working");
     async function run() {
@@ -44,7 +47,18 @@ export default function MakeCardsScreen() {
     return () => {
       active = false;
     };
-  }, [attempt, availability, sessionId]);
+  }, [attempt, availability, making, sessionId]);
+
+  if (!making) {
+    return (
+      <Screen>
+        <CloseButton />
+        <Title>{`You have ${existing} ${existing === 1 ? "card" : "cards"} from this`}</Title>
+        <PrimaryButton label="Practise these" onPress={() => router.replace(`/study/review?sessionId=${sessionId}&all=1`)} />
+        <SecondaryButton label="Make more" onPress={() => setMaking(true)} />
+      </Screen>
+    );
+  }
 
   if (availability !== "available") {
     return (

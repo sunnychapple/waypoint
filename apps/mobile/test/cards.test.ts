@@ -12,6 +12,7 @@ import {
   reviewCard,
   saveCards,
   sessionCardCount,
+  sessionCards,
   type NewCard,
 } from "../src/core/study/cards.ts";
 import { createMemoryDb } from "./helpers/db.ts";
@@ -119,6 +120,27 @@ describe("cards", () => {
     saveCards(db, deps(), sessionId, [card("A"), card("B")], "device_model");
     expect(sessionCardCount(db, sessionId)).toBe(2);
     expect(sessionCardCount(db, "no-such-session")).toBe(0);
+  });
+
+  it("sessionCards lists every card of one session, due or not, oldest due first", () => {
+    const other = createSession(db, { now: () => NOW, newId: () => "session-2" }, { spaceId: "space", kind: "pages", title: "Pages", state: "saved" }).id;
+    saveCards(db, deps(), sessionId, [card("A"), card("B"), card("C")], "device_model");
+    saveCards(db, deps(), other, [card("D")], "device_model");
+    db.run("UPDATE cards SET due_at = ? WHERE id = 'card-1'", [NOW + 3 * MIN]);
+    db.run("UPDATE cards SET due_at = ? WHERE id = 'card-2'", [NOW - MIN]);
+    expect(sessionCards(db, sessionId, 10).map((c) => c.id)).toEqual(["card-2", "card-3", "card-1"]);
+    expect(sessionCards(db, sessionId, 2).map((c) => c.id)).toEqual(["card-2", "card-3"]);
+    expect(sessionCards(db, other, 10).map((c) => c.id)).toEqual(["card-4"]);
+    expect(sessionCards(db, "no-such-session", 10)).toEqual([]);
+  });
+
+  it("reviewing a card that is not due yet reschedules it like any other review", () => {
+    saveCards(db, deps(), sessionId, [card("A")], "device_model");
+    reviewCard(db, "card-1", Rating.Good, NOW);
+    expect(dueCards(db, NOW, { limit: 10 })).toEqual([]);
+    const early = reviewCard(db, "card-1", Rating.Again, NOW + MIN);
+    expect(early.dueAt).toBe(NOW + 2 * MIN);
+    expect(db.all<{ rating: number }>("SELECT rating FROM reviews ORDER BY reviewed_at").map((r) => r.rating)).toEqual([Rating.Good, Rating.Again]);
   });
 
   it("saveCards skips a front the session already has, ignoring case and spacing", () => {

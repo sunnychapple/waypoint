@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { cleanHelp } from "../../core/study/drafts.ts";
-import { problemOf, showAnswer, showNextStep, startHelp, type HelpState } from "../../core/study/help.ts";
+import { problemOf, showAnswer, showNextStep, startHelp, typedProblemOf, type HelpState } from "../../core/study/help.ts";
 import { getDb } from "../../platform/db.ts";
 import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen } from "../../ui/kit.tsx";
@@ -17,9 +17,10 @@ function isDeclined(error: unknown): boolean {
 // Steps first, the answer last. One step shows at a time, and the answer only after the last step.
 export default function HelpStepsScreen() {
   const colors = useColors();
-  const { captureId, block } = useLocalSearchParams<{ sessionId: string; captureId: string; block: string }>();
+  // A problem is either a block the page's text found (block) or one the student typed in (text).
+  const { captureId, block, text } = useLocalSearchParams<{ sessionId: string; captureId: string; block?: string; text?: string }>();
   const [availability] = useState(getAvailability);
-  const [problem] = useState(() => problemOf(getDb(), captureId, Number(block)));
+  const [problem] = useState(() => (text === undefined ? problemOf(getDb(), captureId, Number(block)) : typedProblemOf(getDb(), captureId, text)));
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "declined" | "ready">("working");
   const [help, setHelp] = useState<HelpState | null>(null);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QuizDraft } from "../src/core/study/drafts.ts";
-import { isDone, missedToCards, next, pick, quizCount, startQuiz } from "../src/core/study/quiz.ts";
+import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz } from "../src/core/study/quiz.ts";
 
 const question = (text: string, answerIndex: 0 | 1 | 2 | 3 = 1): QuizDraft => ({
   question: text,
@@ -53,5 +53,16 @@ describe("quiz", () => {
   it("makes eight questions from a recording and five from pages", () => {
     expect(quizCount("recording")).toBe(8);
     expect(quizCount("pages")).toBe(5);
+  });
+
+  it("retryMissed starts a fresh run through only the questions missed", () => {
+    let state = startQuiz([question("Q1"), question("Q2"), question("Q3")]);
+    state = next(pick(state, 0));
+    state = next(pick(state, 1));
+    state = next(pick(state, 2));
+    expect(isDone(state)).toBe(true);
+    const retry = retryMissed(state);
+    expect(retry).toEqual(startQuiz([question("Q1"), question("Q3")]));
+    expect(isDone(next(pick(next(pick(retry, 1)), 1)))).toBe(true);
   });
 });

@@ -140,6 +140,11 @@ export function nextDueAt(db: SqlDb, now: number): number | null {
   return db.get<{ due: number | null }>("SELECT min(due_at) AS due FROM cards WHERE due_at > ?", [now])?.due ?? null;
 }
 
+// Every card of one session, due or not, oldest due first. For practising a session's cards.
+export function sessionCards(db: SqlDb, sessionId: string, limit: number): CardRow[] {
+  return db.all<CardDbRow>(`SELECT ${COLUMNS} FROM cards WHERE session_id = ? ORDER BY due_at, id LIMIT ?`, [sessionId, limit]).map(toRow);
+}
+
 export function sessionCardCount(db: SqlDb, sessionId: string): number {
   return db.get<{ n: number }>("SELECT count(*) AS n FROM cards WHERE session_id = ?", [sessionId])?.n ?? 0;
 }

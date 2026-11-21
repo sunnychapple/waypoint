@@ -6,7 +6,7 @@ import { SymbolView } from "expo-symbols";
 import { getSession } from "../../core/capture/sessions.ts";
 import { saveCards } from "../../core/study/cards.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
-import { isDone, missedToCards, next, pick, quizCount, startQuiz, type QuizState } from "../../core/study/quiz.ts";
+import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
@@ -100,10 +100,13 @@ export default function QuizScreen() {
     return (
       <Screen>
         <CloseButton />
-        <Title>{`${quiz.right} of ${quiz.questions.length} right.`}</Title>
+        <Title>{`You got ${quiz.right} of ${quiz.questions.length}`}</Title>
         {quiz.missed.length > 0 ? <Body>{addedLine(quiz.missed.length)}</Body> : null}
         {quiz.missed.length > 0 ? (
-          <PrimaryButton label="Review them" onPress={() => router.push(`/study/review?sessionId=${sessionId}`)} />
+          <PrimaryButton label="Practise the ones I missed" onPress={() => setQuiz(retryMissed(quiz))} />
+        ) : null}
+        {quiz.missed.length > 0 ? (
+          <SecondaryButton label="Review them" onPress={() => router.push(`/study/review?sessionId=${sessionId}`)} />
         ) : null}
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>

@@ -66,3 +66,12 @@ export function problemOf(db: SqlDb, captureId: string, index: number): Problem 
   if (block === undefined) return null;
   return { text: block.text, context: problemContext(page.found_text, block) };
 }
+
+// A problem the student typed in, with the page's text as its context. Null when the page is missing or the text is blank.
+export function typedProblemOf(db: SqlDb, captureId: string, typed: string): Problem | null {
+  const page = db.get<{ found_text: string | null }>("SELECT found_text FROM captures WHERE id = ? AND kind = 'page'", [captureId]);
+  const text = collapse(typed);
+  if (page === null || text === "") return null;
+  const block: Block = { text, x: 0, y: 0, width: 1, height: 0, lines: 1 };
+  return { text, context: problemContext(page.found_text ?? "", block) };
+}
