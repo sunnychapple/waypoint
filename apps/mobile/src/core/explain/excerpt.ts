@@ -1,5 +1,7 @@
 import { TRANSCRIPT_MAX_CHARS, WORD_MAX_CHARS } from "@waypoint/contracts";
+import { listPages } from "../capture/pages.ts";
 import type { SegmentLine } from "../capture/segments.ts";
+import type { SqlDb } from "../db/sql.ts";
 
 // About 54 seconds of transcript around the tapped word: 45 s before it, 9 s after (docs/architecture.md flow 1).
 export const EXCERPT_BEFORE_MS = 45_000;
@@ -14,13 +16,35 @@ export function excerptAround(segments: SegmentLine[], t: number, maxChars: numb
     .filter((s) => s.tEnd >= from && s.tStart <= to)
     .sort((a, b) => a.tStart - b.tStart)
     .map((s) => s.text)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (text.length <= maxChars) return text;
-  const cut = text.slice(text.length - maxChars);
+    .join(" ");
+  return trimExcerpt(text, maxChars);
+}
+
+// Text with spaces collapsed, cut to maxChars from the start at a word boundary (the end is kept).
+export function trimExcerpt(text: string, maxChars: number = TRANSCRIPT_MAX_CHARS): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  const cut = collapsed.slice(collapsed.length - maxChars);
   const space = cut.indexOf(" ");
   return space === -1 ? cut : cut.slice(space + 1);
+}
+
+// A page the person tapped in: its number in the session (from 1) and its found text, or null when the session has no such page.
+export function pageContext(db: SqlDb, sessionId: string, pageId: string): { number: number; text: string } | null {
+  const pages = listPages(db, sessionId);
+  const index = pages.findIndex((page) => page.id === pageId);
+  if (index === -1) return null;
+  return { number: index + 1, text: pages[index]?.foundText ?? "" };
+}
+
+// What the Explain sheet says is sent and what it says when there is nothing to send, for a recording line or a page.
+export function contextCopy(isPage: boolean): { sent: string; missing: string } {
+  return isPage
+    ? { sent: "NotePath sends this word and the text of this page, for this task only.", missing: "There isn't any text from this page to explain this word with." }
+    : {
+        sent: "NotePath sends this word and about a minute of the transcript around it, for this task only.",
+        missing: "There isn't enough of the transcript around this word yet.",
+      };
 }
 
 export type Token = { text: string; word: string | null };
