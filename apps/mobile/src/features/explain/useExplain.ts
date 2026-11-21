@@ -7,6 +7,7 @@ import { excerptAround, pageContext, trimExcerpt } from "../../core/explain/exce
 import {
   discardIfUnsaved,
   getExplanation,
+  landedExplanation,
   pageForTerm,
   saveExplanation,
   shownAnswer,
@@ -70,9 +71,28 @@ export function useExplain(
   const keys = useRef<Partial<Record<InstantSentTask, string>>>({});
   const idRef = useRef<string | null>(loaded?.id ?? null);
   const cancelled = useRef(false);
-  const [flightKey] = useState(() => `${dbGeneration()}\n${sessionId}\n${pageRef ?? t}\n${word}`);
+  const [openedIn] = useState(dbGeneration);
+  const [flightKey] = useState(() => `${openedIn}\n${sessionId}\n${pageRef ?? t}\n${word}`);
   // This word's answer is already on its way from a sheet that was closed.
   const [stillComing, setStillComing] = useState(() => isInFlight(flightKey));
+  const comingSince = useRef(inFlight.get(flightKey) ?? 0);
+
+  // When that request ends, its answer shows here. If it failed, Explain comes back.
+  useEffect(() => {
+    if (!stillComing) return;
+    const timer = setInterval(() => {
+      if (isInFlight(flightKey)) return;
+      clearInterval(timer);
+      setStillComing(false);
+      if (!stillSame(openedIn)) return;
+      const landed = landedExplanation(getDb(), { sessionId, t, term: word, captureId: pageRef ?? null, since: comingSince.current });
+      if (landed !== null) {
+        idRef.current = landed.id;
+        setExplanation(landed);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [stillComing, flightKey, openedIn, sessionId, t, word, pageRef]);
 
   // Closing the sheet keeps only saved explanations. An answer is saved as soon as it arrives, so it stays unless the
   // person removed it with Saved. A stream still running is not aborted: it runs to the end and its answer lands, so
@@ -90,6 +110,7 @@ export function useExplain(
     if (task !== "explain") return runTask(task);
     if (excerpt === "" || phase.kind === "running") return;
     if (isInFlight(flightKey)) {
+      comingSince.current = inFlight.get(flightKey) ?? 0;
       setStillComing(true);
       return;
     }

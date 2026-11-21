@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
+import { addToThread, discardIfUnsaved, getExplanation, landedExplanation, saveExplanationNow, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
 import { landAnswer } from "../src/core/explain/land.ts";
 import { askLater } from "../src/core/explain/later.ts";
 import { getSent, logSent } from "../src/core/explain/sent.ts";
@@ -25,6 +25,32 @@ function sendLogged(db: ReturnType<typeof setup>["db"], key: string, task: "expl
 function item(kind: ThreadItem["kind"], sentId: string, text = "answer"): ThreadItem {
   return { kind, text, at: 1, retention: "standard", sentId };
 }
+
+describe("a question or answer from a closed sheet", () => {
+  it("askLater does not add the same open question twice", () => {
+    const { db, deps } = setup();
+    askLater(db, deps, "s1", 5, "cell", null);
+    askLater(db, deps, "s1", 5, "cell", null);
+    askLater(db, deps, "s1", 9, "cell", null);
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM flags")?.n).toBe(2);
+    db.run("UPDATE flags SET state = 'dismissed' WHERE t = 5");
+    askLater(db, deps, "s1", 5, "cell", null);
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM flags")?.n).toBe(3);
+  });
+
+  it("landedExplanation finds only a saved answer at this place, since the request began", () => {
+    const { db, deps } = setup();
+    const made = startExplanation(db, deps, "s1", 5, "cell", null);
+    const where = { sessionId: "s1", t: 5, term: "cell", captureId: null, since: 1_000 };
+    addToThread(db, made.id, item("explain", "k1"));
+    expect(landedExplanation(db, where)).toBeNull();
+    saveExplanationNow(db, deps, made.id);
+    expect(landedExplanation(db, where)?.id).toBe(made.id);
+    expect(landedExplanation(db, { ...where, since: 1_001 })).toBeNull();
+    expect(landedExplanation(db, { ...where, t: 6 })).toBeNull();
+    expect(landedExplanation(db, { ...where, term: "cells" })).toBeNull();
+  });
+});
 
 describe("landAnswer", () => {
   it("an explain with the sheet closed creates, saves, and marks the flag answered", () => {
