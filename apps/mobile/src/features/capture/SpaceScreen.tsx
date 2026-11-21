@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { StyleSheet, Switch, View } from "react-native";
+import { ActionSheetIOS, Alert, Pressable, StyleSheet, Switch, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsInSpace } from "../../core/capture/sessions.ts";
 import { getSetting } from "../../core/db/settings.ts";
-import { getSpace, setSavingTo } from "../../core/db/spaces.ts";
+import { deleteSpace, getSpace, renameSpace, setSavingTo, SpaceNameError } from "../../core/db/spaces.ts";
 import { getGroup, spaceGroups } from "../../core/groups/groups.ts";
 import { countLabel, formatClock } from "../../core/format.ts";
 import { canAddTo } from "../../core/share/spaces.ts";
@@ -46,6 +46,74 @@ export default function SpaceScreen() {
     router.push(route);
   };
 
+  // A shared space takes its name from its group (platform/groups.ts), so only a personal or unsynced space is renamed.
+  const canRename = !data.synced || data.link?.kind === "personal";
+  // Sync does not carry a space delete, so a space that syncs or is shared stays, and so does one with notes or the default.
+  const canDelete = data.space !== null && !data.synced && data.space.sessionCount === 0 && !data.space.isDefault;
+
+  // Alert.prompt cannot show an error in the field, so a bad name comes back in the prompt's message with what was typed.
+  const startRename = (typed = name, problem?: string) => {
+    Alert.prompt(
+      "Rename space",
+      problem,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Save", onPress: (value?: string) => saveName(value ?? "") },
+      ],
+      "plain-text",
+      typed,
+    );
+  };
+
+  const saveName = (value: string) => {
+    try {
+      writeDb((db) => renameSpace(db, id, value));
+    } catch (e) {
+      if (!(e instanceof SpaceNameError)) throw e;
+      const trimmed = value.trim();
+      if (e.message === "taken") startRename(trimmed, `You already have a space called ${trimmed}.`);
+      else startRename(trimmed, e.message === "too_long" ? "That name is too long." : "Give it a name.");
+    }
+  };
+
+  const confirmDelete = () => {
+    Alert.alert("Delete this space?", "It has no notes, so nothing is lost.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: deleteNow },
+    ]);
+  };
+
+  const deleteNow = () => {
+    try {
+      writeDb((db) => deleteSpace(db, id));
+      router.back();
+    } catch {
+      Alert.alert("Couldn't delete this space", "Move or delete its notes first.");
+    }
+  };
+
+  const openMenu = () => {
+    const options: string[] = [];
+    const actions: (() => void)[] = [];
+    if (canRename) {
+      options.push("Rename");
+      actions.push(() => startRename());
+    }
+    if (canDelete) {
+      options.push("Delete space");
+      actions.push(confirmDelete);
+    }
+    options.push("Cancel");
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options,
+        cancelButtonIndex: options.length - 1,
+        destructiveButtonIndex: canDelete ? options.length - 2 : undefined,
+      },
+      (index) => actions[index]?.(),
+    );
+  };
+
   const startSync = () => {
     setBusy(true);
     setFailed(false);
@@ -56,7 +124,19 @@ export default function SpaceScreen() {
 
   return (
     <Screen>
-      <BackButton />
+      <View style={styles.topRow}>
+        <BackButton />
+        {canRename || canDelete ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Space options"
+            onPress={openMenu}
+            style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
+          >
+            <SymbolView name="ellipsis" tintColor={colors.ink} size={18} />
+          </Pressable>
+        ) : null}
+      </View>
       <Title>{name}</Title>
       {data.space && canAddTo(data.link?.role ?? null) ? (
         <>
@@ -89,10 +169,11 @@ export default function SpaceScreen() {
           onPress={() => router.push(`/shared/${encodeURIComponent(data.shared?.groupId ?? "")}`)}
         />
       ) : null}
-      <Row
-        title="Sync with my other devices"
-        right={<Switch value={data.synced} disabled={data.synced || busy} onValueChange={startSync} />}
-      />
+      {data.synced ? (
+        <Row title="Syncing with your other devices" />
+      ) : (
+        <Row title="Sync with my other devices" right={<Switch value={false} disabled={busy} onValueChange={startSync} />} />
+      )}
       <Caption>Keep this space the same on your iPhone and iPad.</Caption>
       {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
       {data.synced && data.limited ? (
@@ -130,4 +211,13 @@ export default function SpaceScreen() {
 const styles = StyleSheet.create({
   tile: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   starts: { flexDirection: "row", gap: 12 },
+  topRow: { flexDirection: "row", justifyContent: "space-between" },
+  circle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });
