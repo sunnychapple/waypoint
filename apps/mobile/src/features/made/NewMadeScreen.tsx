@@ -11,10 +11,11 @@ import { keyForRequest } from "../../core/research/research.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useSignOut } from "../../platform/auth.tsx";
+import { useQuote } from "../../platform/jobs.ts";
 import { madeText, startMade } from "../../platform/made.ts";
 import { usePendingText } from "../../platform/pending.ts";
-import { Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
-import { MakeButton, QuoteBox, useRetryingQuote } from "../../ui/QuoteBox.tsx";
+import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // Makes a practice set (M25a), a diagram or a mini app (M25b) from one session, with an optional focus and the price
@@ -57,7 +58,7 @@ export default function NewMadeScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useRetryingQuote(available ? { task: kind } : null);
+  const quote = useQuote(available ? { task: kind } : null);
   const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
   const text = sessionId !== null ? madeText(sessionId, kind) : "";
@@ -140,10 +141,10 @@ export default function NewMadeScreen() {
 
       {!available ? <Caption>{kind === "diagram" ? "Diagrams aren't available yet." : "Mini apps aren't available yet."}</Caption> : null}
       {hasText && available && pending === null ? (
-        <MakeButton
+        <PrimaryButton
           label={price === null ? "Make" : `Make · ${creditsLabel(price)}`}
           icon={KIND_COPY[kind].icon}
-          enabled={price !== null}
+          disabled={price === null}
           onPress={() => void start()}
         />
       ) : null}

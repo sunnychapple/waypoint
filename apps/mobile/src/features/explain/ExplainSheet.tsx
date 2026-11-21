@@ -6,6 +6,7 @@ import { creditsLabel, priceOf } from "../../core/config/config.ts";
 import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
 import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
+import { useSignOut } from "../../platform/auth.tsx";
 import { useConfig } from "../../platform/config.ts";
 import { useWallet } from "../../platform/wallet.ts";
 import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -54,6 +55,7 @@ function ExplainBody({
   const colors = useColors();
   const config = useConfig();
   const { wallet } = useWallet();
+  const signOut = useSignOut();
   const model = useExplain(sessionId, t, word, flagId, explanationId);
   const [showSent, setShowSent] = useState(false);
   const { phase, explanation, unsavedItem, offerResearch } = model;
@@ -144,6 +146,7 @@ function ExplainBody({
               <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(phase.failure).body}</Text>
             </View>
             {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
+            {failureCopy(phase.failure).signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
             {failureCopy(phase.failure).actions.map((action, index) =>
               action === "ask_later" && model.askedLater ? null : index === 0 ? (
                 <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />

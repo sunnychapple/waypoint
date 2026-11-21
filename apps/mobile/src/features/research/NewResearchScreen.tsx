@@ -9,10 +9,11 @@ import { creditsLabel } from "../../core/config/config.ts";
 import { keyForRequest, notesForResearch, researchRequest } from "../../core/research/research.ts";
 import { getDb } from "../../platform/db.ts";
 import { useSignOut } from "../../platform/auth.tsx";
+import { useQuote } from "../../platform/jobs.ts";
 import { startResearch } from "../../platform/research.ts";
-import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-import { MakeButton, QuoteBox, useRetryingQuote } from "../../ui/QuoteBox.tsx";
+import { QuoteBox } from "../../ui/QuoteBox.tsx";
 
 // "Research the web": a question, a depth and the price from the quote, then the job (M19). Opened from a session
 // (sessionId) or from Explain (q prefills the question).
@@ -42,7 +43,7 @@ export default function NewResearchScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useRetryingQuote({ task: "research", depth });
+  const quote = useQuote({ task: "research", depth });
   const signOut = useSignOut();
   const trimmed = question.trim();
   const price = quote.quote?.credits ?? null;
@@ -146,10 +147,10 @@ export default function NewResearchScreen() {
         </View>
       ) : null}
 
-      <MakeButton
+      <PrimaryButton
         label={price === null ? "Research" : `Research · ${creditsLabel(price)}`}
         icon="globe"
-        enabled={price !== null && trimmed !== ""}
+        disabled={price === null || trimmed === ""}
         onPress={() => void start()}
       />
       {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}

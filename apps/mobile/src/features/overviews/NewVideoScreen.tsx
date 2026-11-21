@@ -8,10 +8,11 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import { keyForRequest } from "../../core/research/research.ts";
 import { useSignOut } from "../../platform/auth.tsx";
+import { useQuote } from "../../platform/jobs.ts";
 import { overviewText } from "../../platform/overviews.ts";
 import { startVideo } from "../../platform/videos.ts";
-import { Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
-import { MakeButton, QuoteBox, useRetryingQuote } from "../../ui/QuoteBox.tsx";
+import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // Makes a video overview from one session (M24b): the slides are written in the cloud, the video is made on this iPhone.
@@ -33,7 +34,7 @@ export default function NewVideoScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useRetryingQuote({ task: "video_slides" });
+  const quote = useQuote({ task: "video_slides" });
   const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
   // Read once per session: the text shown under "Show what's sent" is the text that is sent.
@@ -109,7 +110,7 @@ export default function NewVideoScreen() {
       ) : null}
 
       {hasText ? (
-        <MakeButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="play.rectangle" enabled={price !== null} onPress={() => void start()} />
+        <PrimaryButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="play.rectangle" disabled={price === null} onPress={() => void start()} />
       ) : null}
       {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
       {copy !== null

@@ -8,9 +8,10 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import { keyForRequest } from "../../core/research/research.ts";
 import { useSignOut } from "../../platform/auth.tsx";
+import { useQuote } from "../../platform/jobs.ts";
 import { overviewText, startOverview } from "../../platform/overviews.ts";
-import { Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
-import { MakeButton, QuoteBox, useRetryingQuote } from "../../ui/QuoteBox.tsx";
+import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // Makes an audio overview from one session (M23): the script is written in the cloud, the voices on this iPhone.
@@ -32,7 +33,7 @@ export default function NewOverviewScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useRetryingQuote({ task: "overview_script" });
+  const quote = useQuote({ task: "overview_script" });
   const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
   // Read once per session: the text shown under "Show what's sent" is the text that is sent.
@@ -108,7 +109,7 @@ export default function NewOverviewScreen() {
       ) : null}
 
       {hasText ? (
-        <MakeButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="waveform" enabled={price !== null} onPress={() => void start()} />
+        <PrimaryButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="waveform" disabled={price === null} onPress={() => void start()} />
       ) : null}
       {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
       {copy !== null
