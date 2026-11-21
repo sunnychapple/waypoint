@@ -42,6 +42,7 @@ export default function PlansScreen() {
   // Set after a purchase made from a task that ran out of credits: credits added, waiting for Continue.
   const [added, setAdded] = useState<number | null>(null);
   const mounted = useRef(true);
+  const continued = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -227,6 +228,9 @@ export default function PlansScreen() {
           <PrimaryButton
             label="Continue"
             onPress={() => {
+              // A second tap before the screen closes must not also pop the task underneath.
+              if (continued.current) return;
+              continued.current = true;
               if (router.canGoBack()) router.back();
             }}
             style={styles.continue}
