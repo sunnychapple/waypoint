@@ -70,8 +70,14 @@ function loadTurnstile(): Promise<Turnstile> {
     const script = document.createElement("script");
     script.src = TURNSTILE_URL;
     script.async = true;
-    script.onload = () => (window.turnstile === undefined ? reject(new Error("turnstile")) : resolve(window.turnstile));
-    script.onerror = () => reject(new Error("turnstile"));
+    // A failed load is forgotten, so Try again fetches the script again.
+    const fail = (): void => {
+      script.remove();
+      turnstileLoading = null;
+      reject(new Error("turnstile"));
+    };
+    script.onload = () => (window.turnstile === undefined ? fail() : resolve(window.turnstile));
+    script.onerror = fail;
     document.head.append(script);
   });
   return turnstileLoading;
@@ -136,7 +142,14 @@ async function load(id: string, key: CryptoKey, headers: Record<string, string>)
   if (reply.status === 404) return message("This link doesn't work anymore", "It was turned off, or it expired.");
   if (reply.status === 429) return message("Too many tries", "Wait a minute, then try again.", retry);
   if (!reply.ok) return message("Something went wrong", "Try again later.", retry);
-  const plain = await unlock(key, context("link", id), new Uint8Array(await reply.arrayBuffer()));
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await reply.arrayBuffer();
+  } catch {
+    message("You're offline", "Connect to the internet, then try again.", retry);
+    return;
+  }
+  const plain = await unlock(key, context("link", id), new Uint8Array(bytes));
   let item: SharedItem | null = null;
   try {
     item = plain === null ? null : checkSharedItem(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plain)));
