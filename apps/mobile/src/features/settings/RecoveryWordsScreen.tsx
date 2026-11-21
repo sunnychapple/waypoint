@@ -69,10 +69,10 @@ export default function RecoveryWordsScreen() {
       <Screen>
         <Title>Your recovery key</Title>
         <Body>
-          12 words that get you back into Waypoint if you lose this iPhone. Write them on paper and keep it somewhere safe, like with your school things at
+          12 words that get you back into NotePath if you lose this iPhone. Write them on paper and keep it somewhere safe, like with your school things at
           home.
         </Body>
-        <Caption>Waypoint can't see these words and can't send them to you again.</Caption>
+        <Caption>NotePath can't see these words and can't send them to you again.</Caption>
         {caption !== "" ? <Caption>{caption}</Caption> : null}
         <View style={styles.actions}>
           <PrimaryButton label="Show my words" onPress={() => void showWords()} />

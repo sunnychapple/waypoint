@@ -55,7 +55,7 @@ export default function RecordScreen() {
           <View style={[styles.micOff, { backgroundColor: colors.recSoft }]}>
             <SymbolView name="mic.slash.fill" tintColor={colors.rec} size={36} />
           </View>
-          <Title style={styles.centeredText}>Waypoint can't hear yet</Title>
+          <Title style={styles.centeredText}>NotePath can't hear yet</Title>
           <Body style={styles.centeredText}>Turn on the microphone in Settings to record. You can still snap pages.</Body>
         </View>
         <View style={styles.footer}>

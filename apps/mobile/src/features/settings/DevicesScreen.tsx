@@ -85,7 +85,7 @@ export default function DevicesScreen() {
 
   function confirmRemove(row: DeviceRow): void {
     if (row.mine) {
-      Alert.alert("Remove this iPhone?", "Waypoint signs out on this iPhone. Your notes on it stay here.", [
+      Alert.alert("Remove this iPhone?", "NotePath signs out on this iPhone. Your notes on it stay here.", [
         { text: "Cancel", style: "cancel" },
         { text: "Remove", style: "destructive", onPress: () => void remove(row) },
       ]);

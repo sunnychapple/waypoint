@@ -149,7 +149,7 @@ describe("notifications", () => {
   test("job_ready, device_request and device_approved are alerts at priority 10 with fixed text and only aps, kind and ref", () => {
     const texts: Record<"job_ready" | "device_request" | "device_approved", string> = {
       job_ready: "Your result is ready.",
-      device_request: "A new device wants to sign in. Open Waypoint to compare the code.",
+      device_request: "A new device wants to sign in. Open NotePath to compare the code.",
       device_approved: "Your new device was approved.",
     };
     for (const kind of ["job_ready", "device_request", "device_approved"] as const) {
@@ -157,7 +157,7 @@ describe("notifications", () => {
       expect(notification.pushType).toBe("alert");
       expect(notification.priority).toBe(10);
       expect(Object.keys(notification.payload).sort()).toEqual(["aps", "kind", "ref"]);
-      expect(notification.payload.aps).toEqual({ alert: { title: "Waypoint", body: texts[kind] }, sound: "default" });
+      expect(notification.payload.aps).toEqual({ alert: { title: "NotePath", body: texts[kind] }, sound: "default" });
     }
   });
 

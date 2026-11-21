@@ -37,7 +37,7 @@ export default function SignInScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.bg }]}>
       <View style={styles.top}>
-        <Text style={[styles.wordmark, { color: colors.ink }]}>Waypoint</Text>
+        <Text style={[styles.wordmark, { color: colors.ink }]}>NotePath</Text>
         <Text style={[styles.headline, { color: colors.ink }]}>
           Record the lecture. Ask about anything. <Text style={{ color: colors.accent }}>Remember</Text> it.
         </Text>

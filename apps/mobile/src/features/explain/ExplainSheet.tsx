@@ -62,7 +62,7 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
           <Body>There isn't enough of the transcript around this word yet.</Body>
         ) : (
           <>
-            <Body style={{ color: colors.ink2 }}>Waypoint sends this word and about a minute of the transcript around it, for this task only.</Body>
+            <Body style={{ color: colors.ink2 }}>NotePath sends this word and about a minute of the transcript around it, for this task only.</Body>
             <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
               <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
             </Pressable>

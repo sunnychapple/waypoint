@@ -71,7 +71,7 @@ export default function SecondTranscriptSheet() {
       {offered ? (
         <>
           <Body style={[styles.first, { color: colors.ink }]}>
-            {"Your recording's audio will be sent to Waypoint's cloud for this one job, and deleted when it ends."}
+            {"Your recording's audio will be sent to NotePath's cloud for this one job, and deleted when it ends."}
           </Body>
           <Caption>{"A second, more careful transcript. Words that differ from this iPhone's transcript are highlighted."}</Caption>
 

@@ -50,7 +50,7 @@ export default function OverviewScreen() {
       ) : (
         <>
           <Text style={[styles.note, { color: colors.ink }]}>Making the voices…</Text>
-          <Caption>Keep Waypoint open while the voices are made.</Caption>
+          <Caption>Keep NotePath open while the voices are made.</Caption>
         </>
       )}
     </Screen>
