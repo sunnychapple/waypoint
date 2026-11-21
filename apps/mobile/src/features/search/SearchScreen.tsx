@@ -13,6 +13,13 @@ import { useColors } from "../../ui/theme.ts";
 
 const DEBOUNCE_MS = 250;
 
+// Where a hit opens: its moment in the session, and for a page or photo hit (captureId set) that capture, so the
+// session can land on that page rather than the top.
+export function hitRoute(hit: Pick<Hit, "sessionId" | "tStart" | "captureId">): string {
+  const page = hit.captureId === null ? "" : `&page=${encodeURIComponent(hit.captureId)}`;
+  return `/session/${hit.sessionId}?t=${hit.tStart}${page}`;
+}
+
 // Splits a snippet on its [bracketed] words, which are the keyword matches.
 function Snippet({ text }: { text: string }) {
   const colors = useColors();
@@ -107,6 +114,7 @@ export default function SearchScreen() {
         onChangeText={setText}
         autoCorrect={false}
         returnKeyType="search"
+        clearButtonMode="while-editing"
         style={[styles.field, { backgroundColor: colors.surface2, color: colors.ink }]}
       />
 
@@ -129,7 +137,7 @@ export default function SearchScreen() {
             <HitRow
               key={`${hit.chunkId}`}
               hit={hit}
-              onPress={() => router.push(`/session/${hit.sessionId}?t=${hit.tStart}`)}
+              onPress={() => router.push(hitRoute(hit))}
             />
           ))
         : null}

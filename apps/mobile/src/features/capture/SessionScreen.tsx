@@ -36,7 +36,7 @@ import { TimeMarkRow } from "./TimelineMarks.tsx";
 // recording from there (open question 54).
 export default function SessionScreen() {
   const colors = useColors();
-  const { id, view, t } = useLocalSearchParams<{ id: string; view?: string; t?: string }>();
+  const { id, view, t, page: pageId } = useLocalSearchParams<{ id: string; view?: string; t?: string; page?: string }>();
   const data = useQuery((db) => {
     const session = getSession(db, id);
     if (!session) return null;
@@ -84,11 +84,14 @@ export default function SessionScreen() {
   // A search hit's moment picks the transcript line to land on: the nearest one (see nearestSegmentIndex).
   const moment = momentFromParam(t);
   const lines = timeline.filter((item): item is Extract<TimelineItem, { kind: "line" }> => item.kind === "line");
-  const jumpKey = `${id}|${t ?? ""}`;
-  const targetKey = moment === null || lines.length === 0 ? null : (lines[nearestSegmentIndex(lines.map((line) => line.at), moment)]?.key ?? null);
+  // A search hit on a page lands on that page (its capture id); any other hit lands on its transcript line.
+  const landPage = targetPageId(pages, pageId);
+  const jumpKey = `${id}|${t ?? ""}|${pageId ?? ""}`;
+  const targetKey =
+    landPage ?? (moment === null || lines.length === 0 ? null : (lines[nearestSegmentIndex(lines.map((line) => line.at), moment)]?.key ?? null));
 
-  // Once the target line has laid out, scroll to it and tint it. Only the first layout of one jump does this.
-  // The line's y is measured from the scroll content, where every row sits.
+  // Once the target line or page has laid out, scroll to it and tint it. Only the first layout of one jump does this.
+  // Its y is measured from the scroll content, where every row sits.
   function landOn(key: string, y: number): void {
     if (key !== targetKey || landed.current === jumpKey) return;
     landed.current = jumpKey;
@@ -282,7 +285,14 @@ export default function SessionScreen() {
         )}
 
         {pages.map((page, index) => (
-          <PageBlock key={page.id} number={index + 1} file={page.file} text={page.foundText} />
+          <PageBlock
+            key={page.id}
+            number={index + 1}
+            file={page.file}
+            text={page.foundText}
+            lit={lit === page.id}
+            onLayout={(y) => landOn(page.id, y)}
+          />
         ))}
 
         {overviews.length > 0 ? (
@@ -385,11 +395,32 @@ function secondTranscript(db: SqlDb, sessionId: string): { parts: DiffWord[][]; 
   return { parts, truncated };
 }
 
-function PageBlock({ number, file, text }: { number: number; file: string; text: string | null }) {
+// The page a search hit names, when this session has that page; otherwise null.
+export function targetPageId(pages: { id: string }[], pageId: string | undefined): string | null {
+  if (pageId === undefined || pageId === "") return null;
+  return pages.some((page) => page.id === pageId) ? pageId : null;
+}
+
+function PageBlock({
+  number,
+  file,
+  text,
+  lit,
+  onLayout,
+}: {
+  number: number;
+  file: string;
+  text: string | null;
+  lit: boolean;
+  onLayout: (y: number) => void;
+}) {
   const colors = useColors();
   const [showing, setShowing] = useState(false);
   return (
-    <View style={styles.page}>
+    <View
+      onLayout={(event) => onLayout(event.nativeEvent.layout.y)}
+      style={[styles.page, lit ? [styles.litLine, { backgroundColor: colors.accentSoft }] : null]}
+    >
       <Caption>{String(number)}</Caption>
       <Image
         accessibilityLabel={`Page ${number}`}
