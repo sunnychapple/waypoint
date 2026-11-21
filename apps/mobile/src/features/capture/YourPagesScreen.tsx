@@ -60,6 +60,15 @@ export default function YourPagesScreen() {
     ]);
   }
 
+  // Pages can come from the document camera or from the photos already on the phone.
+  function openAddMenu() {
+    Alert.alert("Add pages", undefined, [
+      { text: "Take photos", onPress: () => router.push(`/pages/new?sessionId=${id}`) },
+      { text: "From Photos", onPress: () => router.push(`/pages/new?sessionId=${id}&from=photos`) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
+
   function openMenu() {
     Alert.alert("Your pages", undefined, [
       { text: "Delete these pages", style: "destructive", onPress: confirmDiscard },
@@ -119,7 +128,7 @@ export default function YourPagesScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Add pages"
-          onPress={() => router.push(`/pages/new?sessionId=${id}`)}
+          onPress={openAddMenu}
           style={[styles.addTile, { width: cell, aspectRatio: 0.75, backgroundColor: colors.accentSoft }]}
         >
           <SymbolView name="camera" tintColor={colors.accent} size={24} />
