@@ -147,6 +147,10 @@ export default function SettingsScreen() {
         <Text style={[styles.signOutText, { color: colors.danger }]}>Sign out</Text>
       </Pressable>
       <Caption style={styles.center}>Signing out doesn't delete your notes.</Caption>
+
+      <Pressable accessibilityRole="button" accessibilityLabel="Delete account" onPress={() => router.push("/delete-account")} style={styles.signOut}>
+        <Text style={[styles.signOutText, { color: colors.danger }]}>Delete account</Text>
+      </Pressable>
     </Screen>
   );
 }
