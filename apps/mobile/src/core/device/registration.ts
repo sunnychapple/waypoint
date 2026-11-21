@@ -40,6 +40,12 @@ export function deviceName(modelName: string | null): string {
 
 export type DeviceStatus = "checking" | "approved" | "waiting" | "too_many_waiting" | "offline" | "failed" | "signed_out";
 
+// "Not approved" shows once this iPhone is waiting and its pairing has ended (the approver declined it, or it ran out
+// of time). The app cannot tell those two apart, so both get the same message.
+export function isNotApproved(status: DeviceStatus, pairingEnded: boolean): boolean {
+  return status === "waiting" && pairingEnded;
+}
+
 // Settings keys. The server user id is kept per Clerk user so the app can sign offline.
 export const userIdKey = (clerkUserId: string): string => `server_user_id:${clerkUserId}`;
 export const statusKey = (userId: string): string => `device_status:${userId}`;
