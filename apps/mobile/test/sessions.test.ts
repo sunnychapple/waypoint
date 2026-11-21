@@ -8,6 +8,7 @@ import {
   getSession,
   latestSession,
   moveSession,
+  moveSessionToSpace,
   recentSessions,
   renameSession,
   sessionsInSpace,
@@ -95,6 +96,18 @@ describe("sessions", () => {
     moveSession(db, s.id, math.id, 500);
     expect(getSession(db, s.id)?.spaceId).toBe(math.id);
     expect(db.get<{ last_used_at: number }>("SELECT last_used_at FROM spaces WHERE id = ?", [math.id])?.last_used_at).toBe(500);
+  });
+
+  it("moveSessionToSpace moves the session and marks it to sync only when the space changes", () => {
+    const home = ensureDefaultSpace(db, deps());
+    const math = createSpace(db, deps(100), "Math");
+    const s = createSession(db, deps(), { spaceId: home.id, kind: "recording", title: "Lecture", state: "saved" });
+    const dirtyCount = () => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM dirty WHERE table_name = 'sessions' AND row_id = ?", [s.id])?.n ?? 0;
+    moveSessionToSpace(db, s.id, home.id, 300);
+    expect(dirtyCount()).toBe(0);
+    moveSessionToSpace(db, s.id, math.id, 500);
+    expect(getSession(db, s.id)?.spaceId).toBe(math.id);
+    expect(dirtyCount()).toBe(1);
   });
 
   it("deleteSessionRow removes the session and its captures, flags, cards and segments", () => {

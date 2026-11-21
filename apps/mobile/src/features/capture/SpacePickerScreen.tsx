@@ -2,10 +2,9 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsLabel, usedLabel } from "../../core/capture/labels.ts";
-import { getSession, moveSession } from "../../core/capture/sessions.ts";
+import { getSession, moveSessionToSpace } from "../../core/capture/sessions.ts";
 import { getSavingTo, listSpaces, setSavingTo } from "../../core/db/spaces.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
-import { markMoved } from "../../core/sync/changes.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -39,13 +38,8 @@ export default function SpacePickerScreen() {
 
   function move(spaceId: string) {
     writeDb((db) => {
-      if (sessionId) {
-        // A move to another space: the rows follow the new space's group, and the old group drops the session (M30b).
-        const from = getSession(db, sessionId)?.spaceId ?? null;
-        const oldGroup = from === null ? null : (db.get<{ group_id: string }>("SELECT group_id FROM space_groups WHERE space_id = ?", [from])?.group_id ?? null);
-        moveSession(db, sessionId, spaceId, Date.now());
-        if (from !== spaceId) markMoved(db, sessionId, oldGroup);
-      } else setSavingTo(db, spaceId, Date.now());
+      if (sessionId) moveSessionToSpace(db, sessionId, spaceId, Date.now());
+      else setSavingTo(db, spaceId, Date.now());
     });
     router.back();
   }
@@ -73,7 +67,7 @@ export default function SpacePickerScreen() {
           />
         );
       })}
-      <SecondaryButton label="New space" icon="plus" tone="accent" onPress={() => router.push("/new-space?from=picker")} />
+      <SecondaryButton label="New space" icon="plus" tone="accent" onPress={() => router.push(`/new-space?from=picker${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`)} />
       <Caption style={styles.footer}>Not sure? Leave it in My notes. You can move it any time.</Caption>
     </Screen>
   );

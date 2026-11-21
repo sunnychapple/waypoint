@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { getMicPermission, requestMicPermission, type MicPermission } from "../../../modules/waypoint-audio/index.ts";
 import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
-// Permissions (A7 as a settings page). Microphone is read and asked here; speech and camera are asked by
-// the system on first use, so their rows say so.
+// Permissions (A7 as a settings page). Microphone and camera are read and asked here. Speech recognition is asked by
+// the system on first use, so its row says so.
 export default function PermissionsScreen() {
   const colors = useColors();
   const [mic, setMic] = useState<MicPermission | null>(null);
+  const [camera, setCamera] = useState<ImagePicker.PermissionStatus | null>(null);
 
   // Refreshes when the screen opens or comes back, and when the app comes back from iOS Settings
   // (the screen is not blurred while the app is in the background, so focus alone misses that).
   const refresh = useCallback(() => {
     getMicPermission().then(setMic, () => setMic(null));
+    ImagePicker.getCameraPermissionsAsync().then(
+      ({ status }) => setCamera(status),
+      () => setCamera(null),
+    );
   }, []);
   useFocusEffect(refresh);
   useEffect(() => {
@@ -43,6 +49,19 @@ export default function PermissionsScreen() {
     </Pressable>
   );
 
+  const cameraRight =
+    camera === ImagePicker.PermissionStatus.GRANTED ? (
+      <View style={[styles.chip, { backgroundColor: colors.localSoft }]}>
+        <Text style={[styles.chipText, { color: colors.localInk }]}>Allowed</Text>
+      </View>
+    ) : camera === ImagePicker.PermissionStatus.DENIED ? (
+      <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()} style={styles.denied}>
+        <Caption>Not allowed — tap to open Settings</Caption>
+      </Pressable>
+    ) : camera === ImagePicker.PermissionStatus.UNDETERMINED ? (
+      <Caption>Asked when you first use it</Caption>
+    ) : null;
+
   const micRight =
     mic === "granted" ? (
       <View style={[styles.chip, { backgroundColor: colors.localSoft }]}>
@@ -63,7 +82,7 @@ export default function PermissionsScreen() {
       <Title>Permissions</Title>
       <Row title="Microphone" subtitle="Record classes and talks" right={micRight} />
       <Row title="Speech recognition" subtitle="Write down recordings on this iPhone" right={<Caption>Asked when you first use it</Caption>} />
-      <Row title="Camera" subtitle="Snap pages" right={<Caption>Asked when you first use it</Caption>} />
+      <Row title="Camera" subtitle="Snap pages" right={cameraRight} />
       <Caption style={styles.center}>Change any of these in Settings.</Caption>
     </Screen>
   );

@@ -124,21 +124,21 @@ export default function SettingsScreen() {
       <Link title="Devices" onPress={() => router.push("/devices")} />
 
       <Row
-        title="Cloud jobs"
+        title="Things being made"
         right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
         onPress={() => router.push("/jobs")}
       />
 
       <Caption style={styles.section}>ON THIS IPHONE</Caption>
       <Row
-        title="Speech pack"
+        title="Offline speech"
         right={<Caption>{speechLabel(speech, fraction)}</Caption>}
         onPress={speech?.pack === "not_installed" ? downloadPack : undefined}
       />
       <Row title="Apple Intelligence" right={<Caption>{appleIntelligenceLabel(availability)}</Caption>} />
       <Link title="Permissions" onPress={() => router.push("/settings-permissions")} />
       <Link title="Storage & search" onPress={() => router.push("/settings-storage")} />
-      <Row title="Offer a second transcript after each recording" right={<Switch accessibilityLabel="Offer a second transcript after each recording" value={offerSecond} onValueChange={setOffer} />} />
+      <Row title="Offer a better transcript after each recording" right={<Switch accessibilityLabel="Offer a better transcript after each recording" value={offerSecond} onValueChange={setOffer} />} />
 
       <Caption style={styles.section}>ABOUT</Caption>
       <Row title={versionLabel(Constants.expoConfig?.version ?? null, Constants.nativeBuildVersion)} />

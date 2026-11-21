@@ -103,7 +103,7 @@ export default function DevicesScreen() {
             <SecondaryButton label="Make a new recovery key" onPress={() => router.push("/recovery-words")} />
           </View>
         ) : null}
-        {keyProblem ? <Caption>This iPhone doesn't have your account key. Remove it from another device and add it again.</Caption> : null}
+        {keyProblem ? <Caption>This iPhone can't unlock your notes. Remove it from another device and add it again.</Caption> : null}
         {removeFailed ? <Caption>Couldn't remove it. Try again.</Caption> : null}
         {loadFailed && rows === null ? <Caption>Can't load devices offline.</Caption> : null}
         {rows?.map((row) => (

@@ -62,7 +62,7 @@ export default function SecondTranscriptSheet() {
 
   return (
     <Screen>
-      <Title>Second transcript</Title>
+      <Title>Better transcript</Title>
 
       {plan === null ? <Body>This session has no recording.</Body> : null}
       {tooLong ? <Body>This recording is too long for a second transcript.</Body> : null}

@@ -60,7 +60,7 @@ export const TASK_LABELS: Readonly<Record<string, string>> = {
   sync_extra: "More sync",
   mini_app: "Mini app",
   practice: "Practice set",
-  retranscribe: "Second transcript",
+  retranscribe: "Better transcript",
 };
 
 // The fields of a sent body, in the order the "What was sent" screen shows them. Unknown fields are shown too, so the

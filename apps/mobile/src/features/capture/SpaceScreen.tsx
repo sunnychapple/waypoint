@@ -11,7 +11,7 @@ import { canAddTo } from "../../core/share/spaces.ts";
 import { SYNC_LIMIT_KEY, sendingPaused } from "../../core/sync/limit.ts";
 import { useMinuteNow, useQuery, writeDb } from "../../platform/db.ts";
 import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts";
-import { BackButton, Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { StartTile } from "./HomeScreen.tsx";
 
@@ -93,6 +93,7 @@ export default function SpaceScreen() {
         title="Sync with my other devices"
         right={<Switch value={data.synced} disabled={data.synced || busy} onValueChange={startSync} />}
       />
+      <Caption>Keep this space the same on your iPhone and iPad.</Caption>
       {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
       {data.synced && data.limited ? (
         <>

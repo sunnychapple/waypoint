@@ -17,7 +17,7 @@ function resultMessage(result: SwitchResult): string | null {
     case "ok":
       return null;
     case "plan_required":
-      return "Zero retention needs Plus.";
+      return "“Don't keep my text” needs Plus.";
     case "offline":
       return "You're offline. Try again when you're connected.";
     case "failed":
@@ -53,8 +53,8 @@ export default function CloudScreen() {
 
   function askToTurnOn() {
     Alert.alert(
-      "Turn on zero retention?",
-      "Cloud tasks will use only models that keep nothing. None is available yet, so Explain and every other cloud task will stop working until one is.",
+      "Turn on “Don't keep my text”?",
+      "Cloud tasks will use only AI providers that delete what you send right after answering. None is available yet, so Explain and every other cloud task will stop working until one is.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Turn on", onPress: () => void change(true) },
@@ -70,12 +70,13 @@ export default function CloudScreen() {
 
       {SHOW_ZERO_RETENTION ? (
         <>
-          <Caption style={styles.section}>ZERO RETENTION</Caption>
+          <Caption style={styles.section}>DON'T KEEP MY TEXT</Caption>
           <Row
-            title="Zero retention"
+            title="Don't keep my text"
+            subtitle="AI providers delete what you send right after answering."
             right={
               <Switch
-                accessibilityLabel="Zero retention"
+                accessibilityLabel="Don't keep my text"
                 value={on}
                 disabled={plan !== "plus" || busy}
                 onValueChange={(value) => (value ? askToTurnOn() : void change(false))}
@@ -93,7 +94,7 @@ export default function CloudScreen() {
           ) : on ? (
             <View style={[styles.warning, { backgroundColor: colors.flagSoft }]}>
               <Text style={[styles.warningText, { color: colors.flagInk }]}>
-                Zero retention is on. No model that keeps nothing is available yet, so Explain and other cloud tasks won't work until one is. Everything on this iPhone keeps working.
+                “Don't keep my text” is on. No AI provider that deletes what you send is available yet, so Explain and other cloud tasks won't work until one is. Everything on this iPhone keeps working.
               </Text>
             </View>
           ) : (

@@ -50,14 +50,14 @@ export function failureCopy(failure: CloudFailure): FailureCopy {
       };
     case "zero_retention":
       return {
-        title: "Zero retention is on",
-        body: "No cloud model that keeps nothing is available yet, so cloud tasks can't run. Turn zero retention off in Settings › Cloud & privacy to use this.",
+        title: "“Don't keep my text” is on",
+        body: "No AI provider that deletes what you send is available yet, so cloud tasks can't run. Turn off “Don't keep my text” in Settings › Cloud & privacy to use this.",
         actions: ["close"],
       };
     case "model_failed":
       return { title: "Couldn't get an answer", body: "Nothing was charged. You can try again, or keep it as a question for later.", actions: ["try_again", "ask_later"] };
     case "already_finished":
-      return { title: "That request already finished", body: "Try again to ask once more.", actions: ["try_again"] };
+      return { title: "That's already done.", body: "Try again to ask once more.", actions: ["try_again"] };
     case "busy":
       return { title: "Still working on it", body: "Your last request hasn't finished yet. Try again in a moment.", actions: ["try_again"] };
     case "offline":

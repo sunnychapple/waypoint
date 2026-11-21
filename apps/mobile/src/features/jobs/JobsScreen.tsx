@@ -4,15 +4,15 @@ import { JOB_LABELS, jobLine, listJobs } from "../../core/jobs/jobs.ts";
 import { useQuery } from "../../platform/db.ts";
 import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 
-// Every cloud job this iPhone started, newest first. Tapping one opens its screen.
+// Every job this iPhone started (things being made in the cloud), newest first. Tapping one opens its screen.
 export default function JobsScreen() {
   const jobs = useQuery((db) => listJobs(db));
   const offset = -new Date().getTimezoneOffset();
   return (
     <Screen>
       <BackButton />
-      <Title>Cloud jobs</Title>
-      {jobs.length === 0 ? <Caption>No cloud jobs yet.</Caption> : null}
+      <Title>Things being made</Title>
+      {jobs.length === 0 ? <Caption>Nothing is being made yet.</Caption> : null}
       {jobs.map((job) => (
         <Row
           key={job.id}
