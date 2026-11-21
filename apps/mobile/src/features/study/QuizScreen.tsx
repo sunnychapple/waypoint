@@ -25,6 +25,9 @@ export default function QuizScreen() {
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "ready">("working");
   const [quiz, setQuiz] = useState<QuizState | null>(null);
+  // True once the student is practising the ones they missed: nothing more is saved, and the first run's count stands.
+  const [retrying, setRetrying] = useState(false);
+  const [added, setAdded] = useState(0);
 
   useEffect(() => {
     if (availability !== "available") return;
@@ -45,6 +48,8 @@ export default function QuizScreen() {
           return;
         }
         setQuiz(startQuiz(questions));
+        setRetrying(false);
+        setAdded(0);
         setOutcome("ready");
       } catch {
         if (active) setOutcome("failed");
@@ -101,9 +106,13 @@ export default function QuizScreen() {
       <Screen>
         <CloseButton />
         <Title>{`You got ${quiz.right} of ${quiz.questions.length}`}</Title>
-        {quiz.missed.length > 0 ? <Body>{addedLine(quiz.missed.length)}</Body> : null}
+        {!retrying && added > 0 ? <Body>{addedLine(added)}</Body> : null}
         {quiz.missed.length > 0 ? (
-          <PrimaryButton label="Practise the ones I missed" onPress={() => setQuiz(retryMissed(quiz))} />
+          <PrimaryButton label="Practise the ones I missed" onPress={() => {
+              setRetrying(true);
+              setQuiz(retryMissed(quiz));
+            }}
+          />
         ) : null}
         {quiz.missed.length > 0 ? (
           <SecondaryButton label="Review them" onPress={() => router.push(`/study/review?sessionId=${sessionId}`)} />
@@ -123,9 +132,10 @@ export default function QuizScreen() {
   function advance() {
     if (quiz === null) return;
     const after = next(quiz);
-    if (isDone(after) && after.missed.length > 0) {
+    if (!retrying && isDone(after) && after.missed.length > 0) {
       const missed = after.missed;
-      writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, missedToCards(missed), "quiz_miss"));
+      // Only the cards actually saved count: a front the session already has is skipped.
+      setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, missedToCards(missed), "quiz_miss")).length);
     }
     setQuiz(after);
   }
@@ -184,7 +194,7 @@ export default function QuizScreen() {
       ) : null}
 
       {answered ? <PrimaryButton label={last ? "See how you did" : "Next"} onPress={advance} /> : null}
-      <Caption style={styles.caption}>Wrong answers become flashcards</Caption>
+      {retrying ? null : <Caption style={styles.caption}>Wrong answers become flashcards</Caption>}
     </Screen>
   );
 }

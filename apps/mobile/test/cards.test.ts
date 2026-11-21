@@ -143,6 +143,23 @@ describe("cards", () => {
     expect(db.all<{ rating: number }>("SELECT rating FROM reviews ORDER BY reviewed_at").map((r) => r.rating)).toEqual([Rating.Good, Rating.Again]);
   });
 
+  it("a review card practised early keeps its schedule unless forgotten, and a clock set back does not throw", () => {
+    saveCards(db, deps(), sessionId, [card("A")], "device_model");
+    let at = NOW;
+    let due = reviewCard(db, "card-1", Rating.Good, at).dueAt;
+    for (let i = 0; i < 3; i++) {
+      at = due;
+      due = reviewCard(db, "card-1", Rating.Good, at).dueAt;
+    }
+    const early = at + 60_000;
+    expect(reviewCard(db, "card-1", Rating.Easy, early).dueAt).toBe(due);
+    expect(reviewCard(db, "card-1", Rating.Hard, early).dueAt).toBe(due);
+    expect(previewIntervals(db, "card-1", early)[4]).toBe(due - early);
+    expect(reviewCard(db, "card-1", Rating.Again, early).dueAt).toBeLessThan(due);
+    expect(() => reviewCard(db, "card-1", Rating.Good, NOW)).not.toThrow();
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM reviews")?.n).toBe(9);
+  });
+
   it("saveCards skips a front the session already has, ignoring case and spacing", () => {
     saveCards(db, deps(), sessionId, [card("Elasticity")], "device_model");
     const second = saveCards(db, deps(), sessionId, [card("elasticity "), card("Supply")], "device_model");
