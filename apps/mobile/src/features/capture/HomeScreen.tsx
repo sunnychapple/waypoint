@@ -51,7 +51,7 @@ export default function HomeScreen() {
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
           <Text style={[styles.cardTitle, { color: colors.ink }]}>Approve this iPhone</Text>
           <Body>Open NotePath on your other iPhone or iPad and approve this one to get your notes here.</Body>
-          <PrimaryButton label="Approve this iPhone" onPress={() => router.push("/device-waiting")} />
+          <PrimaryButton label="Show me how" onPress={() => router.push("/device-waiting")} />
         </View>
       ) : null}
 

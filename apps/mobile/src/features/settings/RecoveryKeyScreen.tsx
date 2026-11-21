@@ -31,7 +31,7 @@ export default function RecoveryKeyScreen() {
         {canMakeRecoveryKey() ? (
           <>
             <PrimaryButton label="Make new recovery words" onPress={() => router.push("/recovery-words")} />
-            <Caption>A new key replaces the old one. The old words stop working.</Caption>
+            <Caption>New recovery words replace the old ones. The old words stop working.</Caption>
           </>
         ) : (
           <Caption>This iPhone can't make recovery words yet.</Caption>
