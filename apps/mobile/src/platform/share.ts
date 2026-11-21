@@ -1,6 +1,6 @@
 import { randomUUID, CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
 import { createSpace, freeSpaceName } from "../core/db/spaces.ts";
-import { getGroup, upsertGroup, type Role } from "../core/groups/groups.ts";
+import { getGroup, markLeft, upsertGroup, type Role } from "../core/groups/groups.ts";
 import { acceptNewAccountKey } from "../core/groups/keys.ts";
 import { SHARED_FALLBACK_NAME, safetyCode } from "../core/share/spaces.ts";
 import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
@@ -14,6 +14,7 @@ import {
   ensureKeys,
   refreshGroups,
   removeMember as removeGroupMember,
+  whileMakingGroup,
 } from "./groups.ts";
 
 // Shared spaces (M30a): a shared group, mapped to a local space (space_groups) so sync (M29) carries its rows.
@@ -38,18 +39,20 @@ function mapSpace(spaceId: string, groupId: string): void {
 }
 
 // A new shared space: the local space first (a taken name fails before anything goes to the server), then the group.
-export async function newSharedSpace(name: string): Promise<string> {
-  const trimmed = name.trim();
-  const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, trimmed));
-  let groupId: string;
-  try {
-    groupId = await createGroup("shared", trimmed);
-  } catch (error) {
-    writeDb((db) => db.run("DELETE FROM spaces WHERE id = ?", [space.id]));
-    throw error;
-  }
-  mapSpace(space.id, groupId);
-  return groupId;
+export function newSharedSpace(name: string): Promise<string> {
+  return whileMakingGroup(async () => {
+    const trimmed = name.trim();
+    const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, trimmed));
+    let groupId: string;
+    try {
+      groupId = await createGroup("shared", trimmed);
+    } catch (error) {
+      writeDb((db) => db.run("DELETE FROM spaces WHERE id = ?", [space.id]));
+      throw error;
+    }
+    mapSpace(space.id, groupId);
+    return groupId;
+  });
 }
 
 // The link for a new invite. "From now" gives history_from = now; "everything" gives 0. An owner invite never ends.
@@ -60,23 +63,25 @@ export async function invite(groupId: string, role: Role, history: HistoryChoice
 
 // Joins with a token (the token is used once and never kept). Once the server accepts it, the local space is mapped
 // first; the keys and the refresh are best effort, so nothing after the server step can fail the join.
-export async function join(token: string): Promise<string> {
-  const user = currentUserId();
-  if (user === null) throw new Error("signed out");
-  const generation = dbGeneration();
-  const view = await acceptInvite(token);
-  if (!stillSame(generation)) throw new Error("signed out"); // the group is not mapped into someone else's notes
-  const groupId = view.id;
-  writeDb((db) => upsertGroup(db, view, null, Date.now(), user));
-  if (getDb().get("SELECT 1 AS ok FROM space_groups WHERE group_id = ?", [groupId]) === null) {
-    const group = getGroup(getDb(), groupId);
-    const base = group === null || group.name === "" ? SHARED_FALLBACK_NAME : group.name;
-    const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, freeSpaceName(db, base, null)));
-    mapSpace(space.id, groupId);
-  }
-  await ensureKeys(groupId, { now: false }).catch(() => undefined);
-  await refreshGroups().catch(() => undefined);
-  return groupId;
+export function join(token: string): Promise<string> {
+  return whileMakingGroup(async () => {
+    const user = currentUserId();
+    if (user === null) throw new Error("signed out");
+    const generation = dbGeneration();
+    const view = await acceptInvite(token);
+    if (!stillSame(generation)) throw new Error("signed out"); // the group is not mapped into someone else's notes
+    const groupId = view.id;
+    writeDb((db) => upsertGroup(db, view, null, Date.now(), user));
+    if (getDb().get("SELECT 1 AS ok FROM space_groups WHERE group_id = ?", [groupId]) === null) {
+      const group = getGroup(getDb(), groupId);
+      const base = group === null || group.name === "" ? SHARED_FALLBACK_NAME : group.name;
+      const space = writeDb((db) => createSpace(db, { now: Date.now, newId: randomUUID }, freeSpaceName(db, base, null)));
+      mapSpace(space.id, groupId);
+    }
+    await ensureKeys(groupId, { now: false }).catch(() => undefined);
+    await refreshGroups().catch(() => undefined);
+    return groupId;
+  });
 }
 
 // Leaves a shared group (the same call as removing oneself). The local copy stays; the mapping goes, so sync stops.
@@ -85,7 +90,10 @@ export async function leave(groupId: string): Promise<void> {
   if (me === null) throw new Error("signed out");
   const generation = dbGeneration();
   await removeGroupMember(groupId, me);
-  writeDbIf(generation, (db) => db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]));
+  writeDbIf(generation, (db) => {
+    db.run("DELETE FROM space_groups WHERE group_id = ?", [groupId]);
+    markLeft(db, groupId, Date.now()); // so a restore cannot map a space back for a group just left
+  });
 }
 
 // An owner removes a member. The new key is made at once.

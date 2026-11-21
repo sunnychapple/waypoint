@@ -11,6 +11,7 @@ import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { getSpace } from "../core/db/spaces.ts";
 import type { SqlDb } from "../core/db/sql.ts";
 import { getGroup, type StoredGroup } from "../core/groups/groups.ts";
+import { restoreGroupSpaces } from "../core/groups/restore.ts";
 import { actionForPush } from "../core/push/push.ts";
 import {
   SEGMENT_BUCKET_MS,
@@ -39,7 +40,7 @@ import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
 import { dbGeneration, dbUser, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId, requireApprovedDevice, restoreApprovedUser, useDeviceStatus } from "./device.ts";
-import { createGroup, ensureKeys, refreshGroups, wrapKeysNow } from "./groups.ts";
+import { createGroup, ensureKeys, makingGroup, onGroupsReady, refreshGroups, whileMakingGroup, wrapKeysNow } from "./groups.ts";
 import { createKeyNudger } from "./keyNudge.ts";
 import { toFailure } from "./tasks.ts";
 
@@ -109,16 +110,37 @@ function markExisting(db: SqlDb, spaceId: string): void {
 export async function turnOnSync(spaceId: string): Promise<void> {
   const space = getSpace(getDb(), spaceId);
   if (space === null || isSpaceSynced(getDb(), spaceId)) return;
-  const groupId = await createGroup("personal", space.name);
-  writeDb((db) => {
-    db.transaction(() => {
-      db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, ?)", [spaceId, groupId]);
-      markExisting(db, spaceId);
+  const groupId = await whileMakingGroup(async () => {
+    const id = await createGroup("personal", space.name);
+    writeDb((db) => {
+      db.transaction(() => {
+        db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, ?)", [spaceId, id]);
+        markExisting(db, spaceId);
+      });
     });
+    return id;
   });
   if (foreground) void connect(groupId);
   void syncNow(groupId);
 }
+
+// A group this iPhone holds a key for but has no space for (a new or recovered iPhone) gets a space here, and its notes
+// come down. Skipped while a group is being made here (its own flow maps the space).
+async function restoreSpaces(): Promise<void> {
+  if (makingGroup()) return;
+  const user = currentUserId();
+  if (user === null) return;
+  const generation = dbGeneration();
+  const restored =
+    writeDbIf(generation, (db) =>
+      restoreGroupSpaces(db, { now: Date.now, newId: randomUUID }, (groupId) => heldGroupKeyVersions(user, groupId).length > 0),
+    ) ?? [];
+  for (const groupId of restored) {
+    if (foreground) void connect(groupId);
+    void syncNow(groupId);
+  }
+}
+onGroupsReady(restoreSpaces);
 
 // The blob key of a capture's file: an existing blob, or a new one made now (the file is locked and uploaded first).
 // null: the capture has no file, or the plan does not allow media (the change then goes without its file).
