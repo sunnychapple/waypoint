@@ -8,7 +8,7 @@ import type { AppEnv } from "../env.ts";
 // the app's own link (waypoint://invite/<token>) at once. The page itself is the same for everyone; the script is allowed
 // by a per-response nonce only.
 export function invitePageRoute() {
-  return new Hono<AppEnv>().get("/i/?", () => {
+  const page = (): Response => {
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
     return new Response(invitePage(nonce), {
       headers: {
@@ -21,7 +21,8 @@ export function invitePageRoute() {
         "Cache-Control": "no-store",
       },
     });
-  });
+  };
+  return new Hono<AppEnv>().get("/i", page).get("/i/", page);
 }
 
 // The page itself. `nonce` is base64 (no quotes or angle brackets), so it needs no escaping.
