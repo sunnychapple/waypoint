@@ -1,4 +1,4 @@
-import { cleanCards, cleanQuiz, type CardDraft, type QuizDraft } from "./drafts.ts";
+import { cleanCards, cleanQuiz, type CardDraft, type QuizDraft, type SourcedQuizDraft } from "./drafts.ts";
 
 export type ModelPort = {
   contextSize(): number;
@@ -140,13 +140,25 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
   return out;
 }
 
+// Grounded when the answer is in the group text, or the evidence is in it and the answer is in the evidence.
+function grounded(quiz: SourcedQuizDraft, groupText: string): boolean {
+  const text = looseText(groupText);
+  const answer = looseText(quiz.answer);
+  if (text.includes(answer)) return true;
+  const evidence = looseText(quiz.evidence);
+  return text.includes(evidence) && evidence.includes(answer);
+}
+
 export async function makeQuizFromUnits(port: ModelPort, units: Unit[], count: number): Promise<QuizDraft[]> {
   const call = async (text: string, n: number) => cleanQuiz(await port.makeQuiz(text, n), n);
   const out: QuizDraft[] = [];
   for (const { group, want } of plan(port, units, count)) {
     if (out.length >= count) break;
+    const groupText = joinText(group);
     for (const quiz of await askGroup(group, want, call)) {
-      if (out.length < count) out.push(quiz);
+      if (out.length >= count) break;
+      if (!grounded(quiz, groupText)) continue;
+      out.push({ question: quiz.question, choices: quiz.choices, answerIndex: quiz.answerIndex, why: quiz.why });
     }
   }
   return out;

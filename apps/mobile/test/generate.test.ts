@@ -23,7 +23,7 @@ function fakePort(respond: (call: Call, index: number) => unknown, options: { co
 const unit = (text: string, captureId: string | null = null, t: number | null = null): Unit => ({ text, captureId, t });
 const big = (fill: string, chars = 1500) => fill.repeat(chars / fill.length);  // 1,500 characters = 500 tokens
 const term = (front: string, back = "A meaning.") => ({ kind: "term", front, back });
-const quizItem = (question: string) => ({ question, choices: ["a", "b", "c", "d"], answerIndex: 0, why: "Because." });
+const quizItem = (question: string, answer = "a", evidence = answer) => ({ question, evidence, answer, wrongChoices: ["x1", "x2", "x3"], why: "Because." });
 
 describe("inputBudget and packing", () => {
   it("keeps 1,500 tokens for instructions and output, and never less than 500", () => {
@@ -116,7 +116,7 @@ describe("makeCardsFromUnits", () => {
 describe("makeQuizFromUnits", () => {
   it("spreads the count across groups and stops at it", async () => {
     const { port, calls } = fakePort(() => [quizItem("Q1"), quizItem("Q2")]);
-    const units = [unit(big("a ")), unit(big("b "))];
+    const units = [unit(big("a ")), unit(big("a b "))];  // both pages contain the answer "a"
     const quiz = await makeQuizFromUnits({ ...port, contextSize: () => 2000 }, units, 3);
     expect(calls.map((c) => c.n)).toEqual([2, 2]);
     expect(quiz).toHaveLength(3);
@@ -133,5 +133,41 @@ describe("makeQuizFromUnits", () => {
     const { port, calls } = fakePort(() => [term("x")]);
     expect(await makeCardsFromUnits(port, [unit("", "p1"), unit("  \n ", "p2")], 5)).toEqual([]);
     expect(calls).toEqual([]);
+  });
+  it("keeps a question whose answer is in the page text, and puts the right answer at its marked position", async () => {
+    const text = 'Waypoint uses a generated name "Waypoint (164818)" while the record is set up.';
+    const { port } = fakePort(() => [
+      quizItem("What is the temporary name of the record?", "Waypoint (164818)", 'generated name "Waypoint (164818)"'),
+    ]);
+    const quiz = await makeQuizFromUnits(port, [unit(text)], 5);
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0]?.choices[quiz[0].answerIndex]).toBe("Waypoint (164818)");
+    expect(quiz[0]?.choices).toHaveLength(4);
+    expect(quiz[0]).not.toHaveProperty("evidence");
+  });
+
+  it("drops a question whose answer and evidence are not in the page text", async () => {
+    const text = 'Waypoint uses a generated name "Waypoint (164818)" while the record is set up.';
+    const { port } = fakePort(() => [
+      quizItem("What is the temporary name of the App Store Connect record?", "App Store Connect", 'Using generated name "Waypoint (164818)"'),
+    ]);
+    expect(await makeQuizFromUnits(port, [unit(text)], 5)).toEqual([]);
+  });
+
+  it("keeps a grounded question and drops an ungrounded one from the same answer", async () => {
+    const text = "Mitosis splits one cell into two.";
+    const { port } = fakePort(() => [
+      quizItem("What splits a cell?", "Mitosis", "Mitosis splits one cell into two."),
+      quizItem("What is the capital of France?", "Paris", "Paris is the capital."),
+    ]);
+    const quiz = await makeQuizFromUnits(port, [unit(text)], 5);
+    expect(quiz.map((q) => q.question)).toEqual(["What splits a cell?"]);
+  });
+
+  it("keeps a question whose evidence is in the page text and whose answer is in the evidence", async () => {
+    const text = "The sun is a star. Plants use sunlight to make sugar.";
+    const { port } = fakePort(() => [quizItem("What do plants use?", "sunlight", "Plants use sunlight to make sugar.")]);
+    const quiz = await makeQuizFromUnits(port, [unit(text)], 5);
+    expect(quiz.map((q) => q.question)).toEqual(["What do plants use?"]);
   });
 });

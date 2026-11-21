@@ -46,7 +46,7 @@ public class WaypointModelModule: Module {
           to: "Make \(count) quiz questions from this text. Each has four choices.\n\nText:\n\(text)",
           generating: QuizSet.self)
         return response.content.questions.map { (q: QuizDraft) -> [String: Any] in
-          ["question": q.question, "choices": q.choices, "answerIndex": q.answerIndex, "why": q.why]
+          ["question": q.question, "evidence": q.evidence, "answer": q.answer, "wrongChoices": q.wrongChoices, "why": q.why]
         }
       }
     }
