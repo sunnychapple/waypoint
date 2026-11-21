@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { editPageText, nameUntitledPages } from "../../core/capture/pages.ts";
-import { writeDb } from "../../platform/db.ts";
+import { dbGeneration, writeDbIf } from "../../platform/db.ts";
 import { fileUri } from "../../platform/files.ts";
 import { Caption } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -24,11 +24,25 @@ export function PageTextEditor({
   // The parent mounts this only while it is open, so the draft starts from the text each time.
   const [draft, setDraft] = useState(text ?? "");
 
+  // The notes this sheet opened on: a save never lands in another account's notes.
+  const [generation] = useState(dbGeneration);
+
   function save() {
-    writeDb((db) => {
-      editPageText(db, captureId, draft);
-      nameUntitledPages(db);
-    });
+    // Unchanged text keeps the word positions Help uses to find problems on the page.
+    if (draft.trim() === (text ?? "").trim()) {
+      onClose();
+      return;
+    }
+    try {
+      writeDbIf(generation, (db) => {
+        editPageText(db, captureId, draft);
+        nameUntitledPages(db);
+      });
+    } catch {
+      // The page was removed while this was open, or the write failed: the draft stays on screen.
+      Alert.alert("Couldn't save this text.", "The page may have been removed.");
+      return;
+    }
     onClose();
   }
 

@@ -71,10 +71,14 @@ export function usePageReader(): void {
 // Reads one page again, from the person's "Try again". Nothing is written when the read finds no words, so the page
 // keeps its text as it was. Returns whether words were found. A failed read returns false.
 export async function retryPageRead(captureId: string, file: string): Promise<boolean> {
+  const generation = dbGeneration();
   try {
     const page = await readPage(file);
     if (page.text.trim() === "") return false;
-    writeDb((db) => {
+    writeDbIf(generation, (db) => {
+      // Text typed or synced while this read ran is kept; a removed page is left alone.
+      const row = db.get<{ found_text: string | null }>("SELECT found_text FROM captures WHERE id = ?", [captureId]);
+      if (row === null || (row.found_text ?? "").trim() !== "") return;
       setPageText(db, captureId, page.text, JSON.stringify(page.lines));
       nameUntitledPages(db);
     });

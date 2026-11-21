@@ -486,7 +486,16 @@ function PageBlock({
         </>
       ) : null}
       {editing ? (
-        <PageTextEditor captureId={captureId} file={file} number={number} text={text} onClose={() => setEditing(false)} />
+        <PageTextEditor
+          captureId={captureId}
+          file={file}
+          number={number}
+          text={text}
+          onClose={() => {
+            setEditing(false);
+            setStillBlank(false);
+          }}
+        />
       ) : null}
     </View>
   );
