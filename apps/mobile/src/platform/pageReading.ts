@@ -1,10 +1,8 @@
 import { useEffect } from "react";
 import { AppState } from "react-native";
 import { readPage } from "../../modules/waypoint-pages/index.ts";
-import { pagesToRead, setPageText, titleFromText } from "../core/capture/pages.ts";
-import { renameSession } from "../core/capture/sessions.ts";
-import type { SqlDb } from "../core/db/sql.ts";
-import { dbGeneration, getDb, useQuery, writeDbIf } from "./db.ts";
+import { nameUntitledPages, pagesToRead, setPageText } from "../core/capture/pages.ts";
+import { dbGeneration, getDb, useQuery, writeDb, writeDbIf } from "./db.ts";
 
 const INTERVAL_MS = 5000;
 // While any page or photo is still unread, the reader runs this often, so a session waiting on it starts soon.
@@ -70,14 +68,22 @@ export function usePageReader(): void {
   }, [unread]);
 }
 
-// A pages session still called "Pages" takes its title from the first line of page 1 once that is read.
-function nameUntitledPages(db: SqlDb): void {
-  const rows = db.all<{ id: string; found_text: string | null }>(
-    `SELECT s.id, c.found_text FROM sessions s
-     JOIN captures c ON c.session_id = s.id AND c.kind = 'page' AND c.position = 0
-     WHERE s.kind = 'pages' AND s.title = 'Pages' AND c.found_text IS NOT NULL`,
-  );
-  for (const row of rows) {
-    renameSession(db, row.id, titleFromText(row.found_text, "Pages"));
+// Reads one page again, from the person's "Try again". Nothing is written when the read finds no words, so the page
+// keeps its text as it was. Returns whether words were found. A failed read returns false.
+export async function retryPageRead(captureId: string, file: string): Promise<boolean> {
+  const generation = dbGeneration();
+  try {
+    const page = await readPage(file);
+    if (page.text.trim() === "") return false;
+    writeDbIf(generation, (db) => {
+      // Text typed or synced while this read ran is kept; a removed page is left alone.
+      const row = db.get<{ found_text: string | null }>("SELECT found_text FROM captures WHERE id = ?", [captureId]);
+      if (row === null || (row.found_text ?? "").trim() !== "") return;
+      setPageText(db, captureId, page.text, JSON.stringify(page.lines));
+      nameUntitledPages(db);
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
