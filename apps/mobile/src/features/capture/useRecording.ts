@@ -177,6 +177,13 @@ export function useRecording(): RecordingModel {
         setPack(speech.pack);
         setPhase("recording");
         await startRecording(created.session.id);
+        if (sessionRef.current?.id !== created.session.id) {
+          // Discarded while the recorder was starting: the session is already gone, so only the microphone is left.
+          stopRecording()
+            .catch(() => undefined)
+            .finally(() => deleteSessionFiles(created.session.id));
+          return;
+        }
         if (cancelled) {
           // The screen went away while the recorder was starting, so the unmount stop came too early. Stop it now;
           // the session stays unfinished and the next launch's recoverSessions marks it interrupted.
@@ -194,11 +201,10 @@ export function useRecording(): RecordingModel {
       } catch (error) {
         // The session row was written before the recorder started; a recorder that never started leaves nothing.
         const failed = sessionRef.current;
-        if (failed !== null) {
-          sessionRef.current = null;
-          writeDb((db) => deleteSessionRow(db, failed.id));
-          deleteSessionFiles(failed.id);
-        }
+        if (failed === null) return; // discarded meanwhile: nothing to report
+        sessionRef.current = null;
+        writeDb((db) => deleteSessionRow(db, failed.id));
+        deleteSessionFiles(failed.id);
         Alert.alert("Couldn't start the recording.", messageOf(error), [{ text: "OK", onPress: () => router.back() }]);
       }
     })();
@@ -283,8 +289,13 @@ export function useRecording(): RecordingModel {
     await stopRecording().catch(() => undefined);
     // Late native events for this session are ignored from here on.
     sessionRef.current = null;
-    writeDb((db) => deleteSessionRow(db, current.id));
-    deleteSessionFiles(current.id);
+    try {
+      // Rows go first: with the row gone nothing can list the files, and a synced row leaves a delete for the other devices.
+      writeDb((db) => deleteSessionRow(db, current.id));
+      deleteSessionFiles(current.id);
+    } catch {
+      // A row left behind is marked interrupted at the next launch; the person still gets out of the screen.
+    }
     router.back();
   }
 

@@ -81,3 +81,22 @@ describe("nameRecording", () => {
     expect(getSession(db, row.id)?.title).toBe("Pages");
   });
 });
+
+describe("discarding a recording", () => {
+  it("removes the session with its words and leaves delete marks when the space is shared", async () => {
+    const { deleteSessionRow } = await import("../src/core/capture/sessions.ts");
+    const db = createMemoryDb();
+    migrate(db);
+    let n = 0;
+    const deps = { now: () => startedAt, newId: () => `d-${++n}` };
+    const spaceId = ensureDefaultSpace(db, deps).id;
+    db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('g1', 'personal', 'owner', 1, 0)");
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, 'g1')", [spaceId]);
+    const session = startRecordingSession(db, deps, spaceId, true);
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES (?, 0, 1000, 'hello there', 'device')", [session.id]);
+    deleteSessionRow(db, session.id);
+    expect(getSession(db, session.id)).toBeNull();
+    expect(db.all("SELECT 1 FROM segments WHERE session_id = ?", [session.id])).toHaveLength(0);
+    expect(db.all("SELECT 1 FROM dirty WHERE table_name = 'sessions' AND row_id = ? AND deleted = 1", [session.id])).toHaveLength(1);
+  });
+});

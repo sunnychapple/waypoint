@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { router } from "expo-router";
 import { Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -7,23 +6,16 @@ import { SavingToPill } from "./SavingToPill.tsx";
 import { StartTile } from "./StartTile.tsx";
 
 // The Record tab. Nothing starts until one of the actions is chosen, so a mistap costs nothing.
-// Each action dismisses the sheet first and opens its screen only once the sheet has gone: the recorder is a
-// full-screen modal, and presenting it while the form sheet is still on screen does not work reliably.
-// The screen unmounts when the dismissal finishes, and the unmount is where the pending route is pushed.
+// Each action replaces the sheet with its screen in one navigation update. react-native-screens then dismisses the
+// sheet and presents the next screen from the dismissal's completion, so the full-screen recorder never competes
+// with a sheet that is still on screen. (Pushing from the sheet's unmount does not wait for anything: the stack drops
+// the route and unmounts it as soon as the dismissal starts, not when it ends.) A swipe down just closes the sheet.
+// Going back from the opened screen lands on the tabs, as the sheet is no longer in the stack.
 export default function CaptureSheet() {
   const colors = useColors();
-  const pending = useRef<string | null>(null);
-
-  useEffect(
-    () => () => {
-      if (pending.current !== null) router.push(pending.current as never);
-    },
-    [],
-  );
 
   function leave(path: string): void {
-    pending.current = path;
-    router.back();
+    router.replace(path as never);
   }
 
   return (
