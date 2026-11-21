@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { countSavedExplanations, addToThread, getExplanation, saveExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
+import { countSavedExplanations, addToThread, getExplanation, saveExplanation, saveExplanationNow, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
 import { countOpenFlags, markAnswered } from "../src/core/explain/later.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
