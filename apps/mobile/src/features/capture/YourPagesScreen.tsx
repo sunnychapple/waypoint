@@ -8,6 +8,7 @@ import { getSpace } from "../../core/db/spaces.ts";
 import { countLabel } from "../../core/format.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
+import { getAvailability } from "../../../modules/waypoint-model/index.ts";
 import { Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { PageSheet } from "./PageSheet.tsx";
@@ -26,6 +27,9 @@ export default function YourPagesScreen() {
     return { spaceName: getSpace(db, session.spaceId)?.name ?? "", pages: listPages(db, id) };
   }, id);
   const [openId, setOpenId] = useState<string | null>(null);
+  // "· free" only where the study sets are made on this iPhone; elsewhere they are not free to make.
+  const [onDevice] = useState(() => getAvailability() === "available");
+  const free = onDevice ? " · free" : "";
   const cell = (width - 40 - GAP * (COLUMNS - 1)) / COLUMNS;
 
   if (!data) return <Screen>{null}</Screen>;
@@ -147,14 +151,14 @@ export default function YourPagesScreen() {
         />
         <Row
           title="Flashcards"
-          subtitle={`About ${Math.min(12, Math.max(3, Math.round(words / 40)))} cards · free`}
+          subtitle={`About ${Math.min(12, Math.max(3, Math.round(words / 40)))} cards${free}`}
           leading={<Leading icon="square.stack.3d.up" />}
           right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
           onPress={() => router.push(`/study/make?sessionId=${id}`)}
         />
         <Row
           title="Quiz me"
-          subtitle="5 questions · free"
+          subtitle={`5 questions${free}`}
           leading={<Leading icon="checklist" />}
           right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
           onPress={() => router.push(`/study/quiz?sessionId=${id}`)}
