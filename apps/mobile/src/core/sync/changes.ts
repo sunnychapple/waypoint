@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SqlDb, SqlValue } from "../db/sql.ts";
+import { freeSpaceName } from "../db/spaces.ts";
 
 // What one locked change says (M29a). The plaintext is this JSON; it is locked with the group key under
 // context("change", group id, device id, kind) (docs/security.md section 11). kind is in clear for the room.
@@ -297,7 +298,10 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   if (change.op === "upsert" && change.table === "spaces") {
     if (typeof change.row.name !== "string") return "rejected";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
-    db.run("UPDATE spaces SET name = ? WHERE id = ?", [change.row.name.slice(0, 60) || "Shared space", space]);
+    // A name another space here already has takes a number, so a picker never shows two of the same.
+    const base = change.row.name.slice(0, 60) || "Shared space";
+    const free = freeSpaceName(db, base, space);
+    db.run("UPDATE spaces SET name = ? WHERE id = ?", [free.length <= 60 ? free : base, space]);
     return "applied";
   }
   if (change.op === "upsert" && change.table === "sessions") {

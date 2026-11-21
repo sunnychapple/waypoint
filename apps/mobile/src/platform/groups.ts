@@ -322,6 +322,15 @@ export async function recoverGroupKeys(user: string, accountId: string): Promise
       // This group stays without its keys; the others still go on.
     }
   }
+  await readMissingNames(user);
+  await notifyGroupsReady();
+}
+
+// A key that arrived before its group's name is readable: the names are read again, once.
+async function readMissingNames(user: string | null): Promise<void> {
+  if (user !== null && listGroups(getDb()).some((g) => g.name === "" && heldGroupKeyVersions(user, g.id).length > 0)) {
+    await refreshGroups().catch(() => undefined);
+  }
 }
 
 // The owner's part of a keys_needed message (a member accepted an invite; platform/sync.ts): the same step syncGroups runs
@@ -337,6 +346,38 @@ export async function wrapKeysNow(groupId: string): Promise<void> {
 }
 
 let syncing = false;
+
+// A group being created or joined here: its space is mapped by that flow, so the restore (sync.ts) must not map a second
+// space for it while it runs.
+let making = 0;
+
+export async function whileMakingGroup<T>(fn: () => Promise<T>): Promise<T> {
+  making += 1;
+  try {
+    return await fn();
+  } finally {
+    making -= 1;
+  }
+}
+
+export function makingGroup(): boolean {
+  return making > 0;
+}
+
+// Run once the groups' keys and names have been brought up to date (sync.ts restores the groups' spaces).
+let groupsReady: (() => void | Promise<void>) | null = null;
+
+export function onGroupsReady(listener: () => void | Promise<void>): void {
+  groupsReady = listener;
+}
+
+async function notifyGroupsReady(): Promise<void> {
+  try {
+    await groupsReady?.();
+  } catch {
+    // The listener's own failure must not break the group sync.
+  }
+}
 
 // Refreshes the groups and brings their keys up to date. One run at a time; a failed run is retried on the next one,
 // and a failed group does not stop the others.
@@ -360,6 +401,8 @@ async function syncGroups(): Promise<void> {
         // This group is tried again next time.
       }
     }
+    await readMissingNames(user);
+    await notifyGroupsReady();
   } catch {
     // Offline or a failed call: the next launch, or the next time the app comes to the front, tries again.
   } finally {
