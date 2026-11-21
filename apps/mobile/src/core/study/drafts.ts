@@ -52,9 +52,10 @@ function fourChoices(list: string[]): [string, string, string, string] | null {
 
 type PlainLine = { clean: string; bare: string; bold: boolean };
 
-// Bold markers come off, but `**` between two word characters stays, so 2**3 survives. `bare` also drops a leading list marker.
+// Only a matched pair of bold markers comes off, so a power such as 2**3 or (a+b)**2 survives. `bare` also drops a leading list marker.
 function plainLines(text: string): PlainLine[] {
-  const unbold = (line: string) => line.replace(/(?<![\p{L}\p{N}])\*\*|\*\*(?![\p{L}\p{N}])/gu, "").trim();
+  const unbold = (line: string) =>
+    line.replace(/(?<![\p{L}\p{N})\]*])\*\*(?=\S)(.+?)(?:(?<=:)\*\*|(?<=\S)\*\*(?![\p{L}\p{N}(*-]))/gu, "$1").trim();
   return text.split(/\r?\n/).map((raw) => {
     const line = raw.trim();
     const unlisted = line.replace(/^(?:\d+[.)]|[-*•])\s+/, "");
@@ -62,7 +63,7 @@ function plainLines(text: string): PlainLine[] {
   });
 }
 
-const isBreak = (line: PlainLine): boolean => line.clean === "" || /^-+$/.test(line.clean);
+const isBreak = (line: PlainLine): boolean => line.clean === "" || /^(?:-+|\*{3,}|_{3,})$/.test(line.clean);
 const joined = (parts: string[]): string => parts.filter((part) => part !== "").join(" ");
 
 // FRONT: and BACK: cards. A FRONT with no BACK before the next FRONT is dropped. Later lines continue a field until a break.
@@ -147,9 +148,10 @@ export function parseHelpLines(text: string): { steps: { title: string; detail: 
         open = step.detail;
       }
     } else if (word === "ANSWER") {
-      answer = [value];
-      // Only an empty ANSWER: continues on the next line, so a closing remark never joins the answer.
-      open = value === "" ? answer : null;
+      // An empty ANSWER: never wipes a real answer. It continues on the next line only when there is no answer yet.
+      const waiting = value === "" && joined(answer) === "";
+      if (value !== "" || waiting) answer = [value];
+      open = waiting ? answer : null;
     } else if (isBreak(line)) {
       open = null;
     } else {

@@ -43,6 +43,21 @@ describe("parseCardLines", () => {
     expect(parseCardLines("**FRONT:** Evaluate 2**3\n**BACK:** 2**3 = 8")).toEqual([{ kind: "term", front: "Evaluate 2**3", back: "2**3 = 8" }]);
   });
 
+  it.each(["(a+b)**2", "x**(n+1)", "2**-1", "2 ** 3", "3 * 4 ** 2", "x**2 + y**2"])("keeps the power in %s", (math) => {
+    expect(parseCardLines(`**FRONT:** ${math}\n**BACK:** ${math}`)).toEqual([{ kind: "term", front: math, back: math }]);
+  });
+
+  it("still removes real bold, including a label glued to its value", () => {
+    expect(parseCardLines("**Front:**Mitosis\n**Back:** **Cell** division")).toEqual([{ kind: "term", front: "Mitosis", back: "Cell division" }]);
+  });
+
+  it.each(["***", "___"])("treats a %s line as a break", (rule) => {
+    expect(parseCardLines(`FRONT: a\nBACK: b\n${rule}\nFRONT: c\nBACK: d`)).toEqual([
+      { kind: "term", front: "a", back: "b" },
+      { kind: "term", front: "c", back: "d" },
+    ]);
+  });
+
   it("reads a multi-line front and labels on their own line", () => {
     expect(parseCardLines("FRONT: What is\nmitosis?\nBACK: Cell division")).toEqual([{ kind: "term", front: "What is mitosis?", back: "Cell division" }]);
     expect(parseCardLines("**Front:**\nMitosis\n**Back:**\nCell division")).toEqual([{ kind: "term", front: "Mitosis", back: "Cell division" }]);
@@ -89,6 +104,10 @@ describe("parseHelpLines", () => {
       steps: [{ title: "a", detail: "b" }, { title: "c", detail: "c" }, { title: "d", detail: "e" }],
       answer: "42",
     });
+  });
+
+  it("keeps a real answer when an empty ANSWER follows it", () => {
+    expect(parseHelpLines("STEP: a\nDO: b\nANSWER: 7\nANSWER:\nHope this helps!")?.answer).toBe("7");
   });
 
   it("returns null with no answer, or with no steps", () => {
