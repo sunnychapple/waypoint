@@ -170,4 +170,22 @@ describe("makeQuizFromUnits", () => {
     const quiz = await makeQuizFromUnits(port, [unit(text)], 5);
     expect(quiz.map((q) => q.question)).toEqual(["What do plants use?"]);
   });
+  it("drops a question whose answer is on the page but not in its evidence", async () => {
+    const text = 'Waypoint uses the generated name "Waypoint (164818)". Later, App Store Connect shows the real name.';
+    const { port } = fakePort(() => [
+      quizItem("What is the temporary name?", "App Store Connect", 'generated name "Waypoint (164818)"'),
+    ]);
+    expect(await makeQuizFromUnits(port, [unit(text)], 5)).toEqual([]);
+  });
+
+  it("matches evidence across curly quotes, line breaks, case and an ellipsis", async () => {
+    const text = "The record is named \u201CWaypoint\u201D\nwhile it is set up, and then it is renamed.";
+    const { port } = fakePort(() => [quizItem("What is the name?", "Waypoint", 'named "Waypoint" while it is set up\u2026 renamed')]);
+    expect(await makeQuizFromUnits(port, [unit(text)], 5)).toHaveLength(1);
+  });
+
+  it("drops a question whose answer or evidence is only punctuation", async () => {
+    const { port } = fakePort(() => [quizItem("Q?", "?", "?")]);
+    expect(await makeQuizFromUnits(port, [unit("What? Why?")], 5)).toEqual([]);
+  });
 });

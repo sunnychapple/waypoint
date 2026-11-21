@@ -140,13 +140,20 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
   return out;
 }
 
-// Grounded when the answer is in the group text, or the evidence is in it and the answer is in the evidence.
+// Words only, lower case: curly quotes, dashes, punctuation and line breaks all become single spaces, so a real quote matches the page.
+function words(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+
+// Grounded when the evidence appears in the group text (each side of an "…" gap on its own) and the answer appears in the evidence.
+// Matching is by whole words, so "a" does not match inside "cat". An answer that only appears elsewhere on the page does not count.
 function grounded(quiz: SourcedQuizDraft, groupText: string): boolean {
-  const text = looseText(groupText);
-  const answer = looseText(quiz.answer);
-  if (text.includes(answer)) return true;
-  const evidence = looseText(quiz.evidence);
-  return text.includes(evidence) && evidence.includes(answer);
+  const text = words(groupText);
+  const answer = words(quiz.answer);
+  const evidence = words(quiz.evidence);
+  if (answer.trim() === "" || evidence.trim() === "" || !evidence.includes(answer)) return false;
+  const pieces = quiz.evidence.split(/…|\.{3}/).map(words).filter((piece) => piece.trim() !== "");
+  return pieces.length > 0 && pieces.every((piece) => text.includes(piece));
 }
 
 export async function makeQuizFromUnits(port: ModelPort, units: Unit[], count: number): Promise<QuizDraft[]> {
