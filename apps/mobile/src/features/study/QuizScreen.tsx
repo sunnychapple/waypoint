@@ -8,6 +8,7 @@ import { saveCards } from "../../core/study/cards.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
+import type { QuizDraft } from "../../core/study/drafts.ts";
 import { isUnsupportedLanguage, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
@@ -20,7 +21,7 @@ import { ModelUnavailable } from "./ModelUnavailable.tsx";
 const PORT: ModelPort = { contextSize: getContextSize, makeCards, makeQuiz };
 const LETTERS = ["A", "B", "C", "D"] as const;
 
-// Runs one quiz on this iPhone. Wrong answers are saved as flashcards when the quiz ends.
+// Runs one quiz on this iPhone. Wrong answers are saved as flashcards as soon as they are picked.
 export default function QuizScreen() {
   const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
@@ -162,15 +163,21 @@ export default function QuizScreen() {
   const answered = picked !== null;
   const wasRight = picked === question.answerIndex;
 
-  function advance() {
+  // A wrong pick is saved as a flashcard straight away, so leaving the quiz early keeps it.
+  function choose(index: number) {
     if (quiz === null) return;
-    const after = next(quiz);
-    if (!retrying && isDone(after) && after.missed.length > 0) {
-      const missed = after.missed;
-      // Only the cards actually saved count: a front the session already has is skipped.
-      setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, missedToCards(missed), "quiz_miss")).length);
+    const after = pick(quiz, index);
+    const question = quiz.questions[quiz.index];
+    if (!retrying && question !== undefined && after.missed.length > quiz.missed.length) {
+      const saved = saveMiss(sessionId, question);
+      setAdded((count) => count + saved);
     }
     setQuiz(after);
+  }
+
+  function advance() {
+    if (quiz === null) return;
+    setQuiz(next(quiz));
   }
 
   return (
@@ -199,7 +206,7 @@ export default function QuizScreen() {
             accessibilityRole="button"
             accessibilityLabel={`${LETTERS[index]}, ${choice}`}
             disabled={answered}
-            onPress={() => setQuiz(pick(quiz, index))}
+            onPress={() => choose(index)}
             style={[styles.choice, { backgroundColor: tint, borderColor: edge }]}
           >
             <View style={[styles.letter, { backgroundColor: colors.surface2 }]}>
@@ -230,6 +237,15 @@ export default function QuizScreen() {
       {retrying ? null : <Caption style={styles.caption}>Wrong answers become flashcards</Caption>}
     </Screen>
   );
+}
+
+// Returns how many flashcards were saved. A failed save returns 0 so the quiz carries on.
+function saveMiss(sessionId: string, question: QuizDraft): number {
+  try {
+    return writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, missedToCards([question]), "quiz_miss")).length;
+  } catch {
+    return 0;
+  }
 }
 
 function addedLine(count: number): string {

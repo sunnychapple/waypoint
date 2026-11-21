@@ -149,6 +149,13 @@ export function nextDueAt(db: SqlDb, now: number): number | null {
   return db.get<{ due: number | null }>("SELECT min(due_at) AS due FROM cards WHERE due_at > ?", [now])?.due ?? null;
 }
 
+// Where a card's "From ..." chip opens: the moment in a recording, else the page, else the session.
+export function cardSourceHref(card: { sessionId: string; captureId: string | null; t: number | null }): string {
+  if (card.t !== null) return `/session/${card.sessionId}?t=${card.t}`;
+  if (card.captureId !== null) return `/session/${card.sessionId}?page=${encodeURIComponent(card.captureId)}`;
+  return `/session/${card.sessionId}`;
+}
+
 // Every card of one session, due or not, oldest due first. For practising a session's cards.
 export function sessionCards(db: SqlDb, sessionId: string, limit: number): CardRow[] {
   return db.all<CardDbRow>(`SELECT ${COLUMNS} FROM cards WHERE session_id = ? ORDER BY due_at, id LIMIT ?`, [sessionId, limit]).map(toRow);
