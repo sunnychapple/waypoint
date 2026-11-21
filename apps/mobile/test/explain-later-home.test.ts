@@ -87,10 +87,15 @@ describe("Get the answer for a flag with no word", () => {
     addLine(db, 40_000, 44_000, "end of line");
     expect(phraseForFlag(db, plainFlag(db, 44_000))).toBe("end of line");
   });
-  it("null when no transcript line covers the time (still being transcribed)", () => {
+  it("null when no transcript line is at or just before the time (still being transcribed)", () => {
     const { db } = setup();
     addLine(db, 0, 10_000, "earlier");
     expect(phraseForFlag(db, plainFlag(db, 42_000))).toBeNull();
+  });
+  it("a flag tapped in the pause just after a line uses that line", () => {
+    const { db } = setup();
+    addLine(db, 30_000, 36_000, "the line just heard");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBe("the line just heard");
   });
   it("null when the only line at that time is empty", () => {
     const { db } = setup();
@@ -119,9 +124,13 @@ describe("lineAt", () => {
     expect(lineAt(lines, 500)?.text).toBe("one");
     expect(lineAt(lines, 3_000)?.text).toBe("two");
   });
-  it("null in a gap or past the end", () => {
-    expect(lineAt(lines, 1_500)).toBeNull();
-    expect(lineAt(lines, 2_500)).toBeNull();
+  it("in a short pause, the latest line before it (blank lines skipped)", () => {
+    expect(lineAt(lines, 1_500)?.text).toBe("one");
+    expect(lineAt(lines, 2_500)?.text).toBe("one");
+  });
+  it("null when the nearest line ended more than 10 s before, or there are no lines", () => {
+    expect(lineAt(lines, 11_001)).toBeNull();
+    expect(lineAt(lines, 14_001)).toBeNull();
     expect(lineAt([], 0)).toBeNull();
   });
 });
