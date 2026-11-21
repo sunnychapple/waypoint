@@ -76,7 +76,6 @@ function RootStack() {
         <Stack.Screen name="invite/[token]" />
         <Stack.Screen name="join" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="shared/[id]" />
-        <Stack.Screen name="shared/new" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="shared/invite" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="share/[sessionId]" />
         <Stack.Screen name="shared/keys" />

@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { LinkPasscodeSchema } from "@waypoint/contracts";
 import { shortDay } from "../../core/format.ts";
 import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share/links.ts";
 import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
 import { syncLimitHit } from "../../platform/sync.ts";
+import { toFailure } from "../../platform/tasks.ts";
 import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -16,6 +18,14 @@ const EXPIRY_CHOICES: { value: LinkExpiry; label: string }[] = [
   { value: "week", label: "1 week" },
   { value: "month", label: "1 month" },
 ];
+
+const OFFLINE = "You're offline. Connect to the internet and try again.";
+
+// Shows which expiry is chosen (the same checkmark as the other choice rows).
+function Check() {
+  const colors = useColors();
+  return <SymbolView name="checkmark" tintColor={colors.accent} size={18} />;
+}
 
 const isActive = (link: LinkRow, now: number): boolean => link.revokedAt === null && (link.expiresAt === null || link.expiresAt > now);
 
@@ -46,7 +56,7 @@ export default function ShareSessionScreen() {
     } catch (failure) {
       // Today's sync is used up (open question 55): the sheet offers more for today.
       if (syncLimitHit(failure, generation)) router.push("/sync-limit");
-      else setError(linkFailureText(failure, "make"));
+      else setError(toFailure(failure).kind === "offline" ? OFFLINE : linkFailureText(failure, "make"));
     } finally {
       setBusy(false);
     }
@@ -57,7 +67,7 @@ export default function ShareSessionScreen() {
     try {
       await revokeLink(link.id);
     } catch (failure) {
-      setError(linkFailureText(failure, "turn_off"));
+      setError(toFailure(failure).kind === "offline" ? OFFLINE : linkFailureText(failure, "turn_off"));
     }
   }
 
@@ -99,6 +109,7 @@ export default function ShareSessionScreen() {
           key={choice.value}
           title={choice.label}
           selected={expiry === choice.value}
+          right={expiry === choice.value ? <Check /> : null}
           onPress={() => setExpiry(choice.value)}
         />
       ))}
