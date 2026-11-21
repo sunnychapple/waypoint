@@ -4,7 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { shortDay } from "../../core/format.ts";
 import { dateLine } from "../../core/capture/labels.ts";
-import { getGroup, heldVersions } from "../../core/groups/groups.ts";
+import { getGroup, heldVersions, spaceForGroup } from "../../core/groups/groups.ts";
 import { canInvite, canLeave, canRemove, memberLabels, type Role } from "../../core/share/spaces.ts";
 import { refreshGroups } from "../../platform/groups.ts";
 import { currentUserId } from "../../platform/device.ts";
@@ -22,6 +22,7 @@ export default function SharedSpaceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const group = useQuery((db) => getGroup(db, id), id);
   const held = useQuery((db) => heldVersions(db, id), id);
+  const spaceId = useQuery((db) => spaceForGroup(db, id), id);
   const [pending, setPending] = useState<PendingKeyChange[]>([]);
   const me = currentUserId() ?? "";
 
@@ -85,6 +86,13 @@ export default function SharedSpaceScreen() {
       <BackButton />
       <Title>{group.name === "" ? "Shared space" : group.name}</Title>
       {held.length === 0 ? <Caption>Waiting for the owner to let you in. This can take a minute.</Caption> : null}
+      {spaceId !== null ? (
+        <Row
+          title="Notes"
+          right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
+          onPress={() => router.push(`/space/${spaceId}`)}
+        />
+      ) : null}
 
       {changed.map((change) => (
         <View key={change.userId} style={[styles.notice, { backgroundColor: colors.surface2 }]}>

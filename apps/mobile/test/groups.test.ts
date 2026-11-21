@@ -9,6 +9,7 @@ import {
   noteKeyVersion,
   parseMembers,
   rememberSigner,
+  spaceForGroup,
   splitSpaces,
   spaceGroups,
   trustedSigners,
@@ -163,5 +164,16 @@ describe("splitSpaces", () => {
 
   it("returns empty lists when there are no spaces", () => {
     expect(splitSpaces([], new Map())).toEqual({ private: [], shared: [] });
+  });
+});
+
+describe("spaceForGroup", () => {
+  it("finds the space a group keeps its notes in, and null when there is none", () => {
+    const db = fresh();
+    upsertGroup(db, view(), "Trip", 5, "usr_me");
+    db.run("INSERT INTO spaces (id, name, is_default, last_used_at, created_at) VALUES ('sp_trip', 'Trip', 0, 0, 0)");
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES ('sp_trip', 'grp_1')");
+    expect(spaceForGroup(db, "grp_1")).toBe("sp_trip");
+    expect(spaceForGroup(db, "grp_missing")).toBeNull();
   });
 });

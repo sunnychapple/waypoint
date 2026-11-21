@@ -90,6 +90,11 @@ export function splitSpaces(spaces: Space[], groups: Map<string, SpaceGroup>): {
   return { private: spaces.filter((space) => !isShared(space)), shared: spaces.filter(isShared) };
 }
 
+// The space a group keeps its notes in, if this iPhone has it (a group maps to one space).
+export function spaceForGroup(db: SqlDb, groupId: string): string | null {
+  return db.get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId])?.space_id ?? null;
+}
+
 // Groups this person is still in, by name.
 export function listGroups(db: SqlDb): StoredGroup[] {
   return db.all<GroupRow>(`${SELECT_GROUP} WHERE left_at IS NULL ORDER BY name, id`).map(toStored);

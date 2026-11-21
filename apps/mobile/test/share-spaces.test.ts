@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canAddTo,
   canInvite,
   canLeave,
   canRemove,
@@ -137,5 +138,14 @@ describe("canRemove", () => {
 
   it("does not let a viewer remove anyone", () => {
     expect(canRemove("viewer", "viewer")).toBe(false);
+  });
+});
+
+describe("canAddTo", () => {
+  it("lets a private space (no role) and an owner or editor add, and never a viewer", () => {
+    expect(canAddTo(null)).toBe(true);
+    expect(canAddTo("owner")).toBe(true);
+    expect(canAddTo("editor")).toBe(true);
+    expect(canAddTo("viewer")).toBe(false);
   });
 });

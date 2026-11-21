@@ -106,7 +106,7 @@ function Chip({ label, tone }: { label: string; tone?: "flag" }) {
   );
 }
 
-function StartTile({
+export function StartTile({
   label,
   detail,
   icon,

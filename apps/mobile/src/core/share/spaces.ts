@@ -50,6 +50,11 @@ export function safetyCode(hexSha256: string): string {
   return `${twelve.slice(0, 4)} ${twelve.slice(4, 8)} ${twelve.slice(8, 12)}`;
 }
 
+// A private space (no role) and a shared space where you are an owner or editor can take new captures. A viewer cannot.
+export function canAddTo(role: Role | null): boolean {
+  return role !== "viewer";
+}
+
 // Only an owner invites (PR 27).
 export function canInvite(role: Role): boolean {
   return role === "owner";
