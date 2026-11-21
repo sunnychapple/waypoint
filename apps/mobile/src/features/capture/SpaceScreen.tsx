@@ -174,7 +174,8 @@ export default function SpaceScreen() {
       ) : (
         <Row title="Sync with my other devices" right={<Switch value={false} disabled={busy} onValueChange={startSync} />} />
       )}
-      <Caption>Keep this space the same on your iPhone and iPad.</Caption>
+      <Caption>Keeps this space on your other devices, and lets your recovery words bring it back if you lose this iPhone.</Caption>
+      {!data.synced ? <Caption>Photos and audio sync on paid plans.</Caption> : null}
       {data.synced && data.planRequired ? <Body>Photos and audio sync on paid plans.</Body> : null}
       {data.synced && data.limited ? (
         <>

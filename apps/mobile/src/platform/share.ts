@@ -5,6 +5,7 @@ import { acceptNewAccountKey } from "../core/groups/keys.ts";
 import { SHARED_FALLBACK_NAME, safetyCode } from "../core/share/spaces.ts";
 import { dbGeneration, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId } from "./device.ts";
+import { getAccountKey } from "../../modules/waypoint-keys/index.ts";
 import {
   acceptInvite,
   createGroup,
@@ -109,4 +110,13 @@ export async function pendingKeyChanges(): Promise<PendingKeyChange[]> {
       },
     })),
   );
+}
+
+// This iPhone's own safety code, the one another member sees as the code for a new key (the same hash as pendingKeyChanges).
+export async function mySafetyCode(): Promise<string | null> {
+  const user = currentUserId();
+  if (user === null) return null;
+  const account = getAccountKey(user);
+  if (account === null) return null;
+  return safetyCode(await digestStringAsync(CryptoDigestAlgorithm.SHA256, account.signPub));
 }
