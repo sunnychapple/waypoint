@@ -1,20 +1,24 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { listSpaces } from "../../core/db/spaces.ts";
 import { sessionsInSpace } from "../../core/capture/sessions.ts";
+import { MADE_LABELS, beingMadeItems, listFinished, listWorkingJobs, readyItems, viewerRoute } from "../../core/made/list.ts";
 import { countLabel } from "../../core/format.ts";
 import { countDue, nextDueAt } from "../../core/study/cards.ts";
 import { minutesLabel } from "../../core/study/labels.ts";
+import { useConfig } from "../../platform/config.ts";
 import { useMinuteNow, useQuery } from "../../platform/db.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { nextDueLabel } from "./ReviewScreen.tsx";
 
-// The Review tab: what is due, and the five newest sessions to make cards from.
+// The Review tab: what is being made and what is ready, what is due, and the five newest sessions to make cards from.
 export default function ReviewHomeScreen() {
   const colors = useColors();
   const now = useMinuteNow();
+  const config = useConfig();
+  const flags = { miniApps: config?.flags.mini_app_viewer === true, diagrams: config?.flags.diagram_viewer === true };
   const data = useQuery((db) => {
     const sessions = listSpaces(db)
       .flatMap((space) => sessionsInSpace(db, space.id))
@@ -24,14 +28,57 @@ export default function ReviewHomeScreen() {
       total: sessions.reduce((sum, session) => sum + session.cards, 0),
       next: nextDueAt(db, now),
       recent: sessions.slice(0, 5),
+      working: listWorkingJobs(db),
+      finished: listFinished(db, now),
       now,
     };
   }, String(now));
+
+  const working = beingMadeItems(data.working, flags);
+  const ready = readyItems(data.finished, now, flags);
+  const madeSections = (
+    <>
+      {working.length > 0 ? (
+        <>
+          <Caption>BEING MADE</Caption>
+          {working.map((item) => (
+            <Row
+              key={item.id}
+              title={MADE_LABELS[item.kind]}
+              {...(item.sessionTitle === null ? {} : { subtitle: item.sessionTitle })}
+              right={<Caption>Working…</Caption>}
+              onPress={() => router.push(`/job/${encodeURIComponent(item.id)}`)}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {ready.length > 0 ? (
+        <>
+          <View style={styles.sectionHead}>
+            <Caption>READY</Caption>
+            <Pressable accessibilityRole="link" hitSlop={8} onPress={() => router.push("/jobs")}>
+              <Text style={[styles.seeAll, { color: colors.accent }]}>See all</Text>
+            </Pressable>
+          </View>
+          {ready.map((item) => (
+            <Row
+              key={item.id}
+              title={item.title}
+              subtitle={MADE_LABELS[item.kind]}
+              onPress={() => router.push(viewerRoute(item.kind, item.id))}
+            />
+          ))}
+        </>
+      ) : null}
+    </>
+  );
 
   if (data.total === 0) {
     return (
       <Screen>
         <Title>Review</Title>
+        {madeSections}
         <View style={styles.empty}>
           <SymbolView name="square.stack.3d.up" tintColor={colors.accent} size={44} />
           <Title style={styles.centered}>Nothing to review yet</Title>
@@ -45,6 +92,7 @@ export default function ReviewHomeScreen() {
   return (
     <Screen>
       <Title>Review</Title>
+      {madeSections}
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
         {data.due > 0 ? (
           <>
@@ -92,4 +140,6 @@ const styles = StyleSheet.create({
   sessionTitle: { fontSize: 17, fontWeight: "600" },
   buttons: { flexDirection: "row", gap: 8 },
   half: { flex: 1 },
+  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  seeAll: { fontSize: 15, fontWeight: "600" },
 });
