@@ -85,7 +85,7 @@ export default function SharedSpaceScreen() {
     <Screen>
       <BackButton />
       <Title>{group.name === "" ? "Shared space" : group.name}</Title>
-      {held.length === 0 ? <Caption>Waiting for the owner to let you in. This can take a minute.</Caption> : null}
+      {held.length === 0 ? <Caption>Waiting for the owner to let you in. Ask them to open NotePath on their phone.</Caption> : null}
       {spaceId !== null ? (
         <Row
           title="Notes"

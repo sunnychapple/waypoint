@@ -168,7 +168,7 @@ async function makeFirstSet(user: string, groupId: string, keyVersion: number, t
   }
   if (!stored) {
     await dropGroupKey(user, groupId, keyVersion);
-    return ensureKeys(groupId, { now: true }); // the winner's key is on the server now: open it
+    return runEnsureKeys(groupId, { now: true }); // the winner's key is on the server now: open it
   }
   writeDbIf(generation, (db) => noteKeyVersion(db, groupId, keyVersion, Date.now()));
 }
@@ -196,7 +196,21 @@ async function addEnvelopes(user: string, group: StoredGroup, keyVersion: number
 
 // Brings one group's keys up to date for this iPhone (docs/security.md section 10). `now`: skip the random 0-30 s wait
 // that lets two devices rarely race to make a missing key.
-export async function ensureKeys(groupId: string, options: { now: boolean }): Promise<void> {
+// One run per group at a time: two at once (a keys_needed nudge during a sync) could both make the first set, and the
+// loser would drop the local key the winner just stored.
+const keyRuns = new Map<string, Promise<void>>();
+
+export function ensureKeys(groupId: string, options: { now: boolean }): Promise<void> {
+  const run = (keyRuns.get(groupId) ?? Promise.resolve()).catch(() => undefined).then(() => runEnsureKeys(groupId, options));
+  const tail = run.catch(() => undefined);
+  keyRuns.set(groupId, tail);
+  void tail.then(() => {
+    if (keyRuns.get(groupId) === tail) keyRuns.delete(groupId);
+  });
+  return run;
+}
+
+async function runEnsureKeys(groupId: string, options: { now: boolean }): Promise<void> {
   const user = currentUserId();
   const keys = user === null ? null : getDeviceKeys(user);
   const group = getGroup(getDb(), groupId);
@@ -213,7 +227,7 @@ export async function ensureKeys(groupId: string, options: { now: boolean }): Pr
   if (plan.kind === "first") {
     if (!options.now) {
       await delay(firstSetDelayMs(Math.random));
-      return ensureKeys(groupId, { now: true });
+      return runEnsureKeys(groupId, { now: true });
     }
     return makeFirstSet(user, groupId, keyVersion, devices, known);
   }
@@ -308,6 +322,18 @@ export async function recoverGroupKeys(user: string, accountId: string): Promise
       // This group stays without its keys; the others still go on.
     }
   }
+}
+
+// The owner's part of a keys_needed message (a member accepted an invite; platform/sync.ts): the same step syncGroups runs
+// for this group. Only an owner wraps keys for another member's devices, so anyone else does nothing. Skipped when the
+// notes changed since it started; ensureKeys' own reads and writes check the notes as well.
+export async function wrapKeysNow(groupId: string): Promise<void> {
+  const user = currentUserId();
+  const generation = dbGeneration();
+  const group = user === null ? null : getGroup(getDb(), groupId);
+  if (user === null || group === null || group.leftAt !== null || group.role !== "owner") return;
+  if (!stillSame(generation)) return;
+  await ensureKeys(groupId, { now: false });
 }
 
 let syncing = false;

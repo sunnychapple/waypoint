@@ -123,6 +123,13 @@ export function groupRoutes(deps: { now: () => number }) {
       if (used?.accepted_by !== user.id) throw new ApiFailure("not_found", "no such invite");
       const [view] = await groupViews(db, user.id, now, invite.group_id);
       if (view === undefined) throw new ApiFailure("not_found", "no such invite");
+      // The owners' open apps wrap the group key for this member's devices (keys_needed on the room's socket). Best
+      // effort: the membership is written, and every owner's app also checks at launch and when it comes to the front.
+      try {
+        await c.env.GROUP_ROOM.get(c.env.GROUP_ROOM.idFromName(invite.group_id)).keysNeeded(invite.group_id);
+      } catch {
+        // the room did not answer: the owners catch up when they next open the app
+      }
       return c.json(view);
     });
 }

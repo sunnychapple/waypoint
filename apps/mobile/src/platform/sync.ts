@@ -5,7 +5,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import * as Notifications from "expo-notifications";
 import * as TaskManager from "expo-task-manager";
 import { ApiCallError, type ChangesPage } from "@waypoint/api-client";
-import { SYNC_EXTRA_CREDITS, SyncServerMessageSchema } from "@waypoint/contracts";
+import { SYNC_EXTRA_CREDITS, SyncServerMessageSchema, type SyncServerMessage } from "@waypoint/contracts";
 import type { CloudFailure } from "../core/cloud/failure.ts";
 import { deleteSetting, getSetting, setSetting } from "../core/db/settings.ts";
 import { getSpace } from "../core/db/spaces.ts";
@@ -39,7 +39,8 @@ import { api } from "./api.ts";
 import { deleteFile, blobTempPath } from "./files.ts";
 import { dbGeneration, dbUser, getDb, stillSame, writeDb, writeDbIf } from "./db.ts";
 import { currentUserId, requireApprovedDevice, restoreApprovedUser, useDeviceStatus } from "./device.ts";
-import { createGroup, ensureKeys, refreshGroups } from "./groups.ts";
+import { createGroup, ensureKeys, refreshGroups, wrapKeysNow } from "./groups.ts";
+import { createKeyNudger } from "./keyNudge.ts";
 import { toFailure } from "./tasks.ts";
 
 // The background task for silent "sync" pushes (defined at module scope, as expo-task-manager requires).
@@ -67,6 +68,8 @@ const waiting = new Map<string, number>();
 const pullQueued = new Map<string, Promise<void>>();
 const sealed = new Map<string, Sealed>();
 const sealings = new Map<string, number>();
+// A keys_needed message from a room's socket runs the group's key step once, however many arrive together.
+const keyNudger = createKeyNudger(wrapKeysNow);
 
 // Work that awaits and then writes reads dbGeneration() first and stops here if the notes changed meanwhile (sign-out, or
 // another person signed in): a write must never land in someone else's notes.
@@ -447,14 +450,19 @@ async function connect(groupId: string): Promise<void> {
   };
   ws.onmessage = (event) => {
     if (typeof event.data !== "string") return;
-    let message: ReturnType<typeof SyncServerMessageSchema.safeParse>;
+    let message: SyncServerMessage;
     try {
-      message = SyncServerMessageSchema.safeParse(JSON.parse(event.data));
+      const parsed = SyncServerMessageSchema.safeParse(JSON.parse(event.data));
+      if (!parsed.success) return;
+      message = parsed.data;
     } catch {
       return;
     }
     try {
-      if (message.success && message.data.last_seq > lastSeq(getDb(), groupId)) {
+      if (message.type === "keys_needed") {
+        // A member accepted an invite: an owner's app wraps the group key for them (debounced; owners only).
+        if (message.group_id === groupId) keyNudger.nudge(groupId);
+      } else if (message.last_seq > lastSeq(getDb(), groupId)) {
         void pullSoon(groupId).then(() => acknowledge(ws, groupId));
       }
     } catch {

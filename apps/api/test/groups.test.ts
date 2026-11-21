@@ -9,6 +9,7 @@ import { activeMembership } from "../src/groups/membership.ts";
 import { groupRoutes } from "../src/groups/routes.ts";
 import type { BatchDb } from "../src/storage.ts";
 import { createTestDb } from "./helpers/d1.ts";
+import { fakeRoomNamespace } from "./helpers/room.ts";
 import { insertDevice, makeTestDevice, signedInit, type TestDevice } from "./helpers/signing.ts";
 
 const NOW = 1_763_560_000_000;
@@ -320,6 +321,38 @@ describe("POST /v1/invites/:token/accept", () => {
     expect(row).toEqual({ role: "viewer", history_from: NOW - 1000, ends_at: NOW + DAY, starts_at: NOW, left_at: null });
     const invite = await w.db.prepare("SELECT accepted_by FROM invites WHERE token_hash = ?").bind(HASH).first<{ accepted_by: string }>();
     expect(invite?.accepted_by).toBe("u2");
+  });
+
+  test("accepting tells the group's room: its sockets get keys_needed with the group id and nothing else", async () => {
+    const w = await world();
+    await seedGroup(w.db, G1);
+    await seedMember(w.db, G1, "u1", { role: "owner" });
+    await seedInvite(w.db, HASH, G1);
+    const rooms = fakeRoomNamespace(() => NOW);
+    const owner = rooms.roomFor(G1).host.connect(["device:dev_u1", "user:u1", "until:never"]);
+    const path = `/v1/invites/${TOKEN}/accept`;
+    const init = await signedInit(w.d.u2, { method: "POST", path, now: NOW, idempotencyKey: crypto.randomUUID() });
+    const res = await appFor(userOf("u2")).request(path, init, { DB: w.db, GROUP_ROOM: rooms });
+    expect(res.status).toBe(200);
+    expect(owner.sent).toEqual([JSON.stringify({ type: "keys_needed", group_id: G1 })]);
+  });
+
+  test("a room that cannot be reached does not fail the accept: the membership is still made", async () => {
+    const w = await world();
+    await seedGroup(w.db, G1);
+    await seedMember(w.db, G1, "u1", { role: "owner" });
+    await seedInvite(w.db, HASH, G1);
+    const path = `/v1/invites/${TOKEN}/accept`;
+    const init = await signedInit(w.d.u2, { method: "POST", path, now: NOW, idempotencyKey: crypto.randomUUID() });
+    const GROUP_ROOM = {
+      idFromName: (name: string) => name,
+      get: () => {
+        throw new Error("room unavailable");
+      },
+    };
+    const res = await appFor(userOf("u2")).request(path, init, { DB: w.db, GROUP_ROOM });
+    expect(res.status).toBe(200);
+    expect(await count(w.db, "SELECT count(*) AS n FROM memberships WHERE group_id = ? AND user_id = 'u2' AND left_at IS NULL", G1)).toBe(1);
   });
 
   test("again by u3 is 404 'no such invite' and u3 gets no membership", async () => {

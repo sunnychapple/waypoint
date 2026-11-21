@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GroupIdSchema } from "./groups.ts";
 import { KeyIdSchema } from "./keys.ts";
 
 // PR 28: sync. Locked bytes are base64url; 44 to 1,398,102 characters is 33 bytes (the smallest locked content:
@@ -33,8 +34,13 @@ export const ChangesPageSchema = z.strictObject({
   changes: z.array(ChangeViewSchema),
 });
 
-// The socket only says that something changed; the app then calls GET /v1/groups/:id/changes?after=.
-export const SyncServerMessageSchema = z.strictObject({ type: z.literal("changed"), last_seq: z.number().int().min(0) });
+// The socket only says that something changed; the app then calls GET /v1/groups/:id/changes?after=. "keys_needed"
+// (sent when a member accepts an invite) asks an owner's app to wrap the group key for the devices that lack it. It
+// carries no key and no content.
+export const ChangedMessageSchema = z.strictObject({ type: z.literal("changed"), last_seq: z.number().int().min(0) });
+export const KeysNeededMessageSchema = z.strictObject({ type: z.literal("keys_needed"), group_id: GroupIdSchema });
+export const SyncServerMessageSchema = z.discriminatedUnion("type", [ChangedMessageSchema, KeysNeededMessageSchema]);
+export type SyncServerMessage = z.infer<typeof SyncServerMessageSchema>;
 export const SyncAckMessageSchema = z.strictObject({ type: z.literal("ack"), seq: z.number().int().min(0) });
 
 // Open question 55: each person may send this many bytes of locked changes and shared-link data per UTC day. Over it,
