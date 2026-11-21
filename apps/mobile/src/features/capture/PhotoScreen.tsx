@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -13,10 +14,25 @@ export function isKnownCapture(db: SqlDb, file: string): boolean {
   return db.get("SELECT 1 AS ok FROM captures WHERE file = ? AND kind IN ('photo', 'page')", [file]) !== null;
 }
 
-// A photo from a recording's timeline, full screen. Pinch to zoom; Close returns to the session.
+// "reading" while the app has not read the photo yet (found_text is NULL); otherwise the text it read, trimmed. Empty text means no text.
+export type FoundText = { state: "reading" } | { state: "read"; text: string };
+
+// The photo's read text, or null when this person's database does not know the file (the same check as isKnownCapture).
+export function photoFoundText(db: SqlDb, file: string): FoundText | null {
+  if (!isKnownCapture(db, file)) return null;
+  const row = db.get<{ found_text: string | null }>(
+    "SELECT found_text FROM captures WHERE file = ? AND kind IN ('photo', 'page')",
+    [file],
+  );
+  if (row === null) return null;
+  return row.found_text === null ? { state: "reading" } : { state: "read", text: row.found_text.trim() };
+}
+
+// A photo from a recording's timeline, full screen. Pinch to zoom; Close returns to the session. The text the app read is under the photo.
 export default function PhotoScreen() {
   const { file, t } = useLocalSearchParams<{ file?: string; t?: string }>();
-  const known = useQuery((db) => (file ? isKnownCapture(db, file) : false), file ?? "");
+  const found = useQuery((db) => (file ? photoFoundText(db, file) : null), file ?? "");
+  const known = found !== null;
   const at = momentFromParam(t);
   const time = at === null ? null : formatOffset(at);
   const label = time === null ? "Photo" : `Photo at ${time}`;
@@ -43,7 +59,37 @@ export default function PhotoScreen() {
           <Image accessibilityLabel={label} source={{ uri: fileUri(file) }} resizeMode="contain" style={styles.fill} />
         </ScrollView>
       ) : null}
+      {file && found ? <PhotoText found={found} /> : null}
     </SafeAreaView>
+  );
+}
+
+// Under the photo. Hidden text is one tap away; the shown text can be selected and copied.
+function PhotoText({ found }: { found: FoundText }) {
+  const [showing, setShowing] = useState(false);
+  if (found.state === "reading") {
+    return <Text style={styles.reading}>Reading this photo…</Text>;
+  }
+  if (found.text === "") return null;
+  return (
+    <View style={styles.textPanel}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={showing ? "Hide the text" : "Show the text"}
+        accessibilityState={{ expanded: showing }}
+        onPress={() => setShowing(!showing)}
+        style={styles.toggleRow}
+      >
+        <Text style={styles.toggle}>{showing ? "Hide the text" : "Show the text"}</Text>
+      </Pressable>
+      {showing ? (
+        <ScrollView style={styles.textScroll}>
+          <Text selectable style={styles.text}>
+            {found.text}
+          </Text>
+        </ScrollView>
+      ) : null}
+    </View>
   );
 }
 
@@ -53,4 +99,10 @@ const styles = StyleSheet.create({
   time: { color: "#fff", fontSize: 15, fontVariant: ["tabular-nums"] },
   close: { color: "#fff", fontSize: 17, fontWeight: "600" },
   fill: { flex: 1 },
+  reading: { color: "#fff", fontSize: 15, paddingHorizontal: 20, paddingVertical: 12 },
+  textPanel: { paddingHorizontal: 20, paddingBottom: 8 },
+  toggleRow: { minHeight: 44, justifyContent: "center" },
+  toggle: { color: "#fff", fontSize: 17, fontWeight: "600" },
+  textScroll: { maxHeight: 240 },
+  text: { color: "#fff", fontSize: 15, lineHeight: 21, paddingBottom: 12 },
 });

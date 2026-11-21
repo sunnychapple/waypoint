@@ -35,7 +35,11 @@ const SEARCH = "../src/features/search/SearchScreen.tsx";
 const SESSION = "../src/features/capture/SessionScreen.tsx";
 const MARKS = "../src/features/capture/TimelineMarks.tsx";
 const PHOTO = "../src/features/capture/PhotoScreen.tsx";
-const { isKnownCapture } = (await import(PHOTO)) as { isKnownCapture: (db: unknown, file: string) => boolean };
+type PhotoModule = {
+  isKnownCapture: (db: unknown, file: string) => boolean;
+  photoFoundText: (db: unknown, file: string) => { state: "reading" } | { state: "read"; text: string } | null;
+};
+const { isKnownCapture, photoFoundText } = (await import(PHOTO)) as PhotoModule;
 const { hitRoute } = (await import(SEARCH)) as SearchModule;
 const { targetPageId } = (await import(SESSION)) as SessionModule;
 const { flagLabel, photoLabel } = (await import(MARKS)) as MarksModule;
@@ -86,5 +90,39 @@ describe("photo viewer path check", () => {
     expect(isKnownCapture(db, "sessions/../keys.db")).toBe(false);
     expect(isKnownCapture(db, "/etc/passwd")).toBe(false);
     expect(isKnownCapture(db, "sessions/s2/p.jpg")).toBe(false);
+  });
+});
+
+describe("photo text under the photo", () => {
+  // file -> found_text; a file missing from the map is not a capture this person has.
+  const captures = new Map<string, string | null>([
+    ["sessions/s1/read.jpg", "Qd = Qs at equilibrium"],
+    ["sessions/s1/blank.jpg", "   "],
+    ["sessions/s1/pending.jpg", null],
+  ]);
+  const db = {
+    get: (sql: string, params: string[]) => {
+      if (!captures.has(params[0] ?? "")) return null;
+      const file = params[0] ?? "";
+      return sql.includes("found_text") ? { found_text: captures.get(file) ?? null } : { ok: 1 };
+    },
+  };
+
+  it("returns the text the app read, trimmed", () => {
+    expect(photoFoundText(db, "sessions/s1/read.jpg")).toEqual({ state: "read", text: "Qd = Qs at equilibrium" });
+  });
+
+  it("reports reading while found_text is still null", () => {
+    expect(photoFoundText(db, "sessions/s1/pending.jpg")).toEqual({ state: "reading" });
+  });
+
+  it("returns read with empty text when the photo holds no text", () => {
+    expect(photoFoundText(db, "sessions/s1/blank.jpg")).toEqual({ state: "read", text: "" });
+  });
+
+  it("returns nothing for an unknown file or a traversal path, so no text is read", () => {
+    expect(photoFoundText(db, "sessions/s2/read.jpg")).toBeNull();
+    expect(photoFoundText(db, "sessions/../read.jpg")).toBeNull();
+    expect(photoFoundText(db, "/sessions/s1/read.jpg")).toBeNull();
   });
 });
