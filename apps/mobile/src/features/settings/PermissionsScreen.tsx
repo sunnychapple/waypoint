@@ -1,24 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
-import { SymbolView } from "expo-symbols";
+import { useFocusEffect } from "expo-router";
 import { getMicPermission, requestMicPermission, type MicPermission } from "../../../modules/waypoint-audio/index.ts";
-import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
 
 // Permissions (A7 as a settings page). Microphone is read and asked here; speech and camera are asked by
 // the system on first use, so their rows say so.
@@ -85,7 +70,6 @@ export default function PermissionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   chip: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   chipText: { fontSize: 13, fontWeight: "600" },
   denied: { alignItems: "flex-end", gap: 6 },

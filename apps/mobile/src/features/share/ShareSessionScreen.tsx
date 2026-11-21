@@ -6,7 +6,7 @@ import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share
 import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
 import { syncLimitHit } from "../../platform/sync.ts";
-import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 const EXPIRY_CHOICES: { value: LinkExpiry; label: string }[] = [
@@ -69,6 +69,7 @@ export default function ShareSessionScreen() {
 
   return (
     <Screen>
+      <BackButton />
       <Title>Share a link</Title>
       <Body>
         Anyone with the link can read this session's transcript and page text in a web browser. They can't change it or see anything else.

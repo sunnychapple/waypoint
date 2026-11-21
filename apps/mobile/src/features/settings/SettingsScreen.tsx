@@ -10,7 +10,7 @@ import { deleteSetting, getSetting, setSetting } from "../../core/db/settings.ts
 import { percentLabel, versionLabel } from "../../core/settings/format.ts";
 import { useProfile, useSignOut } from "../../platform/auth.tsx";
 import { getDb, writeDb } from "../../platform/db.ts";
-import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 function appleIntelligenceLabel(availability: ModelAvailability): string {
@@ -40,20 +40,6 @@ function speechLabel(speech: SpeechStatus | null, fraction: number | null): stri
     case "unsupported":
       return "Not available for this language";
   }
-}
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
 }
 
 // Settings (K1): the account, what runs on this iPhone, permissions, storage, the version and sign-out.
@@ -171,7 +157,6 @@ function Link({ title, onPress }: { title: string; onPress: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   account: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
   avatar: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center" },
   avatarText: { fontSize: 24, fontWeight: "600" },

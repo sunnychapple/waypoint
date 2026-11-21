@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { join } from "../../platform/share.ts";
-import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 
 // The screen for waypoint://invite/<token>. The token is used once here and is not kept.
 export default function JoinScreen() {
@@ -33,6 +33,7 @@ export default function JoinScreen() {
 
   return (
     <Screen>
+      <BackButton onPress={close} />
       <Title>Join this shared space?</Title>
       {failed ? <Caption>This invite doesn't work. Ask for a new link.</Caption> : null}
       <View style={styles.buttons}>

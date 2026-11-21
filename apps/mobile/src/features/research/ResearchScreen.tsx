@@ -1,12 +1,11 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
-import { SymbolView } from "expo-symbols";
+import { StyleSheet, Text, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 import { dateLine } from "../../core/capture/labels.ts";
 import { answerBlocks, openableUrl, type Block } from "../../core/research/answer.ts";
 import { getResearch } from "../../core/research/research.ts";
 import { useQuery } from "../../platform/db.ts";
 import { openSource } from "../../platform/research.ts";
-import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors, type Colors } from "../../ui/theme.ts";
 
 // One research answer as plain text: no HTML and no remote image. Sources open on a tap, in the in-app browser.
@@ -83,22 +82,7 @@ function hostOf(url: string): string {
   return /^https?:\/\/([^/?#\s]+)/i.exec(url.trim())?.[1] ?? url;
 }
 
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   block: { gap: 12 },
   heading: { fontSize: 20, fontWeight: "700", lineHeight: 26 },
   body: { fontSize: 17, lineHeight: 25 },
