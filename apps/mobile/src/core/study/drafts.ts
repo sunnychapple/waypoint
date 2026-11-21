@@ -50,43 +50,47 @@ function fourChoices(list: string[]): [string, string, string, string] | null {
   return [a, b, c, d];
 }
 
-type PlainLine = { raw: string; clean: string };
+type PlainLine = { clean: string; bare: string; bold: boolean };
 
-// Lines with `**` removed and trimmed. `raw` keeps the original, so bold can still be seen.
+// Bold markers come off, but `**` between two word characters stays, so 2**3 survives. `bare` also drops a leading list marker.
 function plainLines(text: string): PlainLine[] {
-  return text.split(/\r?\n/).map((raw) => ({ raw, clean: raw.replace(/\*\*/g, "").trim() }));
+  const unbold = (line: string) => line.replace(/(?<![\p{L}\p{N}])\*\*|\*\*(?![\p{L}\p{N}])/gu, "").trim();
+  return text.split(/\r?\n/).map((raw) => {
+    const line = raw.trim();
+    const unlisted = line.replace(/^(?:\d+[.)]|[-*•])\s+/, "");
+    return { clean: unbold(line), bare: unbold(unlisted), bold: /^\*\*(?:(?!\*\*).)+\*\*$/.test(unlisted) };
+  });
 }
 
-// A line that is wholly bold in the original, such as **Mitosis**.
-function isWhollyBold(raw: string): boolean {
-  return /^\*\*(?:(?!\*\*).)+\*\*$/.test(raw.trim());
-}
+const isBreak = (line: PlainLine): boolean => line.clean === "" || /^-+$/.test(line.clean);
+const joined = (parts: string[]): string => parts.filter((part) => part !== "").join(" ");
 
-// FRONT: and BACK: cards. A FRONT with no BACK before the next FRONT is dropped. Lines after BACK: belong to the back until a blank line.
+// FRONT: and BACK: cards. A FRONT with no BACK before the next FRONT is dropped. Later lines continue a field until a break.
 function labeledCards(lines: PlainLine[]): CardDraft[] {
   const out: CardDraft[] = [];
-  let card: { front: string; back: string[] | null } | null = null;
-  let open = false;
+  let card: { front: string[]; back: string[] | null } | null = null;
+  let open: string[] | null = null;
   const done = (c: typeof card): void => {
-    if (c?.back) out.push({ kind: "term", front: c.front, back: c.back.join(" ") });
+    if (c?.back) out.push({ kind: "term", front: joined(c.front), back: joined(c.back) });
   };
-  for (const { clean } of lines) {
-    const label = /^(FRONT|BACK):\s*(.*)$/i.exec(clean);
+  for (const line of lines) {
+    const label = /^(FRONT|BACK)\s*:\s*(.*)$/i.exec(line.bare);
     const word = label?.[1]?.toUpperCase();
     const value = label?.[2] ?? "";
     if (word === "FRONT") {
       done(card);
-      card = { front: value, back: null };
-      open = false;
+      card = { front: [value], back: null };
+      open = card.front;
     } else if (word === "BACK") {
+      open = null;
       if (card !== null && card.back === null) {
         card.back = [value];
-        open = true;
+        open = card.back;
       }
-    } else if (clean === "") {
-      open = false;
-    } else if (open && card?.back) {
-      card.back.push(clean);
+    } else if (isBreak(line)) {
+      open = null;
+    } else {
+      open?.push(line.clean);
     }
   }
   done(card);
@@ -98,7 +102,7 @@ function blockCards(lines: PlainLine[]): CardDraft[] {
   const blocks: PlainLine[][] = [];
   let block: PlainLine[] = [];
   for (const line of lines) {
-    if (line.clean === "" || /^-+$/.test(line.clean)) {
+    if (isBreak(line)) {
       if (block.length > 0) blocks.push(block);
       block = [];
     } else {
@@ -109,8 +113,8 @@ function blockCards(lines: PlainLine[]): CardDraft[] {
   const out: CardDraft[] = [];
   for (const b of blocks) {
     const [first, ...rest] = b;
-    if (first === undefined || rest.length === 0 || !isWhollyBold(first.raw)) continue;
-    out.push({ kind: "term", front: first.clean, back: rest.map((l) => l.clean).join(" ") });
+    if (first === undefined || rest.length === 0 || !first.bold) continue;
+    out.push({ kind: "term", front: first.bare, back: joined(rest.map((l) => l.clean)) });
   }
   return out;
 }
@@ -123,34 +127,38 @@ export function parseCardLines(text: string): CardDraft[] {
 }
 
 // Reads STEP / DO / ANSWER lines from a plain-text reply. Returns null when there are no steps or no answer. The last ANSWER wins.
+// A step with no DO keeps its title as the detail, so no step of the method goes missing.
 export function parseHelpLines(text: string): { steps: { title: string; detail: string }[]; answer: string } | null {
   const steps: { title: string; detail: string[] }[] = [];
-  let title: string | null = null;
-  let detail: string[] | null = null;
-  let answer: string | null = null;
-  for (const { clean } of plainLines(text)) {
-    const label = /^(STEP|DO|ANSWER)(?:\s*\d+)?\s*:\s*(.*)$/i.exec(clean);
+  let answer: string[] = [];
+  let open: string[] | null = null;
+  for (const line of plainLines(text)) {
+    const label = /^(STEP|DO|ANSWER)(?:\s*\d+)?\s*:\s*(.*)$/i.exec(line.bare);
     const word = label?.[1]?.toUpperCase();
     const value = label?.[2] ?? "";
     if (word === "STEP") {
-      title = value;
-      detail = null;
+      steps.push({ title: value, detail: [] });
+      open = null;
     } else if (word === "DO") {
-      detail = null;
-      if (title !== null) {
-        detail = [value];
-        steps.push({ title, detail });
-        title = null;
+      const step = steps[steps.length - 1];
+      open = null;
+      if (step !== undefined && step.detail.length === 0) {
+        step.detail.push(value);
+        open = step.detail;
       }
     } else if (word === "ANSWER") {
-      answer = value;
-      detail = null;
-    } else if (clean !== "" && detail !== null) {
-      detail.push(clean);
+      answer = [value];
+      // Only an empty ANSWER: continues on the next line, so a closing remark never joins the answer.
+      open = value === "" ? answer : null;
+    } else if (isBreak(line)) {
+      open = null;
+    } else {
+      open?.push(line.clean);
     }
   }
-  if (steps.length === 0 || answer === null) return null;
-  return { steps: steps.map((s) => ({ title: s.title, detail: s.detail.join(" ") })), answer };
+  const final = joined(answer);
+  if (steps.length === 0 || final === "") return null;
+  return { steps: steps.map((s) => ({ title: s.title, detail: joined(s.detail) || s.title })), answer: final };
 }
 
 export function cleanCards(raw: unknown, max: number): CardDraft[] {

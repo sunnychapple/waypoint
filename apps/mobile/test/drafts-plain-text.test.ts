@@ -32,6 +32,34 @@ describe("parseCardLines", () => {
     ]);
   });
 
+  it("treats a --- line as the end of a labeled card", () => {
+    expect(parseCardLines("**Front:** A\n**Back:** B\n---\n**Front:** C\n**Back:** D\n---\nsome commentary")).toEqual([
+      { kind: "term", front: "A", back: "B" },
+      { kind: "term", front: "C", back: "D" },
+    ]);
+  });
+
+  it("keeps ** inside math", () => {
+    expect(parseCardLines("**FRONT:** Evaluate 2**3\n**BACK:** 2**3 = 8")).toEqual([{ kind: "term", front: "Evaluate 2**3", back: "2**3 = 8" }]);
+  });
+
+  it("reads a multi-line front and labels on their own line", () => {
+    expect(parseCardLines("FRONT: What is\nmitosis?\nBACK: Cell division")).toEqual([{ kind: "term", front: "What is mitosis?", back: "Cell division" }]);
+    expect(parseCardLines("**Front:**\nMitosis\n**Back:**\nCell division")).toEqual([{ kind: "term", front: "Mitosis", back: "Cell division" }]);
+  });
+
+  it("reads numbered and bulleted labels and CRLF, and keeps a numbered line in a back", () => {
+    expect(parseCardLines("1. **Front:** A\r\n   **Back:** B\r\n\r\n- **Front:** C\r\n- **Back:** D")).toEqual([
+      { kind: "term", front: "A", back: "B" },
+      { kind: "term", front: "C", back: "D" },
+    ]);
+    expect(parseCardLines("FRONT: Solve\nBACK: Do these:\n1) 3x = 6")[0]?.back).toBe("Do these: 1) 3x = 6");
+  });
+
+  it("reads a numbered bold block without the number on the front", () => {
+    expect(parseCardLines("1. **Mitosis**\nCell division.")).toEqual([{ kind: "term", front: "Mitosis", back: "Cell division." }]);
+  });
+
   it("returns none for prose with no cards", () => {
     expect(parseCardLines("Sorry.")).toEqual([]);
   });
@@ -46,6 +74,20 @@ describe("parseHelpLines", () => {
         { title: "Find the change", detail: "Subtract the total from 20." },
       ],
       answer: "4.25",
+    });
+  });
+
+  it("ends a step at ---, keeps ** in the answer, and keeps a closing remark out of the answer", () => {
+    expect(parseHelpLines("STEP: a\nDO: b\n---\nSTEP: c\nDO: d\n---\nANSWER: 2**3 = 8\nHope this helps!")).toEqual({
+      steps: [{ title: "a", detail: "b" }, { title: "c", detail: "d" }],
+      answer: "2**3 = 8",
+    });
+  });
+
+  it("reads bulleted labels, an answer on the next line, and keeps a step with no DO", () => {
+    expect(parseHelpLines("1. **STEP:** a\n   **DO:** b\nSTEP: c\nSTEP: d\nDO: e\nANSWER:\n42")).toEqual({
+      steps: [{ title: "a", detail: "b" }, { title: "c", detail: "c" }, { title: "d", detail: "e" }],
+      answer: "42",
     });
   });
 
