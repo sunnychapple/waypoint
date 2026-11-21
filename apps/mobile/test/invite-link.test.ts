@@ -5,10 +5,10 @@ const TOKEN = "Abc_-0123456789abcdefghijklmnopqrstuvwxyzAB";
 
 describe("inviteLink", () => {
   it("makes the https link on the API host", () => {
-    expect(inviteLink("https://api.example.com", TOKEN)).toBe(`https://api.example.com/i/${TOKEN}`);
+    expect(inviteLink("https://api.example.com", TOKEN)).toBe(`https://api.example.com/i#${TOKEN}`);
   });
   it("drops trailing slashes from the API host", () => {
-    expect(inviteLink("https://api.example.com/", TOKEN)).toBe(`https://api.example.com/i/${TOKEN}`);
+    expect(inviteLink("https://api.example.com/", TOKEN)).toBe(`https://api.example.com/i#${TOKEN}`);
   });
   it("falls back to the app link when no API host is set", () => {
     expect(inviteLink("", TOKEN)).toBe(`waypoint://invite/${TOKEN}`);
@@ -17,10 +17,13 @@ describe("inviteLink", () => {
 
 describe("inviteTokenFromText", () => {
   it("reads the https link", () => {
-    expect(inviteTokenFromText(`https://api.example.com/i/${TOKEN}`)).toBe(TOKEN);
+    expect(inviteTokenFromText(`https://api.example.com/i#${TOKEN}`)).toBe(TOKEN);
   });
   it("reads the https link with a trailing slash, and with surrounding space", () => {
-    expect(inviteTokenFromText(`  https://api.example.com/i/${TOKEN}/\n`)).toBe(TOKEN);
+    expect(inviteTokenFromText(`  https://api.example.com/i#${TOKEN}\n`)).toBe(TOKEN);
+  });
+  it("reads the older path form of the https link", () => {
+    expect(inviteTokenFromText(`https://api.example.com/i/${TOKEN}`)).toBe(TOKEN);
   });
   it("reads the app link", () => {
     expect(inviteTokenFromText(`waypoint://invite/${TOKEN}`)).toBe(TOKEN);
