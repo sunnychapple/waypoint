@@ -1,31 +1,16 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { router } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { activityLine, needsZeroRetentionClear, sentKeyOf, zeroRetentionShown } from "../../core/cloud/activity.ts";
 import { getSent } from "../../core/explain/sent.ts";
 import { useQuery } from "../../platform/db.ts";
 import { clearStoredZeroRetention, setZeroRetention, useActivity, useStoredZeroRetention, type SwitchResult } from "../../platform/privacy.ts";
 import { useWallet } from "../../platform/wallet.ts";
 import { CloudLine } from "../../ui/CloudLine.tsx";
-import { Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 const SHOW_ZERO_RETENTION = true;
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
 
 function resultMessage(result: SwitchResult): string | null {
   switch (result) {
@@ -152,7 +137,6 @@ export default function CloudScreen() {
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   section: { marginTop: 8, letterSpacing: 0.5 },
   inline: { flexDirection: "row", alignItems: "center", gap: 12 },
   warning: { padding: 12, borderRadius: 12 },

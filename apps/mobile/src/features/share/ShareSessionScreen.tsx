@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { LinkPasscodeSchema } from "@waypoint/contracts";
+import { shortDay } from "../../core/format.ts";
 import { linksForSession, type LinkExpiry, type LinkRow } from "../../core/share/links.ts";
 import { dbGeneration, useQuery } from "../../platform/db.ts";
 import { createLink, linkFailureText, revokeLink } from "../../platform/links.ts";
 import { syncLimitHit } from "../../platform/sync.ts";
-import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 const EXPIRY_CHOICES: { value: LinkExpiry; label: string }[] = [
@@ -69,6 +70,7 @@ export default function ShareSessionScreen() {
 
   return (
     <Screen>
+      <BackButton />
       <Title>Share a link</Title>
       <Body>
         Anyone with the link can read this session's transcript and page text in a web browser. They can't change it or see anything else.
@@ -119,7 +121,7 @@ export default function ShareSessionScreen() {
         <Row
           key={link.id}
           title={link.hasPasscode ? "Passcode link" : "Link"}
-          subtitle={link.expiresAt === null ? "No expiry" : `Expires ${new Date(link.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`}
+          subtitle={link.expiresAt === null ? "No expiry" : `Expires ${shortDay(link.expiresAt)}`}
           right={
             <View style={styles.actions}>
               <SecondaryButton label="Share…" icon="square.and.arrow.up" onPress={() => share(link.url)} />

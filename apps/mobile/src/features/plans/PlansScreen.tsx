@@ -1,30 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
-import { SymbolView } from "expo-symbols";
+import { useLocalSearchParams } from "expo-router";
 import { creditsLabel } from "../../core/config/config.ts";
 import { balanceSummary, buyMessage, needLine, ownsOwnIt, restoreMessage } from "../../core/store/plans.ts";
 import { buy, loadProducts, restorePurchases, type ShopProduct } from "../../platform/store.ts";
 import { useWallet } from "../../platform/wallet.ts";
-import { Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 const SUBSCRIPTIONS_URL = "https://apps.apple.com/account/subscriptions";
 const BANNER_MS = 4000;
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
 
 function PricePill({ price }: { price: string }) {
   const colors = useColors();
@@ -235,7 +220,6 @@ export default function PlansScreen() {
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   card: { padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, gap: 6 },
   total: { fontSize: 28, fontWeight: "700" },
   owed: { fontSize: 13 },

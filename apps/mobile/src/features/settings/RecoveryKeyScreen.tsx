@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import type { RecoveryState } from "../../core/device/recovery.ts";
 import { canMakeRecoveryKey, loadRecoveryState } from "../../platform/recovery.ts";
-import { Body, Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 
 const LABEL: Record<RecoveryState, string> = {
   saved: "Saved and checked",
@@ -23,6 +23,7 @@ export default function RecoveryKeyScreen() {
 
   return (
     <Screen>
+      <BackButton />
       <Title>Recovery key</Title>
       <Row title="Status" right={<Caption>{state === null ? "Checking…" : LABEL[state]}</Caption>} />
       <Body>If you lose all your devices, your recovery key is the only way back into your notes.</Body>

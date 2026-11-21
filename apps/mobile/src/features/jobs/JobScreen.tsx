@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { SymbolView } from "expo-symbols";
 import { failureCopy } from "../../core/cloud/failure.ts";
 import { getJob, JOB_LABELS, jobLine } from "../../core/jobs/jobs.ts";
 import { useQuery } from "../../platform/db.ts";
 import { askForPush } from "../../platform/push.ts";
 import { cancelJob, followJob } from "../../platform/jobs.ts";
 import { RESULT_ROUTES } from "../../platform/jobResults.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // One cloud job: its state, its result when it is saved, and cancel while it runs.
@@ -92,22 +91,7 @@ export default function JobScreen() {
   );
 }
 
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   block: { gap: 16 },
   link: { minHeight: 44, justifyContent: "center", alignItems: "center" },
   linkText: { fontSize: 17, fontWeight: "600" },

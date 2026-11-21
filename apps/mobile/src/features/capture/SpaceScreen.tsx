@@ -9,7 +9,7 @@ import { countLabel, formatClock } from "../../core/format.ts";
 import { SYNC_LIMIT_KEY, sendingPaused } from "../../core/sync/limit.ts";
 import { useMinuteNow, useQuery } from "../../platform/db.ts";
 import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts";
-import { Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 export default function SpaceScreen() {
@@ -40,6 +40,7 @@ export default function SpaceScreen() {
 
   return (
     <Screen>
+      <BackButton />
       <Title>{name}</Title>
       <Row
         title="Sync with my other devices"

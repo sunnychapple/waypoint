@@ -53,88 +53,94 @@ function ExplainBody({ sessionId, t, word }: { sessionId: string; t: number; wor
   }
 
   return (
-    <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
-      <Title>{word}</Title>
-      <Caption>{`At ${formatOffset(t)} in this recording`}</Caption>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.header}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Done" hitSlop={8} onPress={() => router.back()}>
+          <Text style={[styles.link, { color: colors.accent }]}>Done</Text>
+        </Pressable>
+      </View>
+      <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
+        <Title>{word}</Title>
+        <Caption>{`At ${formatOffset(t)} in this recording`}</Caption>
 
-      {phase.kind === "idle" && !explained ? (
-        model.excerpt === "" ? (
-          <Body>There isn't enough of the transcript around this word yet.</Body>
-        ) : (
-          <>
-            <Body style={{ color: colors.ink2 }}>NotePath sends this word and about a minute of the transcript around it, for this task only.</Body>
-            <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
-              <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
-            </Pressable>
-            {showSent ? <Text style={[styles.sent, { color: colors.ink3, backgroundColor: colors.surface2 }]}>{model.excerpt}</Text> : null}
-            <PrimaryButton label={`Explain · ${cost("explain")}`} icon="sparkle.magnifyingglass" onPress={() => void model.run("explain")} />
-          </>
-        )
-      ) : null}
-
-      {thread.map((item, index) => (
-        <ThreadBlock key={`${item.sentId}-${index}`} item={item} colors={colors} />
-      ))}
-
-      {unsavedItem !== null ? (
-        <View style={styles.block}>
-          <ThreadBlock item={unsavedItem} colors={colors} />
-          <Caption>Couldn't save this on the iPhone</Caption>
-        </View>
-      ) : null}
-
-      {phase.kind === "running" ? (
-        <View style={styles.block}>
-          <Caption>{HEADINGS[phase.task]}</Caption>
-          {phase.text === "" ? <ActivityIndicator /> : <Body>{phase.text}</Body>}
-          <Caption>{RUNNING[phase.task]}</Caption>
-        </View>
-      ) : null}
-
-      {phase.kind === "failed" ? (
-        <View style={styles.block}>
-          {phase.text !== "" ? <Body style={{ color: colors.ink3 }}>{phase.text}</Body> : null}
-          <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
-            <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(phase.failure).title}</Text>
-            <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(phase.failure).body}</Text>
-          </View>
-          {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
-          {failureCopy(phase.failure).actions.map((action, index) =>
-            action === "ask_later" && model.askedLater ? null : index === 0 ? (
-              <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
-            ) : (
-              <SecondaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
-            ),
-          )}
-        </View>
-      ) : null}
-
-      {phase.kind === "idle" && explained ? (
-        <View style={styles.block}>
-          {offerResearch ? (
-            <SecondaryButton
-              label="Research the web"
-              icon="globe"
-              onPress={() => router.push(`/research/new?sessionId=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(`What is ${word}?`)}`)}
-            />
-          ) : null}
-          {hasAnswer ? (
+        {phase.kind === "idle" && !explained ? (
+          model.excerpt === "" ? (
+            <Body>There isn't enough of the transcript around this word yet.</Body>
+          ) : (
             <>
-              <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
-              <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
-              <SecondaryButton
-                label={explanation?.saved === true ? "Saved" : "Save"}
-                icon={explanation?.saved === true ? "bookmark.fill" : "bookmark"}
-                tone={explanation?.saved === true ? "accent" : "surface"}
-                onPress={model.toggleSave}
-              />
-              {explanation?.saved === true ? <Caption>Saved with this recording.</Caption> : null}
+              <Body style={{ color: colors.ink2 }}>NotePath sends this word and about a minute of the transcript around it, for this task only.</Body>
+              <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
+                <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
+              </Pressable>
+              {showSent ? <Text style={[styles.sent, { color: colors.ink3, backgroundColor: colors.surface2 }]}>{model.excerpt}</Text> : null}
+              <PrimaryButton label={`Explain · ${cost("explain")}`} icon="sparkle.magnifyingglass" onPress={() => void model.run("explain")} />
             </>
-          ) : null}
-          <PrimaryButton label="Done" onPress={() => router.back()} />
-        </View>
-      ) : null}
-    </ScrollView>
+          )
+        ) : null}
+
+        {thread.map((item, index) => (
+          <ThreadBlock key={`${item.sentId}-${index}`} item={item} colors={colors} />
+        ))}
+
+        {unsavedItem !== null ? (
+          <View style={styles.block}>
+            <ThreadBlock item={unsavedItem} colors={colors} />
+            <Caption>Couldn't save this on the iPhone</Caption>
+          </View>
+        ) : null}
+
+        {phase.kind === "running" ? (
+          <View style={styles.block}>
+            <Caption>{HEADINGS[phase.task]}</Caption>
+            {phase.text === "" ? <ActivityIndicator /> : <Body>{phase.text}</Body>}
+            <Caption>{RUNNING[phase.task]}</Caption>
+          </View>
+        ) : null}
+
+        {phase.kind === "failed" ? (
+          <View style={styles.block}>
+            {phase.text !== "" ? <Body style={{ color: colors.ink3 }}>{phase.text}</Body> : null}
+            <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
+              <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(phase.failure).title}</Text>
+              <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(phase.failure).body}</Text>
+            </View>
+            {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
+            {failureCopy(phase.failure).actions.map((action, index) =>
+              action === "ask_later" && model.askedLater ? null : index === 0 ? (
+                <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
+              ) : (
+                <SecondaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
+              ),
+            )}
+          </View>
+        ) : null}
+
+        {phase.kind === "idle" && explained ? (
+          <View style={styles.block}>
+            {offerResearch ? (
+              <SecondaryButton
+                label="Research the web"
+                icon="globe"
+                onPress={() => router.push(`/research/new?sessionId=${encodeURIComponent(sessionId)}&q=${encodeURIComponent(`What is ${word}?`)}`)}
+              />
+            ) : null}
+            {hasAnswer ? (
+              <>
+                <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
+                <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
+                <SecondaryButton
+                  label={explanation?.saved === true ? "Saved" : "Save"}
+                  icon={explanation?.saved === true ? "bookmark.fill" : "bookmark"}
+                  tone={explanation?.saved === true ? "accent" : "surface"}
+                  onPress={model.toggleSave}
+                />
+                {explanation?.saved === true ? <Caption>Saved with this recording.</Caption> : null}
+              </>
+            ) : null}
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -161,6 +167,7 @@ const ACTION_LABELS: Record<FailureAction, string> = {
 };
 
 const styles = StyleSheet.create({
+  header: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 20, paddingTop: 16 },
   content: { padding: 20, paddingBottom: 40, gap: 14 },
   block: { gap: 10 },
   link: { fontSize: 15, fontWeight: "600" },

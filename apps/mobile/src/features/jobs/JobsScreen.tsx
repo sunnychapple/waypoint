@@ -1,11 +1,8 @@
-import { Pressable, StyleSheet } from "react-native";
 import { router } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { dateLine } from "../../core/capture/labels.ts";
 import { JOB_LABELS, jobLine, listJobs } from "../../core/jobs/jobs.ts";
 import { useQuery } from "../../platform/db.ts";
-import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
-import { useColors } from "../../ui/theme.ts";
+import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
 
 // Every cloud job this iPhone started, newest first. Tapping one opens its screen.
 export default function JobsScreen() {
@@ -29,20 +26,3 @@ export default function JobsScreen() {
   );
 }
 
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
-});

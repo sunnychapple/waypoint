@@ -1,24 +1,9 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { approveWaiting, pollApproval, removeDevice, type ApprovalView } from "../../platform/devices.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
 
 // Approve a new device (docs/security.md section 8). Both screens show the same code; the person compares them.
 export default function ApproveDeviceScreen() {
@@ -160,5 +145,4 @@ const styles = StyleSheet.create({
   code: { fontSize: 48, fontWeight: "700", letterSpacing: 2, textAlign: "center", marginTop: 24, fontVariant: ["tabular-nums"] },
   spinner: { marginTop: 24 },
   actions: { gap: 12, marginTop: 24 },
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
 });

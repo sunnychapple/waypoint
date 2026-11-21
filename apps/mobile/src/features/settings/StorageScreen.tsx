@@ -1,27 +1,11 @@
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { indexStatus } from "../../core/search/indexer.ts";
 import { bytesLabel, percentLabel } from "../../core/settings/format.ts";
 import { getModel } from "../../../modules/waypoint-embed/index.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { sessionsBytes } from "../../platform/files.ts";
-import { Caption, OnDeviceNote, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, OnDeviceNote, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-
-function BackButton() {
-  const colors = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Back"
-      onPress={() => router.back()}
-      style={[styles.circle, { backgroundColor: colors.surface, borderColor: colors.line }]}
-    >
-      <SymbolView name="chevron.left" tintColor={colors.ink} size={18} />
-    </Pressable>
-  );
-}
 
 // Storage & search (K5, cut down): what the recordings and pages take, and the search index.
 export default function StorageScreen() {
@@ -64,7 +48,6 @@ export default function StorageScreen() {
 }
 
 const styles = StyleSheet.create({
-  circle: { width: 44, height: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
   card: { padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, gap: 6 },
   cardTitle: { fontSize: 17, fontWeight: "600" },
   percent: { fontSize: 34, fontWeight: "700" },
