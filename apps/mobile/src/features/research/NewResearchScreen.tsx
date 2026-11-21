@@ -8,11 +8,11 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import { keyForRequest, notesForResearch, researchRequest } from "../../core/research/research.ts";
 import { getDb } from "../../platform/db.ts";
-import { useQuote } from "../../platform/jobs.ts";
+import { useSignOut } from "../../platform/auth.tsx";
 import { startResearch } from "../../platform/research.ts";
-import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-import { QuoteBox } from "../../ui/QuoteBox.tsx";
+import { MakeButton, QuoteBox, useRetryingQuote } from "../../ui/QuoteBox.tsx";
 
 // "Research the web": a question, a depth and the price from the quote, then the job (M19). Opened from a session
 // (sessionId) or from Explain (q prefills the question).
@@ -42,7 +42,8 @@ export default function NewResearchScreen() {
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  const quote = useQuote({ task: "research", depth });
+  const quote = useRetryingQuote({ task: "research", depth });
+  const signOut = useSignOut();
   const trimmed = question.trim();
   const price = quote.quote?.credits ?? null;
 
@@ -75,7 +76,7 @@ export default function NewResearchScreen() {
     else if (action === "close") router.back();
   }
 
-  const copy = failure === null ? null : failureCopy(failure);
+  const copy = failure === null ? null : failureCopy(failure, "make");
   const notes = withNotes && sessionId !== null ? notesOrNull() : null;
 
   return (
@@ -136,7 +137,7 @@ export default function NewResearchScreen() {
         </View>
       ) : null}
 
-      <QuoteBox state={quote} />
+      <QuoteBox state={quote} onRetry={quote.retry} />
 
       {copy !== null ? (
         <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
@@ -145,11 +146,13 @@ export default function NewResearchScreen() {
         </View>
       ) : null}
 
-      <PrimaryButton
+      <MakeButton
         label={price === null ? "Research" : `Research · ${creditsLabel(price)}`}
         icon="globe"
+        enabled={price !== null && trimmed !== ""}
         onPress={() => void start()}
       />
+      {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
       {copy !== null
         ? copy.actions
             .filter((action) => ACTION_LABELS[action] !== undefined)
