@@ -8,6 +8,7 @@ import { configRoute } from "./config/route.ts";
 import { devicesRoute } from "./devices/register.ts";
 import { blobRoutes } from "./blobs/routes.ts";
 import { memberRoutes } from "./groups/members.ts";
+import { invitePageRoute } from "./groups/invite-page.ts";
 import { groupRoutes } from "./groups/routes.ts";
 import { groupKeyRoutes } from "./keys/routes.ts";
 import { jobEventsRoute } from "./jobs/events.ts";
@@ -72,6 +73,7 @@ export function createApp(deps: SessionDeps): Hono<AppEnv> {
   app.route("/", linkRoutes({ now: deps.now, fetch: (input, init) => fetch(input, init) }));
   app.route("/", audioRoutes({ now: deps.now }));
   app.route("/", viewerRoute());
+  app.route("/", invitePageRoute());
   app.route("/", syncExtraRoute({ now: deps.now }));
   return app;
 }

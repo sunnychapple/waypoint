@@ -5,7 +5,7 @@ import { sessionsLabel } from "../../core/capture/labels.ts";
 import { listSpaces } from "../../core/db/spaces.ts";
 import { listGroups, spaceGroups, splitSpaces } from "../../core/groups/groups.ts";
 import { useQuery } from "../../platform/db.ts";
-import { Caption, Row, Screen, Title } from "../../ui/kit.tsx";
+import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 export default function SpacesScreen() {
@@ -61,6 +61,7 @@ export default function SpacesScreen() {
           onPress={() => router.push(`/shared/${encodeURIComponent(group.id)}`)}
         />
       ))}
+      <SecondaryButton label="Have an invite? Paste it" icon="link" onPress={() => router.push("/join")} style={styles.paste} />
     </Screen>
   );
 }
@@ -69,4 +70,5 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   add: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   tile: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  paste: { alignSelf: "flex-start", marginTop: 16 },
 });

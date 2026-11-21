@@ -4,6 +4,8 @@ import { randomUUID } from "expo-crypto";
 import { fetch } from "expo/fetch";
 
 const baseUrl: string = process.env.EXPO_PUBLIC_API_URL ?? "";
+// The API host (no trailing slash), for the links the app shares (an invite is <host>/i/<token>).
+export const apiBaseUrl: string = baseUrl;
 let device: DeviceSigner | null = null;
 
 // Set by src/platform/device.ts (M27a) once this iPhone is registered and approved.
