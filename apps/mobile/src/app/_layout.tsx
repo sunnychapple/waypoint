@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider, useGate } from "../platform/auth.tsx";
 import { useHeldInvite } from "../platform/invite-link.ts";
+import { WaitScreen } from "../shell/WaitScreen.tsx";
 import { useColors } from "../ui/theme.ts";
 // Loaded at app start, so the silent sync push task is defined even when iOS wakes the app with no screen up (M29b).
 import "../platform/sync.ts";
@@ -10,7 +11,7 @@ function RootStack() {
   const colors = useColors();
   const gate = useGate();
   useHeldInvite(gate);
-  if (gate === "wait") return null;
+  if (gate === "wait") return <WaitScreen />;
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
       {/* Test screens for the native modules: development builds only, and only when signed in. */}

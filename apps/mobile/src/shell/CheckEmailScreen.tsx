@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useRef, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEmailCode } from "../platform/auth.tsx";
 import { useColors } from "../ui/theme.ts";
@@ -13,21 +13,30 @@ export default function CheckEmailScreen() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false); // synchronous, so autofill or paste firing the change twice submits once
 
   // Six digits submit by themselves.
   async function verify(digits: string) {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    const result = await emailCode.verify(mode, digits);
-    setBusy(false);
+    const result = await emailCode.verify(mode, digits).finally(() => {
+      busyRef.current = false;
+      setBusy(false);
+    });
     if (result === "wrong_code") setMessage("That code didn't work. Check it and try again.");
     else if (result === "error") setMessage("Something went wrong. Check your connection and try again.");
     else setMessage(null);
   }
 
   async function resend() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    const result = await emailCode.send(params.email);
-    setBusy(false);
+    const result = await emailCode.send(params.email).finally(() => {
+      busyRef.current = false;
+      setBusy(false);
+    });
     if (result === "error") {
       setMessage("Something went wrong. Check your connection and try again.");
       return;
@@ -44,35 +53,46 @@ export default function CheckEmailScreen() {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.bg }]}>
-      <Text style={[styles.title, { color: colors.ink }]}>Check your email</Text>
-      <Text style={[styles.body, { color: colors.ink2 }]}>We sent a 6-digit code to {params.email}.</Text>
+    <KeyboardAvoidingView
+      style={[styles.flex, { backgroundColor: colors.bg }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
+        <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+          <Text style={[styles.title, { color: colors.ink }]}>Check your email</Text>
+          <Text style={[styles.body, { color: colors.ink2 }]}>We sent a 6-digit code to {params.email}.</Text>
 
-      <TextInput
-        value={code}
-        onChangeText={onChangeCode}
-        editable={!busy}
-        keyboardType="number-pad"
-        textContentType="oneTimeCode"
-        autoComplete="one-time-code"
-        maxLength={6}
-        style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.line, color: colors.ink }]}
-      />
+          <TextInput
+            value={code}
+            onChangeText={onChangeCode}
+            editable={!busy}
+            accessibilityLabel="6-digit code"
+            autoFocus
+            keyboardType="number-pad"
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
+            maxLength={6}
+            style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.line, color: colors.ink }]}
+          />
 
-      {message ? <Text style={[styles.message, { color: colors.danger }]}>{message}</Text> : null}
+          {message ? <Text style={[styles.message, { color: colors.danger }]}>{message}</Text> : null}
 
-      <Pressable accessibilityRole="button" disabled={busy} onPress={() => void resend()} style={styles.link}>
-        <Text style={[styles.linkLabel, { color: colors.accent }]}>Send a new code</Text>
-      </Pressable>
-      <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.link}>
-        <Text style={[styles.linkLabel, { color: colors.accent }]}>Use a different email</Text>
-      </Pressable>
-    </View>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void resend()} style={styles.link}>
+            <Text style={[styles.linkLabel, { color: colors.accent }]}>Send a new code</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.link}>
+            <Text style={[styles.linkLabel, { color: colors.accent }]}>Use a different email</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: 16, paddingTop: 96, gap: 16 },
+  flex: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  screen: { flex: 1, paddingHorizontal: 16, paddingTop: 96, paddingBottom: 40, gap: 16 },
   title: { fontSize: 28, fontWeight: "700" },
   body: { fontSize: 17, lineHeight: 24 },
   input: { height: 56, borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, fontSize: 24, letterSpacing: 8, textAlign: "center" },
