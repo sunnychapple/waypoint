@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { router, useLocalSearchParams } from "expo-router";
 import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
+import { contextCopy } from "../../core/explain/excerpt.ts";
 import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
 import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
@@ -65,6 +66,8 @@ function ExplainBody({
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
+  // A page has no Ask later, so its failure copy is the one that does not point at Questions for later.
+  const failure = phase.kind === "failed" ? failureCopy(phase.failure, pageId === undefined ? "explain" : "make") : null;
   const cost = (task: InstantSentTask): string => creditsLabel(priceOf(config, task) ?? FALLBACK_PRICES[task]);
 
   // A "Try again" after "already finished" starts a new paid request, so the button says what it costs.
@@ -110,10 +113,10 @@ function ExplainBody({
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
-            <Body>There isn't enough of the transcript around this word yet.</Body>
+            <Body>{contextCopy(pageId !== undefined).missing}</Body>
           ) : (
             <>
-              <Body style={{ color: colors.ink2 }}>NotePath sends this word and about a minute of the transcript around it, for this task only.</Body>
+              <Body style={{ color: colors.ink2 }}>{contextCopy(pageId !== undefined).sent}</Body>
               <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
                 <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
               </Pressable>
@@ -151,12 +154,12 @@ function ExplainBody({
           <View style={styles.block}>
             {phase.text !== "" ? <Body style={{ color: colors.ink3 }}>{phase.text}</Body> : null}
             <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
-              <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(phase.failure).title}</Text>
-              <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(phase.failure).body}</Text>
+              <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failure?.title}</Text>
+              <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failure?.body}</Text>
             </View>
             {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
-            {failureCopy(phase.failure).signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
-            {failureCopy(phase.failure).actions.map((action, index) =>
+            {failure?.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
+            {(failure?.actions ?? []).map((action, index) =>
               // A page has no time, so a question for later could not point back to it: Ask later is left off.
               action === "ask_later" && (model.askedLater || pageId !== undefined) ? null : index === 0 ? (
                 <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />

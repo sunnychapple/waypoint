@@ -3,8 +3,9 @@ import { listSegments } from "../src/core/capture/segments.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
-import { cleanWord, excerptAround, pageContext, splitWords, trimExcerpt } from "../src/core/explain/excerpt.ts";
+import { cleanWord, contextCopy, excerptAround, pageContext, splitWords, trimExcerpt } from "../src/core/explain/excerpt.ts";
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
+import { failureCopy } from "../src/core/cloud/failure.ts";
 import { saveExplanation, savedExplanations, startExplanation as startExp } from "../src/core/explain/explanations.ts";
 import {
   askLater,
@@ -230,5 +231,21 @@ describe("page context", () => {
     expect(pageContext(db, "p1", second!)).toEqual({ number: 2, text: "Mitochondria are the powerhouse." });
     expect(pageContext(db, "p1", first!)).toEqual({ number: 1, text: "" });
     expect(pageContext(db, "p1", "missing")).toBeNull();
+  });
+});
+
+describe("page explain copy", () => {
+  it("says a page's text is sent, not a transcript", () => {
+    expect(contextCopy(true).sent).toContain("text of this page");
+    expect(contextCopy(true).sent).not.toContain("transcript");
+    expect(contextCopy(true).missing).not.toContain("transcript");
+    expect(contextCopy(false).sent).toContain("transcript");
+  });
+  it("failure copy for a page offers no Ask later and does not point at Questions for later", () => {
+    for (const failure of [{ kind: "offline" }, { kind: "model_failed" }] as const) {
+      const copy = failureCopy(failure, "make");
+      expect(copy.actions).not.toContain("ask_later");
+      expect(copy.body).not.toMatch(/question/i);
+    }
   });
 });

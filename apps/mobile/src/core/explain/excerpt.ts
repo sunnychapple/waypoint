@@ -37,6 +37,16 @@ export function pageContext(db: SqlDb, sessionId: string, pageId: string): { num
   return { number: index + 1, text: pages[index]?.foundText ?? "" };
 }
 
+// What the Explain sheet says is sent and what it says when there is nothing to send, for a recording line or a page.
+export function contextCopy(isPage: boolean): { sent: string; missing: string } {
+  return isPage
+    ? { sent: "NotePath sends this word and the text of this page, for this task only.", missing: "There isn't any text from this page to explain this word with." }
+    : {
+        sent: "NotePath sends this word and about a minute of the transcript around it, for this task only.",
+        missing: "There isn't enough of the transcript around this word yet.",
+      };
+}
+
 export type Token = { text: string; word: string | null };
 
 const EDGE = /^[\s"'“”‘’()[\]{}.,;:!?…—–-]+|[\s"'“”‘’()[\]{}.,;:!?…—–-]+$/g;
