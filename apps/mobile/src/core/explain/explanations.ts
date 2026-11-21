@@ -38,6 +38,17 @@ export function getExplanation(db: SqlDb, id: string): Explanation | null {
   return row === null ? null : fromRow(row);
 }
 
+// The saved answer to this word at this place that arrived at or after `since`: what a request from a closed sheet left.
+export function landedExplanation(db: SqlDb, where: { sessionId: string; t: number; term: string; captureId: string | null; since: number }): Explanation | null {
+  const row = db.get<Row>(
+    `SELECT id, session_id, t, term, thread, saved, created_at, capture_id FROM explanations
+     WHERE session_id = ? AND t = ? AND term = ? AND capture_id IS ? AND saved = 1 AND created_at >= ?
+     ORDER BY created_at DESC LIMIT 1`,
+    [where.sessionId, Math.max(0, Math.round(where.t)), where.term, where.captureId, where.since],
+  );
+  return row === null ? null : fromRow(row);
+}
+
 // A new, unsaved explanation with an empty thread.
 export function startExplanation(db: SqlDb, deps: Deps, sessionId: string, t: number, term: string, captureId?: string | null): Explanation {
   const id = deps.newId();

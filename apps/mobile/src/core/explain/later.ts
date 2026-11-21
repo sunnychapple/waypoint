@@ -3,13 +3,18 @@ import type { SqlDb } from "../db/sql.ts";
 import { lineAt, listSegments } from "../capture/segments.ts";
 
 // Offline (or after a failed answer): keep the question as a flag at that moment. A word tapped on a page keeps the page.
+// The same question still open at the same place is not added twice.
 export function askLater(db: SqlDb, deps: { newId: () => string }, sessionId: string, t: number, word: string, captureId?: string | null): void {
+  const at = Math.max(0, Math.round(t));
+  const question = questionFor(word);
+  const page = captureId ?? null;
+  if (db.get("SELECT 1 AS ok FROM flags WHERE session_id = ? AND t = ? AND question = ? AND capture_id IS ? AND state = 'open'", [sessionId, at, question, page]) !== null) return;
   db.run("INSERT INTO flags (id, session_id, t, question, capture_id) VALUES (?, ?, ?, ?, ?)", [
     deps.newId(),
     sessionId,
-    Math.max(0, Math.round(t)),
-    questionFor(word),
-    captureId ?? null,
+    at,
+    question,
+    page,
   ]);
 }
 

@@ -115,6 +115,8 @@ function ExplainBody({
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
             <Body>{contextCopy(resolvedPageId !== undefined).missing}</Body>
+          ) : model.stillComing ? (
+            <Body>Your answer is still on its way. It will be in Questions for later.</Body>
           ) : (
             <>
               <Body style={{ color: colors.ink2 }}>{contextCopy(resolvedPageId !== undefined).sent}</Body>
@@ -147,7 +149,9 @@ function ExplainBody({
           <View style={styles.block}>
             <Caption>{HEADINGS[phase.task]}</Caption>
             {phase.text === "" ? <ActivityIndicator /> : <Body>{phase.text}</Body>}
-            <Caption>{RUNNING[phase.task]}</Caption>
+            <Caption>
+              {phase.task === "explain" ? `${RUNNING[phase.task]} You can close this. Your answer will be in Questions for later.` : RUNNING[phase.task]}
+            </Caption>
           </View>
         ) : null}
 
