@@ -57,8 +57,9 @@ export function useExplain(
   const cancelled = useRef(false);
   const controller = useRef<AbortController | null>(null);
 
-  // Closing the sheet keeps only saved explanations. It also aborts a stream still running; the server settles that
-  // request anyway, and no unsaved explanation row or thread item is written after this.
+  // Closing the sheet keeps only saved explanations. An answer is saved as soon as it arrives, so it stays unless the
+  // person removed it with Saved. It also aborts a stream still running; the server settles that request anyway, and
+  // no explanation row or thread item is written after this.
   useEffect(() => {
     cancelled.current = false;
     return () => {
@@ -125,15 +126,17 @@ export function useExplain(
         const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
         idRef.current = id;
         let updated: Explanation | null = null;
-        // One transaction: the thread item, the answered flag and the save all land, or none does.
+        // One transaction: the thread item, the save and the answered flag all land, or none does.
         db.transaction(() => {
           updated = addToThread(db, id, item);
-          // Explain answered a question from Questions for later: that flag is answered now, and the answer is saved
-          // for later (owner decision). Only in the notes the flag came from.
-          if (task === "explain" && flagId !== undefined && stillSame(generation)) {
-            markAnswered(db, flagId);
+          // A paid explanation is kept at once, so closing the sheet before Save cannot lose it. The person can still
+          // remove it with Saved (toggleSave); then closing the sheet discards it. Follow-ups never save.
+          if (task === "explain" && stillSame(generation)) {
             saveExplanationNow(db, deps, id);
             updated = { ...updated, saved: true };
+            // Explain answered a question from Questions for later: that flag is answered now. Only in the notes the
+            // flag came from.
+            if (flagId !== undefined) markAnswered(db, flagId);
           }
         });
         return updated;
