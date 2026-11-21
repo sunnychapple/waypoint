@@ -7,6 +7,7 @@ import { excerptAround } from "../../core/explain/excerpt.ts";
 import {
   addToThread,
   discardIfUnsaved,
+  getExplanation,
   saveExplanation,
   shownAnswer,
   startExplanation,
@@ -30,17 +31,19 @@ export type ExplainPhase =
 
 // One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
 // Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
-export function useExplain(sessionId: string, t: number, word: string, flagId?: string | undefined) {
+// With explanationId, the saved explanation's thread is shown and follow-ups continue it.
+export function useExplain(sessionId: string, t: number, word: string, flagId?: string | undefined, explanationId?: string | undefined) {
   const [excerpt] = useState(() => excerptAround(listSegments(getDb(), sessionId), t));
   const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
-  const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [loaded] = useState<Explanation | null>(() => (explanationId === undefined ? null : getExplanation(getDb(), explanationId)));
+  const [explanation, setExplanation] = useState<Explanation | null>(loaded);
   // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.
   const [unsavedItem, setUnsavedItem] = useState<ThreadItem | null>(null);
   const [askedLater, setAskedLater] = useState(false);
   // The explain answer said research would help (offer_research). Reset when a new explain runs.
   const [offerResearch, setOfferResearch] = useState(false);
   const keys = useRef<Partial<Record<InstantSentTask, string>>>({});
-  const idRef = useRef<string | null>(null);
+  const idRef = useRef<string | null>(loaded?.id ?? null);
   const cancelled = useRef(false);
   const controller = useRef<AbortController | null>(null);
 
@@ -111,10 +114,14 @@ export function useExplain(sessionId: string, t: number, word: string, flagId?: 
         if (cancelled.current) return null;
         const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
         idRef.current = id;
-        const updated = addToThread(db, id, item);
-        // Explain answered a question from Questions for later: that flag is answered now.
-        // Only in the notes the flag came from.
-        if (task === "explain" && flagId !== undefined && stillSame(generation)) markAnswered(db, flagId);
+        let updated = addToThread(db, id, item);
+        // Explain answered a question from Questions for later: that flag is answered now, and the answer is saved
+        // for later (owner decision). Only in the notes the flag came from.
+        if (task === "explain" && flagId !== undefined && stillSame(generation)) {
+          markAnswered(db, flagId);
+          saveExplanation(db, deps, id);
+          updated = { ...updated, saved: true };
+        }
         return updated;
       });
     } catch {

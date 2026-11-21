@@ -13,7 +13,7 @@ import { useMinuteNow, useQuery, writeDb } from "../../platform/db.ts";
 import { SYNC_PLAN_KEY, isSpaceSynced, turnOnSync } from "../../platform/sync.ts";
 import { BackButton, Body, Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
-import { StartTile } from "./HomeScreen.tsx";
+import { StartTile } from "./StartTile.tsx";
 
 export default function SpaceScreen() {
   const colors = useColors();

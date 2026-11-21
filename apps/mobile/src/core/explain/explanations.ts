@@ -69,6 +69,11 @@ export function saveExplanation(db: SqlDb, deps: Deps, id: string): void {
   });
 }
 
+// How many explanations are saved: Home shows "Saved answers" when there are no open questions.
+export function countSavedExplanations(db: SqlDb): number {
+  return db.get<{ n: number }>("SELECT count(*) AS n FROM explanations WHERE saved = 1")?.n ?? 0;
+}
+
 export function unsaveExplanation(db: SqlDb, id: string): void {
   db.transaction(() => {
     db.run("DELETE FROM terms WHERE explanation_id = ?", [id]);

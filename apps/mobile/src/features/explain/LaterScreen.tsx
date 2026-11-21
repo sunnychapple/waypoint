@@ -59,18 +59,23 @@ function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Get the answer for ${word}`}
-            hitSlop={8}
             onPress={() =>
               router.push({
                 pathname: "/explain",
                 params: { sessionId: flag.sessionId, t: String(flag.t), word, flagId: flag.id },
               })
             }
+            style={styles.action}
           >
             <Text style={[styles.link, { color: colors.accent }]}>Get the answer</Text>
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" hitSlop={8} onPress={() => writeDb((db) => dismissFlag(db, flag.id))}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+          onPress={() => writeDb((db) => dismissFlag(db, flag.id))}
+          style={styles.action}
+        >
           <Text style={[styles.link, { color: colors.ink3 }]}>Dismiss</Text>
         </Pressable>
       </View>
@@ -83,7 +88,12 @@ function NoteItem({ note, colors }: { note: SavedExplanation; colors: Colors }) 
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${note.term}, ${note.sessionTitle}`}
-      onPress={() => router.push(`/session/${note.sessionId}?t=${note.t}`)}
+      onPress={() =>
+        router.push({
+          pathname: "/explain",
+          params: { sessionId: note.sessionId, t: String(note.t), word: note.term, explanationId: note.id },
+        })
+      }
       style={[styles.note, { backgroundColor: colors.surface, borderColor: colors.line }]}
     >
       <Text style={[styles.noteTerm, { color: colors.ink }]}>{note.term}</Text>
@@ -101,7 +111,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row" },
   section: { gap: 10 },
   item: { gap: 6 },
-  actions: { flexDirection: "row", gap: 20, paddingHorizontal: 4 },
+  actions: { flexDirection: "row", gap: 12, paddingHorizontal: 4 },
+  action: { minHeight: 44, minWidth: 44, justifyContent: "center", paddingHorizontal: 8 },
   link: { fontSize: 15, fontWeight: "600" },
   note: { borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 16, gap: 6 },
   noteTerm: { fontSize: 17, fontWeight: "700" },
