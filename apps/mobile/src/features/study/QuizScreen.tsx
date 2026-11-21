@@ -122,9 +122,10 @@ export default function QuizScreen() {
     return (
       <Screen>
         <CloseButton />
-        <Title>{NO_TEXT_TITLE}</Title>
+        <Title>{skipped === null ? NO_TEXT_TITLE : skippedCopy(skipped)}</Title>
         <Body>{NO_TEXT_BODY}</Body>
-        <PrimaryButton label="Open my notes" onPress={() => router.replace(`/session/${sessionId}`)} />
+        <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
+        <SecondaryButton label="Open my notes" onPress={() => router.replace(`/session/${sessionId}`)} />
       </Screen>
     );
   }

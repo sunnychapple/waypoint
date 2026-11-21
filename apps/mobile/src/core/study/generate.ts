@@ -153,46 +153,107 @@ export async function makeCardsFromUnits(port: ModelPort, units: Unit[], maxTota
   return out;
 }
 
-const STOP_WORDS = new Set("a an the of to in on at by for from with and or but is are was were be been it its this that these those they them their he she his her him as so do does did not no than then there".split(" "));
-const tokens = (text: string): string[] => { const s = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(); return s === "" ? [] : s.split(" "); };
+// "not" and "no" are kept as real words: a quote that loses one says the opposite of the page.
+const STOP_WORDS = new Set("a an the of to in on at by for from with and or but is are was were be been it its this that these those they them their he she his her him as so do does did than then there".split(" "));
+const NEGATIONS = new Set(["not", "no", "never", "none"]);
+const tokens = (text: string): string[] => {
+  const s = text
+    .toLowerCase()
+    .replace(/\bcannot\b/g, "can not")
+    .replace(/n['’]t\b/g, " not")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return s === "" ? [] : s.split(" ");
+};
 const stem = (word: string): string => (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word);
-const contentWords = (text: string): string[] => { const kept = tokens(text).filter((w) => !STOP_WORDS.has(w)).map(stem); return kept.length > 0 ? kept : tokens(text).map(stem); };
-const phrase = (text: string): string => ` ${tokens(text).join(" ")} `;
+const stems = (text: string): string[] => tokens(text).map(stem);
+const contentWords = (text: string): string[] => {
+  const kept = tokens(text).filter((w) => !STOP_WORDS.has(w)).map(stem);
+  return kept.length > 0 ? kept : stems(text);
+};
+const phrase = (text: string): string => ` ${stems(text).join(" ")} `;
 
-// True when some window of the page holds at least 80% of the evidence's unique content words. The window is about 1.5 times the evidence length, so a reworded quote still matches.
-function quoteOnPage(evidence: string, pageText: string): boolean {
-  const want = [...new Set(contentWords(evidence))];
-  if (want.length === 0) return false;
-  const page = tokens(pageText).map(stem);
-  const size = Math.ceil(tokens(evidence).length * 1.5) + 2;
-  const last = Math.max(0, page.length - size);
-  for (let start = 0; start <= last; start++) {
-    const window = new Set(page.slice(start, start + size));
-    const hits = want.filter((word) => window.has(word)).length;
-    if (hits * 5 >= want.length * 4) return true;
+// A line that starts a new item: a number or letter, a bullet, or "term: meaning".
+const LIST_ITEM = /^\s*(?:\(?\d{1,3}[.)]|\(?[a-z][.)]\s|[-•*]|\p{L}[\p{L} '’-]{0,30}:)/iu;
+
+// The page cut into sentences and list items. Other line breaks are only wrapped text and do not end a passage.
+function passages(pageText: string): string[] {
+  const blocks: string[] = [];
+  let current = "";
+  for (const line of pageText.split("\n")) {
+    if (line.trim() === "" || LIST_ITEM.test(line)) {
+      if (current !== "") blocks.push(current);
+      current = "";
+    }
+    if (line.trim() !== "") current = current === "" ? line : `${current} ${line}`;
   }
-  return false;
+  if (current !== "") blocks.push(current);
+  return blocks.flatMap((block) => block.split(/(?<=[.?!])\s+/)).filter((text) => text.trim() !== "");
 }
 
-// Grounded when the evidence is close to a passage of the page, every answer word is on the page, numbers in the answer are in the evidence,
-// at least 60% of the answer's words are in the evidence, and no wrong choice is quoted in the evidence unless the answer quotes it too.
+// The longest run of `want` found in order in `words`: which words of `want` matched, and where they are in `words`.
+function inOrder(want: string[], words: string[]): { matched: Set<number>; positions: number[] } {
+  const best: number[][] = Array.from({ length: want.length + 1 }, () => new Array<number>(words.length + 1).fill(0));
+  for (let i = want.length - 1; i >= 0; i--) {
+    for (let j = words.length - 1; j >= 0; j--) {
+      const skip = Math.max(best[i + 1]?.[j] ?? 0, best[i]?.[j + 1] ?? 0);
+      const row = best[i];
+      if (row !== undefined) row[j] = want[i] === words[j] ? Math.max(skip, 1 + (best[i + 1]?.[j + 1] ?? 0)) : skip;
+    }
+  }
+  const matched = new Set<number>();
+  const positions: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < want.length && j < words.length) {
+    const here = best[i]?.[j] ?? 0;
+    if (want[i] === words[j] && here === 1 + (best[i + 1]?.[j + 1] ?? 0)) {
+      matched.add(i);
+      positions.push(j);
+      i++;
+      j++;
+    } else if ((best[i + 1]?.[j] ?? 0) === here) i++;
+    else j++;
+  }
+  return { matched, positions };
+}
+
+// The quote holds up against one passage: its words appear there in the same order (at most 15% may differ), it does not drop
+// a "not" that stands between them, the answer's words are all in that passage, and most of them are in the matched quote.
+function quoteSupports(quiz: SourcedQuizDraft, pageText: string): boolean {
+  const quote = contentWords(quiz.evidence);
+  const answer = [...new Set(contentWords(quiz.answer))];
+  if (quote.length === 0 || answer.length === 0) return false;
+  const allowedMisses = Math.floor(quote.length * 0.15);
+  const quoteHasNegation = quote.some((word) => NEGATIONS.has(word));
+  return passages(pageText).some((passage) => {
+    const words = stems(passage);
+    const { matched, positions } = inOrder(quote, words);
+    if (quote.length - matched.size > allowedMisses) return false;
+    const first = positions[0];
+    const last = positions[positions.length - 1];
+    if (first === undefined || last === undefined) return false;
+    if (!quoteHasNegation && words.slice(first, last + 1).some((word) => NEGATIONS.has(word))) return false;
+    const inPassage = new Set(words);
+    if (!answer.every((word) => inPassage.has(word))) return false;
+    const inQuote = new Set(quote.filter((_, index) => matched.has(index)));
+    return answer.filter((word) => inQuote.has(word)).length * 5 >= answer.length * 3;
+  });
+}
+
+// Grounded when the quote holds up against one passage of the page. A negated quote must be asked about as a negative, a number
+// in the answer must appear with the answer's words as written on the page, and no wrong choice may be the answer or be in the quote.
 function grounded(quiz: SourcedQuizDraft, pageText: string): boolean {
-  const answerWords = [...new Set(contentWords(quiz.answer))];
-  const evidenceWords = contentWords(quiz.evidence);
-  if (answerWords.length === 0 || evidenceWords.length === 0) return false;
-  if (!quoteOnPage(quiz.evidence, pageText)) return false;
-  const page = new Set(tokens(pageText).map(stem));
-  if (!answerWords.every((word) => page.has(word))) return false;
-  const evidenceSet = new Set(evidenceWords);
-  if (tokens(quiz.answer).some((word) => /\p{N}/u.test(word) && !evidenceSet.has(stem(word)))) return false;
-  const inEvidence = new Set(tokens(quiz.evidence).map(stem));
-  if (answerWords.filter((word) => inEvidence.has(word)).length * 5 < answerWords.length * 3) return false;
-  const evidencePhrase = phrase(quiz.evidence);
+  if (!quoteSupports(quiz, pageText)) return false;
+  const quoteWords = stems(quiz.evidence);
+  if (quoteWords.some((word) => NEGATIONS.has(word)) && !stems(quiz.question).some((word) => NEGATIONS.has(word))) return false;
+  if (tokens(quiz.answer).some((word) => /\p{N}/u.test(word)) && !phrase(pageText).includes(phrase(quiz.answer))) return false;
+  const quotePhrase = phrase(quiz.evidence);
   const answerPhrase = phrase(quiz.answer);
   return quiz.choices.every((choice, index) => {
     if (index === quiz.answerIndex || tokens(choice).length === 0) return true;
     const wrong = phrase(choice);
-    return !evidencePhrase.includes(wrong) || answerPhrase.includes(wrong);
+    return wrong !== answerPhrase && (!quotePhrase.includes(wrong) || answerPhrase.includes(wrong));
   });
 }
 

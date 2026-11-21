@@ -191,10 +191,52 @@ describe("makeQuizFromUnits", () => {
 });
 
 describe("quiz grounding on real wording", () => {
-  it("keeps a question whose evidence is a reworded quote of the page", async () => {
-    const { port } = fakePort(() => [quizItem("What splits?", "Mitosis", "Mitosis divides one cell into two")]);
+  it("keeps a question whose evidence shortens the page's sentence, in the same order", async () => {
+    const { port } = fakePort(() => [quizItem("What splits?", "Mitosis", "Mitosis splits a cell into two")]);
     const quiz = await makeQuizFromUnits(port, [unit("Mitosis splits one cell into two identical cells during growth.")], 5);
     expect(quiz.map((q) => q.question)).toEqual(["What splits?"]);
+  });
+
+  it("drops a quote stitched from two sentences into a false fact", async () => {
+    const { port } = fakePort(() => [quizItem("Where was Washington born?", "Kentucky", "Washington was born in Kentucky")]);
+    expect(await makeQuizFromUnits(port, [unit("Lincoln was born in Kentucky. Washington was born in Virginia.")], 5)).toEqual([]);
+  });
+
+  it("drops a quote that swaps two facts inside one sentence", async () => {
+    const { port } = fakePort(() => [quizItem("What do plants absorb?", "oxygen", "Plants absorb oxygen and release water")]);
+    expect(await makeQuizFromUnits(port, [unit("Plants absorb water and release oxygen through their leaves.")], 5)).toEqual([]);
+  });
+
+  it("drops a quote mixing two entries of a list", async () => {
+    const page = "coefficient: the number multiplied by a variable\nconstant: a number with no variable";
+    const { port } = fakePort(() => [quizItem("What is a coefficient?", "a number with no variable", "coefficient: a number with no variable")]);
+    expect(await makeQuizFromUnits(port, [unit(page)], 5)).toEqual([]);
+  });
+
+  it("drops an answer the page negates", async () => {
+    const { port } = fakePort(() => [quizItem("Where do plants get food?", "soil", "Plants do not make food from soil")]);
+    expect(await makeQuizFromUnits(port, [unit("Plants do not make food from soil. They use sunlight to make food.")], 5)).toEqual([]);
+  });
+
+  it("drops a quote that leaves out the page's not", async () => {
+    const { port } = fakePort(() => [quizItem("Where do plants get food?", "soil", "Plants make food from soil")]);
+    expect(await makeQuizFromUnits(port, [unit("Plants do not make food from soil. They use sunlight to make food.")], 5)).toEqual([]);
+  });
+
+  it("keeps a negative question about a negative fact", async () => {
+    const { port } = fakePort(() => [quizItem("Which colony did not send delegates?", "Georgia", "Georgia did not send delegates")]);
+    expect(await makeQuizFromUnits(port, [unit("Twelve colonies met in 1774. Georgia did not send delegates.")], 5)).toHaveLength(1);
+  });
+
+  it("drops a date the page never writes that way", async () => {
+    const { port } = fakePort(() => [quizItem("When?", "June 1775", "in June 1776 and again in 1775")]);
+    expect(await makeQuizFromUnits(port, [unit("It met in June 1776 and again in 1775.")], 5)).toEqual([]);
+  });
+
+  it("drops a question with a wrong choice that is the answer in another form", async () => {
+    const item = { question: "Who protested?", evidence: "The colonists protested taxes", answer: "colonists", wrongChoices: ["colonist", "kings", "soldiers"], why: "Because." };
+    const { port } = fakePort(() => [item]);
+    expect(await makeQuizFromUnits(port, [unit("The colonists protested taxes.")], 5)).toEqual([]);
   });
 
   it("drops a question whose answer is not on the page", async () => {
