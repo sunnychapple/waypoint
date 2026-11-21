@@ -72,7 +72,7 @@ const COPY: Record<DeviceStatus, { title: string; body: string; caption: string 
   failed: { title: "Couldn't approve this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
   too_many_waiting: { title: "Too many devices waiting", body: "Three devices are already waiting for approval. Try again in 10 minutes.", caption: "" },
   signed_out: { title: "Sign in to use credits", body: "Credits belong to your NotePath account.", caption: "" },
-  approved: { title: "You're in", body: "This iPhone can open your notes now.", caption: "" },
+  approved: { title: "You're in", body: "This iPhone can use your credits now.", caption: "" },
 };
 
 const NOT_APPROVED = {
