@@ -6,6 +6,7 @@ import { SymbolView } from "expo-symbols";
 import { saveCards, sessionCardCount } from "../../core/study/cards.ts";
 import { makeCardsFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
+import { isUnsupportedLanguage, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { usePendingText } from "../../platform/pending.ts";
@@ -25,7 +26,7 @@ export default function MakeCardsScreen() {
   const [making, setMaking] = useState(existing === 0);
   const [availability] = useState(getAvailability);
   const [attempt, setAttempt] = useState(0);
-  const [outcome, setOutcome] = useState<"working" | "failed" | "empty">("working");
+  const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "unsupported">("working");
   // Unread pages or a transcript still being made: nothing is generated until they are read.
   const { pending, skipped } = usePendingText(sessionId);
 
@@ -43,8 +44,8 @@ export default function MakeCardsScreen() {
         }
         writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, drafts, "device_model"));
         router.replace(`/study/review?sessionId=${sessionId}&made=1`);
-      } catch {
-        if (active) setOutcome("failed");
+      } catch (error) {
+        if (active) setOutcome(isUnsupportedLanguage(error) ? "unsupported" : "failed");
       }
     }
     void run();
@@ -68,7 +69,7 @@ export default function MakeCardsScreen() {
     return (
       <Screen>
         <CloseButton />
-        <ModelUnavailable availability={availability} />
+        <ModelUnavailable availability={availability} sessionId={sessionId} />
       </Screen>
     );
   }
@@ -95,6 +96,7 @@ export default function MakeCardsScreen() {
           {skipped !== null ? <Body>{skippedCopy(skipped)}</Body> : null}
         </View>
       ) : null}
+      {outcome === "unsupported" ? <Title>{UNSUPPORTED_LANGUAGE_LINE}</Title> : null}
       {outcome === "failed" ? (
         <>
           <Title>Couldn't make flashcards this time.</Title>

@@ -18,7 +18,6 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSCameraUsageDescription": "NotePath uses the camera to snap pages of homework and books. Pages are read on this iPhone.",
         "NSSpeechRecognitionUsageDescription": "NotePath turns your recording into text on this iPhone. Nothing is sent anywhere.",
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -41,6 +40,13 @@
         }
       ],
       "expo-apple-authentication",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "NotePath opens the photos you pick so it can read pages of homework and books on this iPhone.",
+          "cameraPermission": "NotePath uses the camera to snap pages of homework and books. Pages are read on this iPhone."
+        }
+      ],
       [
         "expo-notifications",
         {

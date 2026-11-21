@@ -8,6 +8,7 @@ import { saveCards } from "../../core/study/cards.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
+import { isUnsupportedLanguage, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { usePendingText } from "../../platform/pending.ts";
@@ -25,7 +26,7 @@ export default function QuizScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [availability] = useState(getAvailability);
   const [attempt, setAttempt] = useState(0);
-  const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "ready">("working");
+  const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "ready" | "unsupported">("working");
   const [quiz, setQuiz] = useState<QuizState | null>(null);
   // True once the student is practising the ones they missed: nothing more is saved, and the first run's count stands.
   const [retrying, setRetrying] = useState(false);
@@ -58,8 +59,8 @@ export default function QuizScreen() {
         setRetrying(false);
         setAdded(0);
         setOutcome("ready");
-      } catch {
-        if (active) setOutcome("failed");
+      } catch (error) {
+        if (active) setOutcome(isUnsupportedLanguage(error) ? "unsupported" : "failed");
       }
     }
     void run();
@@ -72,7 +73,7 @@ export default function QuizScreen() {
     return (
       <Screen>
         <CloseButton />
-        <ModelUnavailable availability={availability} />
+        <ModelUnavailable availability={availability} sessionId={sessionId} />
       </Screen>
     );
   }
@@ -98,6 +99,15 @@ export default function QuizScreen() {
           <Body>Making a quiz on this iPhone…</Body>
           {skipped !== null ? <Body>{skippedCopy(skipped)}</Body> : null}
         </View>
+      </Screen>
+    );
+  }
+
+  if (outcome === "unsupported") {
+    return (
+      <Screen>
+        <CloseButton />
+        <Title>{UNSUPPORTED_LANGUAGE_LINE}</Title>
       </Screen>
     );
   }
@@ -138,7 +148,7 @@ export default function QuizScreen() {
           />
         ) : null}
         {quiz.missed.length > 0 ? (
-          <SecondaryButton label="Review them" onPress={() => router.push(`/study/review?sessionId=${sessionId}`)} />
+          <SecondaryButton label="See the flashcards" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
         ) : null}
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>

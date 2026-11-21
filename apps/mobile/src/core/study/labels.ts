@@ -45,6 +45,14 @@ export function availabilityMessage(availability: Unavailable): string {
 // Under the cloud Practice set button, on devices that can't make the study sets on the iPhone.
 export const CLOUD_PRACTICE_LINE = "You can still make a Practice set with NotePath's cloud (uses credits).";
 
+// Shown instead of "Try again" when the on-device model rejects the notes' language.
+export const UNSUPPORTED_LANGUAGE_LINE = "NotePath can't make this for notes in this language yet.";
+
+// The on-device model's error code for notes in a language it doesn't support. Retrying the same notes cannot help.
+export function isUnsupportedLanguage(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "unsupported_language";
+}
+
 // What VoiceOver says for each rating button, in plain words. The visible text stays "Again", "Hard", "Good", "Easy".
 export const RATING_SPOKEN: Record<1 | 2 | 3 | 4, string> = {
   1: "Again — I didn't know it",

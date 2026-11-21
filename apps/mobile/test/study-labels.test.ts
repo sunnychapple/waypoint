@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { availabilityMessage, CLOUD_PRACTICE_LINE, intervalLabel, madeSummary, minutesLabel, RATING_SPOKEN } from "../src/core/study/labels.ts";
+import {
+  availabilityMessage,
+  CLOUD_PRACTICE_LINE,
+  intervalLabel,
+  isUnsupportedLanguage,
+  madeSummary,
+  minutesLabel,
+  RATING_SPOKEN,
+  UNSUPPORTED_LANGUAGE_LINE,
+} from "../src/core/study/labels.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -63,5 +72,17 @@ describe("study labels", () => {
       "Good — I knew it",
       "Easy — I knew it right away",
     ]);
+  });
+
+  it("the unsupported language line says the language is not supported yet", () => {
+    expect(UNSUPPORTED_LANGUAGE_LINE).toBe("NotePath can't make this for notes in this language yet.");
+  });
+
+  it("isUnsupportedLanguage matches only the on-device unsupported_language code", () => {
+    expect(isUnsupportedLanguage({ code: "unsupported_language" })).toBe(true);
+    expect(isUnsupportedLanguage({ code: "failed" })).toBe(false);
+    expect(isUnsupportedLanguage(new Error("boom"))).toBe(false);
+    expect(isUnsupportedLanguage(null)).toBe(false);
+    expect(isUnsupportedLanguage("unsupported_language")).toBe(false);
   });
 });
