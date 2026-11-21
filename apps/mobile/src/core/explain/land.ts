@@ -28,15 +28,15 @@ export function landAnswer(db: SqlDb, deps: Deps, input: LandInput): Explanation
   const { item, existingId, closed, sessionId, t, word } = input;
   if (input.sameNotes) settleSent(db, item.sentId, input.credits, input.retention);
   if (!input.sameNotes) return null;
-  // Closing discarded an unsaved answer, and the person has since removed it from Saved. Do not recreate it.
+  // The person removed this answer from Saved, so closing the sheet discarded it. Do not recreate it.
   if (closed && existingId !== null && getExplanation(db, existingId) === null) return null;
   // A follow-up needs an explanation to continue.
   if (existingId === null && item.kind !== "explain") return null;
 
-  const id = existingId ?? startExplanation(db, deps, sessionId, t, word, input.captureId ?? null).id;
   let updated: Explanation | null = null;
-  // One transaction: the thread item, the save and the answered flag all land, or none does.
+  // One transaction: a new explanation, the thread item, the save and the answered flag all land, or none does.
   db.transaction(() => {
+    const id = existingId ?? startExplanation(db, deps, sessionId, t, word, input.captureId ?? null).id;
     updated = addToThread(db, id, item);
     // A paid explanation is kept at once, so closing the sheet before Save cannot lose it. Follow-ups never save.
     if (item.kind === "explain") {
