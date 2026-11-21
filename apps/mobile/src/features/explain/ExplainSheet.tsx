@@ -16,14 +16,17 @@ import { useExplain } from "./useExplain.ts";
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
 // recording or the session.
 export default function ExplainSheet() {
-  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string }>();
+  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string; explanationId?: string }>();
   const t = Number(params.t);
+  const timed = typeof params.t === "string" && params.t !== "" && Number.isFinite(t);
   return (
     <ExplainBody
       sessionId={params.sessionId}
-      t={Number.isFinite(t) ? t : 0}
+      t={timed ? t : 0}
+      timed={timed}
       word={params.word.slice(0, 100)}
       flagId={typeof params.flagId === "string" && params.flagId !== "" ? params.flagId : undefined}
+      explanationId={typeof params.explanationId === "string" && params.explanationId !== "" ? params.explanationId : undefined}
     />
   );
 }
@@ -33,11 +36,25 @@ const RUNNING: Record<InstantSentTask, string> = { explain: "Explaining…", mor
 // Used only until the live price table (M13) has loaded.
 const FALLBACK_PRICES: Record<InstantSentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
 
-function ExplainBody({ sessionId, t, word, flagId }: { sessionId: string; t: number; word: string; flagId?: string | undefined }) {
+function ExplainBody({
+  sessionId,
+  t,
+  timed,
+  word,
+  flagId,
+  explanationId,
+}: {
+  sessionId: string;
+  t: number;
+  timed: boolean;
+  word: string;
+  flagId?: string | undefined;
+  explanationId?: string | undefined;
+}) {
   const colors = useColors();
   const config = useConfig();
   const { wallet } = useWallet();
-  const model = useExplain(sessionId, t, word, flagId);
+  const model = useExplain(sessionId, t, word, flagId, explanationId);
   const [showSent, setShowSent] = useState(false);
   const { phase, explanation, unsavedItem, offerResearch } = model;
   const thread = explanation?.thread ?? [];
@@ -64,13 +81,21 @@ function ExplainBody({ sessionId, t, word, flagId }: { sessionId: string; t: num
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Done" hitSlop={8} onPress={() => router.back()}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open in session"
+          onPress={() => router.push(`/session/${sessionId}?t=${t}`)}
+          style={styles.touch}
+        >
+          <Text style={[styles.link, { color: colors.accent }]}>Open in session</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Done" onPress={() => router.back()} style={styles.touch}>
           <Text style={[styles.link, { color: colors.accent }]}>Done</Text>
         </Pressable>
       </View>
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
         <Title>{word}</Title>
-        <Caption>{`Explain a word here · at ${formatOffset(t)}`}</Caption>
+        <Caption>{timed ? `“${word}” · at ${formatOffset(t)}` : `“${word}”`}</Caption>
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
@@ -148,7 +173,7 @@ function ExplainBody({ sessionId, t, word, flagId }: { sessionId: string; t: num
                   tone={explanation?.saved === true ? "accent" : "surface"}
                   onPress={model.toggleSave}
                 />
-                {explanation?.saved === true ? <Caption>Saved. Find it in Questions for later.</Caption> : null}
+                {explanation?.saved === true ? <Caption>Saved to Questions for later.</Caption> : null}
               </>
             ) : null}
           </View>
@@ -181,7 +206,8 @@ const ACTION_LABELS: Record<FailureAction, string> = {
 };
 
 const styles = StyleSheet.create({
-  header: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 20, paddingTop: 16 },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingTop: 8 },
+  touch: { minHeight: 44, minWidth: 44, justifyContent: "center", paddingHorizontal: 8 },
   content: { padding: 20, paddingBottom: 40, gap: 14 },
   block: { gap: 10 },
   link: { fontSize: 15, fontWeight: "600" },
