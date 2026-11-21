@@ -4,16 +4,22 @@ import { readPage } from "../../modules/waypoint-pages/index.ts";
 import { pagesToRead, setPageText, titleFromText } from "../core/capture/pages.ts";
 import { renameSession } from "../core/capture/sessions.ts";
 import type { SqlDb } from "../core/db/sql.ts";
-import { dbGeneration, getDb, writeDbIf } from "./db.ts";
+import { dbGeneration, getDb, useQuery, writeDbIf } from "./db.ts";
 
 const INTERVAL_MS = 5000;
+// While any page or photo is still unread, the reader runs this often, so a session waiting on it starts soon.
+const UNREAD_INTERVAL_MS = 1000;
 const BATCH = 2;
 
-// Reads pages on the iPhone in the background, while the app is active. Mounted once, in the tabs layout.
-export function usePageReader(): void {
-  useEffect(() => {
-    let busy = false;
+// One pass at a time, for the whole app: an effect that re-runs must not start a second pass beside a running one.
+let busy = false;
 
+// Reads pages on the iPhone in the background, while the app is active. Mounted once, in the tabs layout.
+// A pass runs at once when something new is unread, then every second until nothing is.
+export function usePageReader(): void {
+  const unread = useQuery((db) => pagesToRead(db, 1).length > 0);
+
+  useEffect(() => {
     const tick = async () => {
       if (busy || AppState.currentState !== "active") return;
       busy = true;
@@ -43,11 +49,15 @@ export function usePageReader(): void {
       }
     };
 
-    const timer = setInterval(() => {
-      void tick();
-    }, INTERVAL_MS);
+    if (unread) void tick();
+    const timer = setInterval(
+      () => {
+        void tick();
+      },
+      unread ? UNREAD_INTERVAL_MS : INTERVAL_MS,
+    );
     return () => clearInterval(timer);
-  }, []);
+  }, [unread]);
 }
 
 // A pages session still called "Pages" takes its title from the first line of page 1 once that is read.

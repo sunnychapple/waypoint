@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getSession } from "../../core/capture/sessions.ts";
 import { saveCards } from "../../core/study/cards.ts";
+import { pendingCopy, pendingText } from "../../core/study/pending.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
 import { studyUnits } from "../../core/study/units.ts";
-import { getDb, writeDb } from "../../platform/db.ts";
+import { getDb, useQuery, writeDb } from "../../platform/db.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -28,9 +29,13 @@ export default function QuizScreen() {
   // True once the student is practising the ones they missed: nothing more is saved, and the first run's count stands.
   const [retrying, setRetrying] = useState(false);
   const [added, setAdded] = useState(0);
+  // Unread pages or a transcript still being made: the quiz starts once they are read.
+  const pending = useQuery((db) => pendingText(db, sessionId), sessionId);
+  // Once a quiz has started it is not made again, even if something is read in the middle of it.
+  const started = useRef(false);
 
   useEffect(() => {
-    if (availability !== "available") return;
+    if (availability !== "available" || pending !== null || started.current) return;
     let active = true;
     setOutcome("working");
     async function run() {
@@ -47,6 +52,7 @@ export default function QuizScreen() {
           setOutcome("empty");
           return;
         }
+        started.current = true;
         setQuiz(startQuiz(questions));
         setRetrying(false);
         setAdded(0);
@@ -59,13 +65,25 @@ export default function QuizScreen() {
     return () => {
       active = false;
     };
-  }, [attempt, availability, sessionId]);
+  }, [attempt, availability, pending, sessionId]);
 
   if (availability !== "available") {
     return (
       <Screen>
         <CloseButton />
         <ModelUnavailable availability={availability} />
+      </Screen>
+    );
+  }
+
+  if (quiz === null && pending !== null) {
+    return (
+      <Screen>
+        <CloseButton />
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.accent} />
+          <Body>{pendingCopy(pending)}</Body>
+        </View>
       </Screen>
     );
   }
@@ -97,6 +115,7 @@ export default function QuizScreen() {
       <Screen>
         <CloseButton />
         <Title>There wasn't enough here to make a quiz.</Title>
+        {outcome === "empty" ? <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} /> : null}
       </Screen>
     );
   }
