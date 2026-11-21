@@ -9,6 +9,7 @@ import {
   noteKeyVersion,
   parseMembers,
   rememberSigner,
+  splitSpaces,
   spaceGroups,
   trustedSigners,
   upsertGroup,
@@ -144,5 +145,23 @@ describe("spaceGroups (M30b)", () => {
       ["sp_a", { groupId: "grp_shared_view_1", kind: "shared", role: "viewer" }],
       ["sp_b", { groupId: "grp_personal_0001", kind: "personal", role: "owner" }],
     ]);
+  });
+});
+
+describe("splitSpaces", () => {
+  it("puts a shared space only under shared, and keeps private and personal spaces under private", () => {
+    const space = (id: string, name: string) => ({ id, name, isDefault: false, lastUsedAt: 0, sessionCount: 0 });
+    const spaces = [space("sp_a", "A"), space("sp_b", "B"), space("sp_c", "C"), space("sp_d", "D")];
+    const groups = new Map([
+      ["sp_b", { groupId: "grp_1", kind: "shared" as const, role: "owner" as const }],
+      ["sp_c", { groupId: "grp_2", kind: "personal" as const, role: "owner" as const }],
+    ]);
+    const { private: priv, shared } = splitSpaces(spaces, groups);
+    expect(priv.map((s) => s.id)).toEqual(["sp_a", "sp_c", "sp_d"]);
+    expect(shared.map((s) => s.id)).toEqual(["sp_b"]);
+  });
+
+  it("returns empty lists when there are no spaces", () => {
+    expect(splitSpaces([], new Map())).toEqual({ private: [], shared: [] });
   });
 });

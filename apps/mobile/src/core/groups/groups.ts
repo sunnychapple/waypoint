@@ -1,5 +1,6 @@
 import type { GroupView } from "@waypoint/contracts";
 import type { SqlDb } from "../db/sql.ts";
+import type { Space } from "../db/spaces.ts";
 
 // The group rows this iPhone keeps (GET /v1/groups). Names are unlocked with the group key; "" until it arrives.
 export type Role = GroupView["role"];
@@ -80,6 +81,13 @@ export function spaceGroups(db: SqlDb): Map<string, SpaceGroup> {
     "SELECT sg.space_id, sg.group_id, g.kind, g.role FROM space_groups sg JOIN groups g ON g.id = sg.group_id WHERE g.left_at IS NULL",
   );
   return new Map(rows.map((r) => [r.space_id, { groupId: r.group_id, kind: r.kind, role: r.role }]));
+}
+
+// Splits the spaces into private ones and shared ones (a space mapped to a shared group), each in the order given.
+// A shared space appears only in `shared`, so a list that shows both shows each space once.
+export function splitSpaces(spaces: Space[], groups: Map<string, SpaceGroup>): { private: Space[]; shared: Space[] } {
+  const isShared = (space: Space) => groups.get(space.id)?.kind === "shared";
+  return { private: spaces.filter((space) => !isShared(space)), shared: spaces.filter(isShared) };
 }
 
 // Groups this person is still in, by name.

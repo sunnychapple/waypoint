@@ -73,7 +73,7 @@ export default function SpacePickerScreen() {
           />
         );
       })}
-      <SecondaryButton label="New space" icon="plus" tone="accent" onPress={() => router.push("/new-space")} />
+      <SecondaryButton label="New space" icon="plus" tone="accent" onPress={() => router.push("/new-space?from=picker")} />
       <Caption style={styles.footer}>Not sure? Leave it in My notes. You can move it any time.</Caption>
     </Screen>
   );
