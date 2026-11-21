@@ -43,7 +43,7 @@ export function openFlags(db: SqlDb): OpenFlag[] {
       `SELECT f.id, f.session_id, s.title AS session_title, s.started_at, f.t, f.question, f.capture_id, c.position + 1 AS page_number
        FROM flags f JOIN sessions s ON s.id = f.session_id
        LEFT JOIN captures c ON c.id = f.capture_id
-       WHERE f.state = 'open' ORDER BY s.started_at DESC, f.t`,
+       WHERE f.state = 'open' ORDER BY s.started_at DESC, f.t, c.position`,
     )
     .map((row) => ({
       id: row.id,
