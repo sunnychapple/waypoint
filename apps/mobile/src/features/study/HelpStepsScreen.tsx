@@ -6,7 +6,7 @@ import { cleanHelp } from "../../core/study/drafts.ts";
 import { problemOf, showAnswer, showNextStep, startHelp, typedProblemOf, type HelpState } from "../../core/study/help.ts";
 import { getDb } from "../../platform/db.ts";
 import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
-import { Body, Caption, PrimaryButton, Screen } from "../../ui/kit.tsx";
+import { Body, Caption, PrimaryButton, Screen, SecondaryButton } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
 
@@ -18,7 +18,7 @@ function isDeclined(error: unknown): boolean {
 export default function HelpStepsScreen() {
   const colors = useColors();
   // A problem is either a block the page's text found (block) or one the student typed in (text).
-  const { captureId, block, text } = useLocalSearchParams<{ sessionId: string; captureId: string; block?: string; text?: string }>();
+  const { sessionId, captureId, block, text } = useLocalSearchParams<{ sessionId: string; captureId: string; block?: string; text?: string }>();
   const [availability] = useState(getAvailability);
   const [problem] = useState(() => (text === undefined ? problemOf(getDb(), captureId, Number(block)) : typedProblemOf(getDb(), captureId, text)));
   const [attempt, setAttempt] = useState(0);
@@ -54,7 +54,7 @@ export default function HelpStepsScreen() {
     return (
       <Screen>
         <CloseButton />
-        <ModelUnavailable availability={availability} />
+        <ModelUnavailable availability={availability} sessionId={sessionId} />
       </Screen>
     );
   }
@@ -108,10 +108,22 @@ export default function HelpStepsScreen() {
             </View>
           ) : null}
           <Caption style={styles.caption}>Try each step yourself before you look at the next one.</Caption>
+          {help.answerShown ? (
+            <>
+              <PrimaryButton label="Done" onPress={() => router.back()} />
+              <SecondaryButton label="Help with another problem" onPress={() => backToPick(sessionId)} />
+            </>
+          ) : null}
         </>
       ) : null}
     </Screen>
   );
+}
+
+// The problem list for this session. Steps are pushed from it, so going back lands there; a deep link has no list under it.
+function backToPick(sessionId: string) {
+  if (router.canGoBack()) router.back();
+  else router.replace(`/study/help?sessionId=${sessionId}`);
 }
 
 function CloseButton() {

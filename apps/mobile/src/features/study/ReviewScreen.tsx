@@ -7,7 +7,7 @@ import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
 import { dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
-import { intervalLabel } from "../../core/study/labels.ts";
+import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -128,7 +128,8 @@ export default function ReviewScreen() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={flipped ? "Show the front" : "Show the back"}
+        accessibilityLabel={flipped ? `${card.front}. ${card.back}` : card.front}
+        accessibilityHint="Double-tap to flip"
         onPress={() => setFlipped(!flipped)}
         style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}
       >
@@ -142,14 +143,16 @@ export default function ReviewScreen() {
         </Pressable>
       )}
 
+      {flipped ? null : <Caption style={styles.centered}>Flip the card to rate it.</Caption>}
       <View style={styles.ratings}>
         {ratings.map((item) => (
           <Pressable
             key={item.label}
             accessibilityRole="button"
-            accessibilityLabel={item.label}
+            accessibilityLabel={RATING_SPOKEN[item.rating]}
+            disabled={!flipped}
             onPress={() => rate(item.rating)}
-            style={[styles.rating, { backgroundColor: item.fill }]}
+            style={[styles.rating, { backgroundColor: item.fill, opacity: flipped ? 1 : 0.4 }]}
           >
             <Text style={[styles.ratingLabel, { color: item.ink }]}>{item.label}</Text>
             <Text style={[styles.ratingInterval, { color: item.ink }]}>{intervalLabel(previews[item.rating])}</Text>
@@ -199,4 +202,5 @@ const styles = StyleSheet.create({
   rating: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: "center", gap: 4 },
   ratingLabel: { fontSize: 16, fontWeight: "700" },
   ratingInterval: { fontSize: 13 },
+  centered: { textAlign: "center" },
 });

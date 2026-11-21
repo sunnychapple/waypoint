@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { getMade } from "../../core/made/made.ts";
 import { grade, score, type Grade } from "../../core/made/practice.ts";
 import { useQuery } from "../../platform/db.ts";
-import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, BackButton, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 type Answer = { given: string | number; verdict: Grade };
@@ -24,6 +24,7 @@ export default function PracticeScreen() {
   if (item === null || item.kind !== "practice") {
     return (
       <Screen>
+        <BackButton />
         <Title>Couldn't open this practice set.</Title>
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>
@@ -36,6 +37,7 @@ export default function PracticeScreen() {
     const result = score(grades);
     return (
       <Screen>
+        <BackButton />
         <Title>{`${result.right} of ${result.total} right`}</Title>
         <PrimaryButton
           label="Try again"
@@ -64,6 +66,18 @@ export default function PracticeScreen() {
     setNeedsAnswer(false);
   }
 
+  // Leaving after answers have been given asks first: the answers so far are not kept.
+  function leave() {
+    if (grades.length === 0 && answer === null) {
+      router.back();
+      return;
+    }
+    Alert.alert("Stop practising?", "Your answers so far won't be saved.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Stop", style: "destructive", onPress: () => router.back() },
+    ]);
+  }
+
   function checkShort() {
     if (question === undefined || answer !== null) return;
     const verdict = grade(question, typed);
@@ -77,6 +91,7 @@ export default function PracticeScreen() {
 
   return (
     <Screen>
+      <BackButton onPress={leave} />
       <Title>{item.body.title}</Title>
       <Caption>{`Question ${position + 1} of ${total}`}</Caption>
       <Body style={styles.prompt}>{question.prompt}</Body>

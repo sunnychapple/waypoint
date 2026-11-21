@@ -22,7 +22,7 @@ export default function HelpPickScreen() {
     return (
       <Screen>
         <CloseButton />
-        <ModelUnavailable availability={availability} />
+        <ModelUnavailable availability={availability} sessionId={sessionId} />
       </Screen>
     );
   }
