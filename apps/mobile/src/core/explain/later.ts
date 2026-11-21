@@ -67,6 +67,11 @@ export function markAnswered(db: SqlDb, flagId: string): void {
   db.run("UPDATE flags SET state = 'answered' WHERE id = ? AND state = 'open'", [flagId]);
 }
 
+// The person removed the saved answer to a flagged question: the question goes back on the list.
+export function reopenFlag(db: SqlDb, flagId: string): void {
+  db.run("UPDATE flags SET state = 'open' WHERE id = ? AND state = 'answered'", [flagId]);
+}
+
 export function dismissFlag(db: SqlDb, flagId: string): void {
   db.run("UPDATE flags SET state = 'dismissed' WHERE id = ? AND state = 'open'", [flagId]);
 }

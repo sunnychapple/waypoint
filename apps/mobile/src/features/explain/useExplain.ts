@@ -16,7 +16,7 @@ import {
   type Explanation,
   type ThreadItem,
 } from "../../core/explain/explanations.ts";
-import { askLater, markAnswered } from "../../core/explain/later.ts";
+import { askLater, markAnswered, reopenFlag } from "../../core/explain/later.ts";
 import { logSent, settleFailedSent, settleSent, type InstantSentTask } from "../../core/explain/sent.ts";
 import { dbGeneration, getDb, stillSame, writeDb } from "../../platform/db.ts";
 import { requireApprovedDevice } from "../../platform/device.ts";
@@ -157,7 +157,16 @@ export function useExplain(
   function toggleSave(): void {
     const current = explanation;
     if (current === null) return;
-    writeDb((db) => (current.saved ? unsaveExplanation(db, current.id) : saveExplanation(db, deps, current.id)));
+    writeDb((db) => {
+      if (current.saved) {
+        unsaveExplanation(db, current.id);
+        // Its answer is going away, so a question from Questions for later goes back on the list.
+        if (flagId !== undefined) reopenFlag(db, flagId);
+      } else {
+        saveExplanation(db, deps, current.id);
+        if (flagId !== undefined) markAnswered(db, flagId);
+      }
+    });
     setExplanation({ ...current, saved: !current.saved });
   }
 
