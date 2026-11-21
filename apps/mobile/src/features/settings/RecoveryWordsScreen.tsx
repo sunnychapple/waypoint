@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { wordsMatch, pickPositions } from "../../core/device/recovery.ts";
@@ -19,6 +19,7 @@ export default function RecoveryWordsScreen() {
   const [caption, setCaption] = useState("");
   const [mismatch, setMismatch] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false); // set synchronously, so a double tap on Check cannot start two saves
 
   // Closes without saving anything: the words count as saved only after the check passes. Not while a save is running.
   function notNow(): void {
@@ -51,14 +52,18 @@ export default function RecoveryWordsScreen() {
   }
 
   async function check(): Promise<void> {
-    if (made === null) return;
+    if (made === null || savingRef.current) return;
     if (!wordsMatch(made.words, positions, typed)) {
       setMismatch(true);
       setCaption("That doesn't match. Look at your paper and try again.");
       return;
     }
+    savingRef.current = true;
     setSaving(true);
-    const result = await saveRecoveryKey(made).finally(() => setSaving(false));
+    const result = await saveRecoveryKey(made).finally(() => {
+      savingRef.current = false;
+      setSaving(false);
+    });
     if (result === "saved") {
       setStep("done");
     } else if (result === "offline") {
@@ -131,7 +136,7 @@ export default function RecoveryWordsScreen() {
         ))}
         {caption !== "" ? <Caption>{caption}</Caption> : null}
         <View style={styles.actions}>
-          <PrimaryButton label="Check" onPress={() => void check()} />
+          <PrimaryButton label="Check" onPress={() => void check()} style={saving ? styles.dim : undefined} />
           {mismatch ? <SecondaryButton label="Show the words again" onPress={showWordsAgain} /> : null}
           <SecondaryButton label="Not now" onPress={notNow} style={saving ? styles.dim : undefined} />
         </View>
