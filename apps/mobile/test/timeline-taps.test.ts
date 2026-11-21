@@ -34,6 +34,8 @@ type MarksModule = { flagLabel: (at: number) => string; photoLabel: (at: number)
 const SEARCH = "../src/features/search/SearchScreen.tsx";
 const SESSION = "../src/features/capture/SessionScreen.tsx";
 const MARKS = "../src/features/capture/TimelineMarks.tsx";
+const PHOTO = "../src/features/capture/PhotoScreen.tsx";
+const { isKnownCapture } = (await import(PHOTO)) as { isKnownCapture: (db: unknown, file: string) => boolean };
 const { hitRoute } = (await import(SEARCH)) as SearchModule;
 const { targetPageId } = (await import(SESSION)) as SessionModule;
 const { flagLabel, photoLabel } = (await import(MARKS)) as MarksModule;
@@ -69,5 +71,20 @@ describe("timeline mark labels", () => {
 
   it("labels a flag with its time and where it opens", () => {
     expect(flagLabel(125_000)).toBe("Flagged moment at 2:05, opens Questions for later");
+  });
+});
+
+describe("photo viewer path check", () => {
+  const db = { get: (_sql: string, params: string[]) => (params[0] === "sessions/s1/p.jpg" ? { ok: 1 } : null) };
+
+  it("shows a capture the database knows", () => {
+    expect(isKnownCapture(db, "sessions/s1/p.jpg")).toBe(true);
+  });
+
+  it("refuses unknown paths and traversal from a crafted link", () => {
+    expect(isKnownCapture(db, "../..")).toBe(false);
+    expect(isKnownCapture(db, "sessions/../keys.db")).toBe(false);
+    expect(isKnownCapture(db, "/etc/passwd")).toBe(false);
+    expect(isKnownCapture(db, "sessions/s2/p.jpg")).toBe(false);
   });
 });

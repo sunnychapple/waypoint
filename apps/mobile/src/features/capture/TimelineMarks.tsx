@@ -16,7 +16,8 @@ export function flagLabel(at: number): string {
 
 // A gap, flag or photo in a recording's timeline. The live recording screen and the saved session draw them the same way.
 // A photo opens the full-screen viewer; a flag opens Questions for later.
-export function TimeMarkRow({ item }: { item: Exclude<TimelineItem, { kind: "line" }> }) {
+// Taps only work where `interactive` is set: the live recorder must not navigate away mid-recording.
+export function TimeMarkRow({ item, interactive = false }: { item: Exclude<TimelineItem, { kind: "line" }>; interactive?: boolean }) {
   const colors = useColors();
   switch (item.kind) {
     case "gap":
@@ -31,8 +32,9 @@ export function TimeMarkRow({ item }: { item: Exclude<TimelineItem, { kind: "lin
         <View style={styles.line}>
           <Text style={[styles.time, { color: colors.flagInk }]}>{formatOffset(item.at)}</Text>
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={flagLabel(item.at)}
+            disabled={!interactive}
+            accessibilityRole={interactive ? "button" : undefined}
+            accessibilityLabel={interactive ? flagLabel(item.at) : "Flagged moment"}
             hitSlop={8}
             onPress={() => router.push("/later")}
             style={[styles.flagChip, { backgroundColor: colors.flagSoft }]}
@@ -47,8 +49,9 @@ export function TimeMarkRow({ item }: { item: Exclude<TimelineItem, { kind: "lin
         <View style={styles.line}>
           <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={photoLabel(item.at)}
+            disabled={!interactive}
+            accessibilityRole={interactive ? "button" : undefined}
+            accessibilityLabel={interactive ? photoLabel(item.at) : "Photo"}
             onPress={() => router.push({ pathname: "/photo", params: { file: item.file, t: String(item.at) } })}
           >
             <Image source={{ uri: fileUri(item.file) }} style={styles.thumb} resizeMode="cover" />

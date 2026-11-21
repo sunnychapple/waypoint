@@ -279,7 +279,7 @@ export default function SessionScreen() {
                 />
               </View>
             ) : (
-              <TimeMarkRow key={item.key} item={item} />
+              <TimeMarkRow key={item.key} item={item} interactive />
             ),
           )
         )}
