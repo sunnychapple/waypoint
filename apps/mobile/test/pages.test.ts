@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addPages,
+  editPageText,
   listPages,
   movePage,
   pagesToRead,
@@ -77,6 +78,17 @@ describe("pages", () => {
     setPageText(db, captureId ?? "", "Practice 7.3", "[]");
     expect(db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [session])?.indexed_at).toBeNull();
     expect(listPages(db, session)[0]?.foundText).toBe("Practice 7.3");
+  });
+
+  it("editPageText trims the text, clears the word positions, and marks the session for re-indexing", () => {
+    const session = newSession();
+    const [captureId] = addPages(db, deps(), session, ["a.jpg"]);
+    setPageText(db, captureId ?? "", "old words", '[{"text":"old"}]');
+    db.run("UPDATE sessions SET indexed_at = 500 WHERE id = ?", [session]);
+    editPageText(db, captureId ?? "", "  Solve 3x = 6  \n");
+    expect(listPages(db, session)[0]?.foundText).toBe("Solve 3x = 6");
+    expect(db.get<{ found_lines: string }>("SELECT found_lines FROM captures WHERE id = ?", [captureId ?? ""])?.found_lines).toBe("[]");
+    expect(db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [session])?.indexed_at).toBeNull();
   });
 
   it("pagesToRead returns unread pages oldest first, up to the limit, and never picks an empty text again", () => {

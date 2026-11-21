@@ -70,7 +70,7 @@ function PhotoText({ found }: { found: FoundText }) {
   if (found.state === "reading") {
     return <Text style={styles.reading}>Reading this photo…</Text>;
   }
-  if (found.text === "") return null;
+  if (found.text === "") return <Text style={styles.reading}>NotePath couldn't find any words in this photo.</Text>;
   return (
     <View style={styles.textPanel}>
       <Pressable

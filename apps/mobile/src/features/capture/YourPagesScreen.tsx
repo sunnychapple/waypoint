@@ -37,6 +37,8 @@ export default function YourPagesScreen() {
   const words = wordCount(pages.map((p) => p.foundText));
   const reading = pages.some((p) => p.foundText === null);
   const opened = pages.find((p) => p.id === openId) ?? null;
+  // Pages whose read found no words: the first one is where the line below opens.
+  const blankPages = pages.filter((p) => p.foundText !== null && p.foundText.trim() === "");
 
   function remove(captureId: string) {
     const file = writeDb((db) => removePage(db, captureId));
@@ -90,6 +92,15 @@ export default function YourPagesScreen() {
       <Caption>
         {reading ? `${countLabel(pages.length, "page", "pages")} · reading on this iPhone…` : `${countLabel(pages.length, "page", "pages")} · ${words} words read on this iPhone`}
       </Caption>
+      {blankPages.length > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/session/${id}?page=${blankPages[0]?.id ?? ""}`)}
+          style={styles.blankLine}
+        >
+          <Text style={[styles.blankText, { color: colors.accent }]}>Couldn't read {countLabel(blankPages.length, "page", "pages")}</Text>
+        </Pressable>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Saving to ${spaceName}`}
@@ -214,6 +225,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  blankLine: { alignSelf: "flex-start" },
+  blankText: { fontSize: 15, fontWeight: "600" },
   pillRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   pill: {
     flexDirection: "row",

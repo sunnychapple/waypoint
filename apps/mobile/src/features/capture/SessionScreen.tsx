@@ -24,10 +24,12 @@ import { useConfig } from "../../platform/config.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { linkRefused, revokeLink } from "../../platform/links.ts";
+import { retryPageRead } from "../../platform/pageReading.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
+import { PageTextEditor } from "./PageTextEditor.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 
@@ -287,9 +289,11 @@ export default function SessionScreen() {
         {pages.map((page, index) => (
           <PageBlock
             key={page.id}
+            captureId={page.id}
             number={index + 1}
             file={page.file}
             text={page.foundText}
+            editable={role !== "viewer"}
             lit={lit === page.id}
             onLayout={(y) => landOn(page.id, y)}
             onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, page: page.id, word } })}
@@ -403,22 +407,38 @@ export function targetPageId(pages: { id: string }[], pageId: string | undefined
 }
 
 function PageBlock({
+  captureId,
   number,
   file,
   text,
+  editable,
   lit,
   onLayout,
   onWord,
 }: {
+  captureId: string;
   number: number;
   file: string;
   text: string | null;
+  editable: boolean;
   lit: boolean;
   onLayout: (y: number) => void;
   onWord: (word: string) => void;
 }) {
   const colors = useColors();
   const [showing, setShowing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [stillBlank, setStillBlank] = useState(false);
+  const blank = text !== null && text.trim() === "";
+
+  async function tryAgain() {
+    setRetrying(true);
+    const found = await retryPageRead(captureId, file);
+    setRetrying(false);
+    setStillBlank(!found);
+  }
+
   return (
     <View
       onLayout={(event) => onLayout(event.nativeEvent.layout.y)}
@@ -431,7 +451,24 @@ function PageBlock({
         resizeMode="contain"
         style={[styles.pageImage, { backgroundColor: colors.surface2 }]}
       />
-      {text ? (
+      {text === null ? <Caption>Reading this page…</Caption> : null}
+      {blank ? (
+        <>
+          <Caption>NotePath couldn't find any words on this page.</Caption>
+          {editable && file !== "" ? (
+            <Pressable accessibilityRole="button" disabled={retrying} onPress={() => void tryAgain()}>
+              <Text style={[styles.toggle, { color: colors.accent }]}>{retrying ? "Reading…" : "Try again"}</Text>
+            </Pressable>
+          ) : null}
+          {editable && stillBlank ? <Caption>Still no words. You can type them instead.</Caption> : null}
+          {editable ? (
+            <Pressable accessibilityRole="button" onPress={() => setEditing(true)}>
+              <Text style={[styles.toggle, { color: colors.accent }]}>Type the text</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+      {text && !blank ? (
         <>
           <Pressable
             accessibilityRole="button"
@@ -441,7 +478,15 @@ function PageBlock({
             <Text style={[styles.toggle, { color: colors.accent }]}>{showing ? "Hide the text" : "Show the text"}</Text>
           </Pressable>
           {showing ? <WordText text={text} style={[styles.pageText, { color: colors.ink2 }]} onWord={onWord} /> : null}
+          {showing && editable ? (
+            <Pressable accessibilityRole="button" onPress={() => setEditing(true)}>
+              <Text style={[styles.toggle, { color: colors.accent }]}>Fix the text</Text>
+            </Pressable>
+          ) : null}
         </>
+      ) : null}
+      {editing ? (
+        <PageTextEditor captureId={captureId} file={file} number={number} text={text} onClose={() => setEditing(false)} />
       ) : null}
     </View>
   );

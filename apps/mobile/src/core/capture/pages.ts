@@ -1,5 +1,5 @@
 import type { SqlDb } from "../db/sql.ts";
-import { createSession, type SessionRow } from "./sessions.ts";
+import { createSession, renameSession, type SessionRow } from "./sessions.ts";
 
 type Deps = { now: () => number; newId: () => string };
 
@@ -98,6 +98,11 @@ export function setPageText(db: SqlDb, captureId: string, text: string, linesJso
   });
 }
 
+// Stores the text the person typed for a page, trimmed. Empty lines are right: the old word positions no longer match.
+export function editPageText(db: SqlDb, captureId: string, text: string): void {
+  setPageText(db, captureId, text.trim(), "[]");
+}
+
 // Pages and photos not read yet, oldest first. An empty text ("" after a failed read) is not picked again.
 export function pagesToRead(db: SqlDb, limit: number): { id: string; file: string }[] {
   return db.all<{ id: string; file: string }>(
@@ -125,4 +130,16 @@ export function titleFromText(text: string | null, fallback: string): string {
   if (chars[60] === " ") return cut.trimEnd(); // the 60th character ends a word
   const lastSpace = cut.lastIndexOf(" ");
   return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd();
+}
+
+// A pages session still called "Pages" takes its title from the first line of page 1 once that is read.
+export function nameUntitledPages(db: SqlDb): void {
+  const rows = db.all<{ id: string; found_text: string | null }>(
+    `SELECT s.id, c.found_text FROM sessions s
+     JOIN captures c ON c.session_id = s.id AND c.kind = 'page' AND c.position = 0
+     WHERE s.kind = 'pages' AND s.title = 'Pages' AND c.found_text IS NOT NULL`,
+  );
+  for (const row of rows) {
+    renameSession(db, row.id, titleFromText(row.found_text, "Pages"));
+  }
 }
