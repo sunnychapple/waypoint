@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -13,9 +14,18 @@ import { Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } fro
 import { useColors } from "../../ui/theme.ts";
 import { nextDueLabel } from "./ReviewScreen.tsx";
 
-// The Review tab: what is being made and what is ready, what is due, and the five newest sessions to make cards from.
+// How many sessions the "Make a review" list shows before "Show all".
+export const RECENT_SESSION_COUNT = 5;
+
+// The sessions to list: the newest RECENT_SESSION_COUNT, or all of them once expanded.
+export function visibleSessions<T>(sessions: T[], expanded: boolean): T[] {
+  return expanded ? sessions : sessions.slice(0, RECENT_SESSION_COUNT);
+}
+
+// The Review tab: what is being made and what is ready, what is due, and the sessions to make cards from.
 export default function ReviewHomeScreen() {
   const colors = useColors();
+  const [expanded, setExpanded] = useState(false);
   const now = useMinuteNow();
   const config = useConfig();
   const flags = { miniApps: config?.flags.mini_app_viewer === true, diagrams: config?.flags.diagram_viewer === true };
@@ -27,7 +37,7 @@ export default function ReviewHomeScreen() {
       due: countDue(db, now),
       total: sessions.reduce((sum, session) => sum + session.cards, 0),
       next: nextDueAt(db, now),
-      recent: sessions.slice(0, 5),
+      sessions,
       working: listWorkingJobs(db, Date.now()),
       finished: listFinished(db, now),
       now,
@@ -112,7 +122,7 @@ export default function ReviewHomeScreen() {
       </View>
 
       <Caption>MAKE A REVIEW</Caption>
-      {data.recent.map((session) => (
+      {visibleSessions(data.sessions, expanded).map((session) => (
         <View key={session.id} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
           <Text style={[styles.sessionTitle, { color: colors.ink }]}>{session.title}</Text>
           <Caption>{session.spaceName}</Caption>
@@ -126,6 +136,18 @@ export default function ReviewHomeScreen() {
           </View>
         </View>
       ))}
+      {data.sessions.length > RECENT_SESSION_COUNT ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? "Show fewer sessions" : `Show all ${data.sessions.length} sessions`}
+          onPress={() => setExpanded((open) => !open)}
+          style={styles.toggle}
+        >
+          <Text style={[styles.seeAll, { color: colors.accent }]}>
+            {expanded ? "Show fewer" : `Show all ${data.sessions.length} sessions`}
+          </Text>
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
@@ -142,4 +164,5 @@ const styles = StyleSheet.create({
   half: { flex: 1 },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   seeAll: { fontSize: 15, fontWeight: "600" },
+  toggle: { minHeight: 44, justifyContent: "center", alignItems: "center" },
 });
