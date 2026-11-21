@@ -3,6 +3,7 @@ import {
   addFlag,
   addPhoto,
   finishRecording,
+  isLiveSession,
   pendingTranscriptions,
   recoverSessions,
   saveSegment,
@@ -156,5 +157,15 @@ describe("recording", () => {
     savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 20_000, file: "c0.m4a" });
     recoverSessions(db, { sessionId: "", state: "idle" });
     expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
+});
+
+describe("isLiveSession", () => {
+  it("is true only for this iPhone's active recorder on that session", () => {
+    expect(isLiveSession({ sessionId: "a", state: "recording" }, "a")).toBe(true);
+    expect(isLiveSession({ sessionId: "a", state: "paused" }, "a")).toBe(true);
+    expect(isLiveSession({ sessionId: "a", state: "idle" }, "a")).toBe(false);
+    expect(isLiveSession({ sessionId: "b", state: "recording" }, "a")).toBe(false);
+    expect(isLiveSession({ sessionId: "", state: "idle" }, "a")).toBe(false);
   });
 });

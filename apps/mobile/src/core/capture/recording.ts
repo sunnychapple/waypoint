@@ -96,6 +96,12 @@ export function finishRecording(db: SqlDb, sessionId: string, endedAt: number, r
   );
 }
 
+// True when this iPhone's recorder is working on the session. Keyed on the recorder, not the row's state, so a
+// session another phone left marked "recording" can still be changed here.
+export function isLiveSession(status: { sessionId: string; state: string }, id: string): boolean {
+  return status.sessionId === id && status.state !== "idle";
+}
+
 // After a restart: sessions still marked recording or paused, except the one native is still recording,
 // become interrupted and wait for transcription. Their length is what the saved audio parts add up to, and they
 // end where the last saved part ends. Returns their ids.

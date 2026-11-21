@@ -7,6 +7,7 @@ import { dateLine } from "../../core/capture/labels.ts";
 import { momentFromParam, nearestSegmentIndex } from "../../core/capture/moment.ts";
 import { listPages } from "../../core/capture/pages.ts";
 import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capture/second.ts";
+import { isLiveSession } from "../../core/capture/recording.ts";
 import { listSegments } from "../../core/capture/segments.ts";
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import type { Piece } from "../../core/capture/transcript.ts";
@@ -109,6 +110,10 @@ export default function SessionScreen() {
   }
 
   function openMenu() {
+    if (isLiveSession(getRecorderStatus(), id)) {
+      Alert.alert("Still recording", "Stop the recording first. Then you can move, share or delete it.");
+      return;
+    }
     const canSecond = session.kind === "recording" && (session.state === "saved" || session.state === "interrupted");
     Alert.alert(session.title, undefined, [
       ...(canSecond ? [{ text: "Better transcript", onPress: () => router.push(`/second-transcript?sessionId=${id}`) }] : []),
@@ -137,6 +142,7 @@ export default function SessionScreen() {
 
   // Its links are turned off first (M30b); when one cannot be turned off, the session stays.
   async function deleteSession() {
+    if (isLiveSession(getRecorderStatus(), id)) return;
     try {
       for (const link of links) if (link.revokedAt === null) await revokeLink(link.id);
     } catch (error) {
