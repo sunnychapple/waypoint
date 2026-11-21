@@ -17,7 +17,7 @@ import { useExplain } from "./useExplain.ts";
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
 // recording or the session.
 export default function ExplainSheet() {
-  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string; explanationId?: string }>();
+  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string; explanationId?: string; page?: string }>();
   const t = Number(params.t);
   const timed = typeof params.t === "string" && params.t !== "" && Number.isFinite(t);
   return (
@@ -28,6 +28,7 @@ export default function ExplainSheet() {
       word={params.word.slice(0, 100)}
       flagId={typeof params.flagId === "string" && params.flagId !== "" ? params.flagId : undefined}
       explanationId={typeof params.explanationId === "string" && params.explanationId !== "" ? params.explanationId : undefined}
+      pageId={typeof params.page === "string" && params.page !== "" ? params.page : undefined}
     />
   );
 }
@@ -44,6 +45,7 @@ function ExplainBody({
   word,
   flagId,
   explanationId,
+  pageId,
 }: {
   sessionId: string;
   t: number;
@@ -51,14 +53,15 @@ function ExplainBody({
   word: string;
   flagId?: string | undefined;
   explanationId?: string | undefined;
+  pageId?: string | undefined;
 }) {
   const colors = useColors();
   const config = useConfig();
   const { wallet } = useWallet();
   const signOut = useSignOut();
-  const model = useExplain(sessionId, t, word, flagId, explanationId);
+  const model = useExplain(sessionId, t, word, flagId, explanationId, pageId);
   const [showSent, setShowSent] = useState(false);
-  const { phase, explanation, unsavedItem, offerResearch } = model;
+  const { phase, explanation, unsavedItem, offerResearch, pageNumber } = model;
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
@@ -86,7 +89,7 @@ function ExplainBody({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open in session"
-          onPress={() => router.push(`/session/${sessionId}?t=${t}`)}
+          onPress={() => router.push(pageId === undefined ? `/session/${sessionId}?t=${t}` : `/session/${sessionId}?page=${encodeURIComponent(pageId)}`)}
           style={styles.touch}
         >
           <Text style={[styles.link, { color: colors.accent }]}>Open in session</Text>
@@ -97,7 +100,13 @@ function ExplainBody({
       </View>
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
         <Title>{word}</Title>
-        <Caption>{timed ? `“${word}” · at ${formatOffset(t)}` : `“${word}”`}</Caption>
+        <Caption>
+          {timed
+            ? `“${word}” · at ${formatOffset(t)}`
+            : pageNumber === null
+              ? `“${word}”`
+              : `“${word}” · on page ${pageNumber}`}
+        </Caption>
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
@@ -148,7 +157,8 @@ function ExplainBody({
             {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
             {failureCopy(phase.failure).signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
             {failureCopy(phase.failure).actions.map((action, index) =>
-              action === "ask_later" && model.askedLater ? null : index === 0 ? (
+              // A page has no time, so a question for later could not point back to it: Ask later is left off.
+              action === "ask_later" && (model.askedLater || pageId !== undefined) ? null : index === 0 ? (
                 <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
               ) : (
                 <SecondaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />

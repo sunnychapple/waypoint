@@ -292,6 +292,7 @@ export default function SessionScreen() {
             text={page.foundText}
             lit={lit === page.id}
             onLayout={(y) => landOn(page.id, y)}
+            onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, page: page.id, word } })}
           />
         ))}
 
@@ -407,12 +408,14 @@ function PageBlock({
   text,
   lit,
   onLayout,
+  onWord,
 }: {
   number: number;
   file: string;
   text: string | null;
   lit: boolean;
   onLayout: (y: number) => void;
+  onWord: (word: string) => void;
 }) {
   const colors = useColors();
   const [showing, setShowing] = useState(false);
@@ -437,7 +440,7 @@ function PageBlock({
           >
             <Text style={[styles.toggle, { color: colors.accent }]}>{showing ? "Hide the text" : "Show the text"}</Text>
           </Pressable>
-          {showing ? <Text style={[styles.pageText, { color: colors.ink2 }]}>{text}</Text> : null}
+          {showing ? <WordText text={text} style={[styles.pageText, { color: colors.ink2 }]} onWord={onWord} /> : null}
         </>
       ) : null}
     </View>

@@ -3,7 +3,7 @@ import { randomUUID } from "expo-crypto";
 import type { ExplainRequest, FollowUpRequest, StreamDone } from "@waypoint/contracts";
 import { listSegments } from "../../core/capture/segments.ts";
 import { keepsKey, type CloudFailure } from "../../core/cloud/failure.ts";
-import { excerptAround } from "../../core/explain/excerpt.ts";
+import { excerptAround, pageContext, trimExcerpt } from "../../core/explain/excerpt.ts";
 import {
   addToThread,
   discardIfUnsaved,
@@ -33,8 +33,17 @@ export type ExplainPhase =
 // One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
 // Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
 // With explanationId, the saved explanation's thread is shown and follow-ups continue it.
-export function useExplain(sessionId: string, t: number, word: string, flagId?: string | undefined, explanationId?: string | undefined) {
-  const [excerpt] = useState(() => excerptAround(listSegments(getDb(), sessionId), t));
+// With pageId, the word was tapped on a page: the context is that page's found text, and t is 0 (a page's time).
+export function useExplain(
+  sessionId: string,
+  t: number,
+  word: string,
+  flagId?: string | undefined,
+  explanationId?: string | undefined,
+  pageId?: string | undefined,
+) {
+  const [page] = useState(() => (pageId === undefined ? null : pageContext(getDb(), sessionId, pageId)));
+  const [excerpt] = useState(() => (pageId === undefined ? excerptAround(listSegments(getDb(), sessionId), t) : trimExcerpt(page?.text ?? "")));
   const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [loaded] = useState<Explanation | null>(() => (explanationId === undefined ? null : getExplanation(getDb(), explanationId)));
   const [explanation, setExplanation] = useState<Explanation | null>(loaded);
@@ -155,5 +164,5 @@ export function useExplain(sessionId: string, t: number, word: string, flagId?: 
     setAskedLater(true);
   }
 
-  return { excerpt, phase, explanation, unsavedItem, askedLater, offerResearch, run, toggleSave, saveForLater };
+  return { excerpt, pageNumber: page?.number ?? null, phase, explanation, unsavedItem, askedLater, offerResearch, run, toggleSave, saveForLater };
 }
