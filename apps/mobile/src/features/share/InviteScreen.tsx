@@ -5,13 +5,14 @@ import { inviteEnds, canInvite, type InviteAccess } from "../../core/share/space
 import { getGroup } from "../../core/groups/groups.ts";
 import { useQuery } from "../../platform/db.ts";
 import { invite, type HistoryChoice } from "../../platform/share.ts";
-import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { toFailure } from "../../platform/tasks.ts";
+import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 
 type RoleChoice = "editor" | "viewer";
 
-const ROLES: { value: RoleChoice; label: string }[] = [
-  { value: "editor", label: "Editor" },
-  { value: "viewer", label: "Viewer" },
+const ROLES: { value: RoleChoice; label: string; explain: string }[] = [
+  { value: "editor", label: "Editor", explain: "Can add and change notes" },
+  { value: "viewer", label: "Viewer", explain: "Can only look" },
 ];
 const HISTORY: { value: HistoryChoice; label: string }[] = [
   { value: "from_now", label: "From now" },
@@ -39,7 +40,8 @@ function Choices<T extends string>({ options, value, onChange }: { options: { va
   );
 }
 
-// Invite someone to a shared space (owners only). The link goes to the iOS share sheet and is not kept on the phone.
+// Invite someone to a shared space (owners only). Making the link creates the invite on the server, so the link is kept
+// here until this screen closes: if the share sheet is cancelled, "Share again" sends the same link rather than a new one.
 export default function InviteScreen() {
   const { group: groupParam } = useLocalSearchParams<{ group: string }>();
   const groupId = groupParam ?? "";
@@ -47,6 +49,8 @@ export default function InviteScreen() {
   const [role, setRole] = useState<RoleChoice>("viewer");
   const [history, setHistory] = useState<HistoryChoice>("from_now");
   const [access, setAccess] = useState<InviteAccess>("none");
+  const [link, setLink] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
 
   if (group === null || !canInvite(group.role)) {
     return (
@@ -57,32 +61,69 @@ export default function InviteScreen() {
     );
   }
 
-  async function makeLink(): Promise<void> {
-    try {
-      const url = await invite(groupId, role, history, inviteEnds(access, Date.now(), role));
-      await Share.share({ message: url });
-      router.back();
-    } catch {
-      Alert.alert("Couldn't make an invite. Try again.");
+  // A link made with other choices would not match what is shown, so changing a choice drops it.
+  function choose<T>(set: (v: T) => void) {
+    return (v: T) => {
+      set(v);
+      setLink(null);
+    };
+  }
+
+  async function shareLink(): Promise<void> {
+    let url = link;
+    if (url === null) {
+      try {
+        url = await invite(groupId, role, history, inviteEnds(access, Date.now(), role));
+      } catch (error) {
+        Alert.alert(toFailure(error).kind === "offline" ? "You're offline. Connect to the internet and try again." : "Couldn't make an invite. Try again.");
+        return;
+      }
+      setLink(url);
     }
+    try {
+      const result = await Share.share({ message: url });
+      if (result.action === Share.sharedAction) setSent(true);
+    } catch {
+      Alert.alert("Couldn't open the share sheet");
+    }
+  }
+
+  if (sent) {
+    return (
+      <Screen>
+        <Title>Invite sent</Title>
+        <Body>When they join, open NotePath so they can see the notes.</Body>
+        <PrimaryButton label="Done" onPress={() => router.back()} />
+      </Screen>
+    );
   }
 
   return (
     <Screen>
       <Title>Invite someone</Title>
       <Caption>Role</Caption>
-      <Choices options={ROLES} value={role} onChange={setRole} />
+      <Choices options={ROLES} value={role} onChange={choose(setRole)} />
+      {ROLES.map((r) => (
+        <Caption key={r.value}>{`${r.label}: ${r.explain}`}</Caption>
+      ))}
       <Caption>History</Caption>
-      <Choices options={HISTORY} value={history} onChange={setHistory} />
+      <Choices options={HISTORY} value={history} onChange={choose(setHistory)} />
       <Caption>
         {history === "from_now"
           ? "They'll see notes started from now on. Older notes, and changes to them, stay with you."
           : "They'll see every note in this space, older ones too."}
       </Caption>
       <Caption>Access</Caption>
-      <Choices options={ACCESS} value={access} onChange={setAccess} />
+      <Choices options={ACCESS} value={access} onChange={choose(setAccess)} />
       <Caption>The link works once and lasts 7 days.</Caption>
-      <PrimaryButton label="Share the link" icon="square.and.arrow.up" onPress={() => void makeLink()} />
+      {link === null ? (
+        <PrimaryButton label="Share the link" icon="square.and.arrow.up" onPress={() => void shareLink()} />
+      ) : (
+        <>
+          <Caption>The link is made but not sent yet. Share again to send this same link.</Caption>
+          <PrimaryButton label="Share again" icon="square.and.arrow.up" onPress={() => void shareLink()} />
+        </>
+      )}
     </Screen>
   );
 }

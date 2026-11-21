@@ -7,6 +7,7 @@ import { getSession, moveSessionToSpace } from "../../core/capture/sessions.ts";
 import { createSpace, getSpace, setSavingTo, SpaceNameError } from "../../core/db/spaces.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
 import { newSharedSpace } from "../../platform/share.ts";
+import { toFailure } from "../../platform/tasks.ts";
 import { getDb, useQuery, writeDb } from "../../platform/db.ts";
 import { Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -105,7 +106,7 @@ export default function NewSpaceScreen() {
         setError(`You already have a space called ${trimmed}.`);
         return;
       }
-      setError("Couldn't create it. Try again.");
+      setError(toFailure(e).kind === "offline" ? "You're offline. Connect to the internet and try again." : "Couldn't create it. Try again.");
     }
   }
 
