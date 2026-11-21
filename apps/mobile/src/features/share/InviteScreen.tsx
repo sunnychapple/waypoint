@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Share, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { inviteEnds, canInvite, type InviteAccess } from "../../core/share/spaces.ts";
@@ -51,6 +51,7 @@ export default function InviteScreen() {
   const [access, setAccess] = useState<InviteAccess>("none");
   const [link, setLink] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const making = useRef(false); // a second tap while the invite is being made would make a second open invite
 
   if (group === null || !canInvite(group.role)) {
     return (
@@ -72,11 +73,15 @@ export default function InviteScreen() {
   async function shareLink(): Promise<void> {
     let url = link;
     if (url === null) {
+      if (making.current) return;
+      making.current = true;
       try {
         url = await invite(groupId, role, history, inviteEnds(access, Date.now(), role));
       } catch (error) {
         Alert.alert(toFailure(error).kind === "offline" ? "You're offline. Connect to the internet and try again." : "Couldn't make an invite. Try again.");
         return;
+      } finally {
+        making.current = false;
       }
       setLink(url);
     }

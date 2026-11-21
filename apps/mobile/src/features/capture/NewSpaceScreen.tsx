@@ -80,7 +80,7 @@ export default function NewSpaceScreen() {
     }
   }
 
-  // The same creation and error as /shared/new: a local space plus a group, then that shared space.
+  // A shared space: a local space plus a group, then that shared space.
   async function createShared(trimmed: string): Promise<void> {
     if (inFlight.current) return;
     inFlight.current = true;
