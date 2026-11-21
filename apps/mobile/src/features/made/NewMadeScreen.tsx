@@ -8,11 +8,11 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import type { MadeKind } from "../../core/made/made.ts";
 import { keyForRequest } from "../../core/research/research.ts";
-import { pendingCopy, pendingText } from "../../core/study/pending.ts";
+import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
-import { useQuery } from "../../platform/db.ts";
 import { useQuote } from "../../platform/jobs.ts";
 import { madeText, startMade } from "../../platform/made.ts";
+import { usePendingText } from "../../platform/pending.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -46,7 +46,7 @@ export default function NewMadeScreen() {
   const sessionId = params.sessionId ?? null;
   const kind = kindOf(params.kind);
   // Unread pages or a transcript still being made: the text is not complete, so Make waits.
-  const pending = useQuery((db) => (sessionId === null ? null : pendingText(db, sessionId)), sessionId ?? "");
+  const { pending, skipped } = usePendingText(sessionId);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
   const available = (kind !== "mini_app" || miniAppsOn) && (kind !== "diagram" || diagramsOn);
@@ -102,6 +102,8 @@ export default function NewMadeScreen() {
           <Caption>{pendingCopy(pending)}</Caption>
         </View>
       ) : null}
+
+      {skipped !== null ? <Caption>{skippedCopy(skipped)}</Caption> : null}
 
       {hasText ? (
         <>

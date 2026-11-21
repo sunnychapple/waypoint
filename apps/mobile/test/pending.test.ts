@@ -3,7 +3,7 @@ import { createSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
-import { pendingCopy, pendingText } from "../src/core/study/pending.ts";
+import { PENDING_GIVE_UP_MS, pendingCopy, pendingText, skippedCopy } from "../src/core/study/pending.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 let db: SqlDb;
@@ -70,5 +70,18 @@ describe("pending text", () => {
   it("gives the copy for each kind of wait", () => {
     expect(pendingCopy("pages")).toBe("Reading your pages…");
     expect(pendingCopy("transcript")).toBe("Finishing the transcript…");
+  });
+});
+
+describe("skipped copy", () => {
+  it("says what could not be read when the wait ran out", () => {
+    expect(skippedCopy("pages")).toBe("Some pages couldn't be read.");
+    expect(skippedCopy("transcript")).toMatch(/transcript/);
+    expect(PENDING_GIVE_UP_MS).toBe(60_000);
+  });
+
+  it("a failed transcript is not waiting", () => {
+    setTranscript("rec", "failed");
+    expect(pendingText(db, "rec")).toBeNull();
   });
 });

@@ -5,11 +5,12 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { getSession } from "../../core/capture/sessions.ts";
 import { saveCards } from "../../core/study/cards.ts";
-import { pendingCopy, pendingText } from "../../core/study/pending.ts";
+import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { makeQuizFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { isDone, missedToCards, next, pick, quizCount, retryMissed, startQuiz, type QuizState } from "../../core/study/quiz.ts";
 import { studyUnits } from "../../core/study/units.ts";
-import { getDb, useQuery, writeDb } from "../../platform/db.ts";
+import { getDb, writeDb } from "../../platform/db.ts";
+import { usePendingText } from "../../platform/pending.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -30,7 +31,7 @@ export default function QuizScreen() {
   const [retrying, setRetrying] = useState(false);
   const [added, setAdded] = useState(0);
   // Unread pages or a transcript still being made: the quiz starts once they are read.
-  const pending = useQuery((db) => pendingText(db, sessionId), sessionId);
+  const { pending, skipped } = usePendingText(sessionId);
   // Once a quiz has started it is not made again, even if something is read in the middle of it.
   const started = useRef(false);
 
@@ -95,6 +96,7 @@ export default function QuizScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
           <Body>Making a quiz on this iPhone…</Body>
+          {skipped !== null ? <Body>{skippedCopy(skipped)}</Body> : null}
         </View>
       </Screen>
     );

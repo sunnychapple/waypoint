@@ -17,3 +17,11 @@ export function pendingText(db: SqlDb, sessionId: string): Pending | null {
 export function pendingCopy(pending: Pending): string {
   return pending === "pages" ? "Reading your pages…" : "Finishing the transcript…";
 }
+
+// How long a session waits for pages or a transcript before it goes on with what it has.
+export const PENDING_GIVE_UP_MS = 60_000;
+
+// Said when the wait ran out and the study goes on with part of the text.
+export function skippedCopy(pending: Pending): string {
+  return pending === "pages" ? "Some pages couldn't be read." : "The transcript isn't ready yet, so this uses what there is.";
+}

@@ -5,9 +5,10 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { saveCards, sessionCardCount } from "../../core/study/cards.ts";
 import { makeCardsFromUnits, type ModelPort } from "../../core/study/generate.ts";
-import { pendingCopy, pendingText } from "../../core/study/pending.ts";
+import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { studyUnits } from "../../core/study/units.ts";
-import { getDb, useQuery, writeDb } from "../../platform/db.ts";
+import { getDb, writeDb } from "../../platform/db.ts";
+import { usePendingText } from "../../platform/pending.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
 import { Body, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -26,7 +27,7 @@ export default function MakeCardsScreen() {
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "empty">("working");
   // Unread pages or a transcript still being made: nothing is generated until they are read.
-  const pending = useQuery((db) => pendingText(db, sessionId), sessionId);
+  const { pending, skipped } = usePendingText(sessionId);
 
   useEffect(() => {
     if (!making || availability !== "available" || pending !== null) return;
@@ -91,6 +92,7 @@ export default function MakeCardsScreen() {
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
           <Body>Making flashcards on this iPhone…</Body>
+          {skipped !== null ? <Body>{skippedCopy(skipped)}</Body> : null}
         </View>
       ) : null}
       {outcome === "failed" ? (

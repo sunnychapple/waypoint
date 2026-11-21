@@ -10,9 +10,12 @@ const INTERVAL_MS = 5000;
 // While any page or photo is still unread, the reader runs this often, so a session waiting on it starts soon.
 const UNREAD_INTERVAL_MS = 1000;
 const BATCH = 2;
+// After a pass that threw (the notes closed, a write failed), no pass starts for this long: no hot loop.
+const COOLDOWN_MS = 30_000;
 
 // One pass at a time, for the whole app: an effect that re-runs must not start a second pass beside a running one.
 let busy = false;
+let cooldownUntil = 0;
 
 // Reads pages on the iPhone in the background, while the app is active. Mounted once, in the tabs layout.
 // A pass runs at once when something new is unread, then every second until nothing is.
@@ -21,11 +24,13 @@ export function usePageReader(): void {
 
   useEffect(() => {
     const tick = async () => {
-      if (busy || AppState.currentState !== "active") return;
+      if (busy || Date.now() < cooldownUntil || AppState.currentState !== "active") return;
       busy = true;
       try {
         const generation = dbGeneration();
         for (const row of pagesToRead(getDb(), BATCH)) {
+          // Sent to the background in the middle of a pass: stop before the next page.
+          if (AppState.currentState !== "active") break;
           let text = "";
           let lines = "[]";
           try {
@@ -41,9 +46,14 @@ export function usePageReader(): void {
               nameUntitledPages(db);
             });
           } catch {
-            // The page was removed while it was being read.
+            // The page was removed while it was being read, or the write failed: wait before trying again.
+            cooldownUntil = Date.now() + COOLDOWN_MS;
+            break;
           }
         }
+      } catch {
+        // Signed out, or the notes could not be read: try again after a pause.
+        cooldownUntil = Date.now() + COOLDOWN_MS;
       } finally {
         busy = false;
       }
