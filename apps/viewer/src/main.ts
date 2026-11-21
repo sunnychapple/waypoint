@@ -28,8 +28,15 @@ function show(...nodes: HTMLElement[]): void {
   document.getElementById("app")?.replaceChildren(...nodes);
 }
 
-function message(title: string, body: string): void {
-  show(el("h1", title), el("p", body));
+function message(title: string, body: string, retry?: () => void): void {
+  const nodes: HTMLElement[] = [el("h1", title), el("p", body)];
+  if (retry !== undefined) {
+    const button = el("button", "Try again");
+    button.type = "button";
+    button.addEventListener("click", () => retry());
+    nodes.push(button);
+  }
+  show(...nodes);
 }
 
 function clock(ms: number): string {
@@ -63,8 +70,14 @@ function loadTurnstile(): Promise<Turnstile> {
     const script = document.createElement("script");
     script.src = TURNSTILE_URL;
     script.async = true;
-    script.onload = () => (window.turnstile === undefined ? reject(new Error("turnstile")) : resolve(window.turnstile));
-    script.onerror = () => reject(new Error("turnstile"));
+    // A failed load is forgotten, so Try again fetches the script again.
+    const fail = (): void => {
+      script.remove();
+      turnstileLoading = null;
+      reject(new Error("turnstile"));
+    };
+    script.onload = () => (window.turnstile === undefined ? fail() : resolve(window.turnstile));
+    script.onerror = fail;
     document.head.append(script);
   });
   return turnstileLoading;
@@ -93,7 +106,7 @@ async function askPasscode(id: string, key: CryptoKey, note: string | null): Pro
       "error-callback": () => (token = ""),
     });
   } catch {
-    message("Couldn't load the check", "Open the link again to try again.");
+    message("Couldn't load the check", "Check your connection, then try again.", () => void askPasscode(id, key, note));
     return;
   }
   form.onsubmit = (event) => {
@@ -107,11 +120,16 @@ async function askPasscode(id: string, key: CryptoKey, note: string | null): Pro
 }
 
 async function load(id: string, key: CryptoKey, headers: Record<string, string>): Promise<void> {
+  // A Turnstile token works only once, so a passcode retry asks for a new one instead of resending these headers.
+  const retry = (): void => {
+    if (Object.keys(headers).length === 0) void load(id, key, {});
+    else void askPasscode(id, key, null);
+  };
   let reply: Response;
   try {
     reply = await fetch(`/v1/links/${id}/data`, { headers, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
   } catch {
-    message("You're offline", "Connect to the internet, then open the link again.");
+    message("You're offline", "Connect to the internet, then try again.", retry);
     return;
   }
   if (reply.status === 401) {
@@ -122,9 +140,16 @@ async function load(id: string, key: CryptoKey, headers: Record<string, string>)
   }
   if (reply.status === 403) return askPasscode(id, key, "The check didn't work. Try again.");
   if (reply.status === 404) return message("This link doesn't work anymore", "It was turned off, or it expired.");
-  if (reply.status === 429) return message("Too many tries", "Wait a minute, then open the link again.");
-  if (!reply.ok) return message("Something went wrong", "Try again later.");
-  const plain = await unlock(key, context("link", id), new Uint8Array(await reply.arrayBuffer()));
+  if (reply.status === 429) return message("Too many tries", "Wait a minute, then try again.", retry);
+  if (!reply.ok) return message("Something went wrong", "Try again later.", retry);
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await reply.arrayBuffer();
+  } catch {
+    message("You're offline", "Connect to the internet, then try again.", retry);
+    return;
+  }
+  const plain = await unlock(key, context("link", id), new Uint8Array(bytes));
   let item: SharedItem | null = null;
   try {
     item = plain === null ? null : checkSharedItem(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plain)));
