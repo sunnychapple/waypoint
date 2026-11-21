@@ -44,7 +44,13 @@ describe("plans copy", () => {
     expect(buyMessage("granted", 1000)).toBe("Added 1,000 credits.");
     expect(buyMessage("granted", 0)).toBe("Done.");
     expect(buyMessage("cancelled", 0)).toBeNull();
-    expect(buyMessage("not_ready", 0)).toBeNull();
+    expect(buyMessage("cancelled", 0, false)).toBeNull();
+    expect(buyMessage("cancelled", 0, true)).toBe("Nothing was charged.");
+    // A failed purchase is not known to be uncharged, so it never says "Nothing was charged", with or without ?need=.
+    expect(buyMessage("failed", 0, true)).toBe(buyMessage("failed", 0));
+    expect(buyMessage("failed", 0, true)).not.toMatch(/Nothing was charged/);
+    expect(buyMessage("not_ready", 0, true)).toBeNull();
+    expect(buyMessage("granted", 5000, true)).toBe("Added 5,000 credits.");
     expect(buyMessage("pending", 0)).toMatch(/^Waiting for approval/);
     expect(restoreMessage(0)).toBe("Nothing to restore.");
     expect(restoreMessage(1)).toBe("Restored 1 purchase.");
