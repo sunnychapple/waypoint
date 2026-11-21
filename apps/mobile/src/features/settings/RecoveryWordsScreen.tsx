@@ -33,7 +33,7 @@ export default function RecoveryWordsScreen() {
       setMade(await newRecoveryKey());
       setStep("words");
     } catch {
-      setCaption("Couldn't make a recovery key. Try again.");
+      setCaption("Couldn't make recovery words. Try again.");
     }
   }
 
@@ -80,9 +80,9 @@ export default function RecoveryWordsScreen() {
   if (step === "intro") {
     return (
       <Screen>
-        <Title>Your recovery key</Title>
+        <Title>Your recovery words</Title>
         <Body>
-          12 words that get you back into NotePath if you lose this iPhone. Write them on paper and keep it somewhere safe, like with your school things at
+          12 recovery words that get you back into NotePath if you lose this iPhone. Write them on paper and keep it somewhere safe, like with your school things at
           home.
         </Body>
         <Caption>NotePath can't see these words and can't send them to you again.</Caption>
@@ -118,7 +118,7 @@ export default function RecoveryWordsScreen() {
   if (step === "check") {
     return (
       <Screen>
-        <Title>Check your words</Title>
+        <Title>Check your recovery words</Title>
         {positions.map((p, i) => (
           <View key={p} style={styles.field}>
             <Caption>{`Word ${p + 1}`}</Caption>
@@ -146,7 +146,7 @@ export default function RecoveryWordsScreen() {
 
   return (
     <Screen>
-      <Title>Recovery key saved</Title>
+      <Title>Recovery words saved</Title>
       <Body>Keep the paper safe. You'll need it only if you lose all your devices.</Body>
       <View style={styles.actions}>
         <PrimaryButton label="Done" onPress={() => router.back()} />

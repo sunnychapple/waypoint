@@ -81,7 +81,7 @@ export default function PermissionsScreen() {
       <BackButton />
       <Title>Permissions</Title>
       <Row title="Microphone" subtitle="Record classes and talks" right={micRight} />
-      <Row title="Speech recognition" subtitle="Write down recordings on this iPhone" right={<Caption>Asked when you first use it</Caption>} />
+      <Row title="Speech recognition" subtitle="Write down recordings on this iPhone" right={<Caption numberOfLines={2}>Asked when you first use it</Caption>} />
       <Row title="Camera" subtitle="Snap pages" right={cameraRight} />
       <Caption style={styles.center}>Change any of these in Settings.</Caption>
     </Screen>

@@ -165,7 +165,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
       {model.toast ? (
         <View style={[styles.toast, { backgroundColor: colors.ink }]}>
           <SymbolView name="flag.fill" tintColor={colors.flag} size={14} />
-          <Text style={[styles.toastText, { color: colors.bg }]}>Flagged at {formatOffset(model.toast.t)}</Text>
+          <Text style={[styles.toastText, { color: colors.bg }]}>Flagged moment at {formatOffset(model.toast.t)}</Text>
         </View>
       ) : null}
     </View>
@@ -224,6 +224,7 @@ function Dock({ model }: { model: Model }) {
     <View style={[styles.dock, { backgroundColor: colors.surface, borderColor: colors.line }]}>
       <View style={styles.row}>
         <View style={[styles.dot, { backgroundColor: live ? colors.rec : colors.ink4 }]} />
+        {paused ? <Text style={[styles.pausedText, { color: colors.ink3 }]}>Paused</Text> : null}
         <Text style={[styles.clock, { color: colors.ink }]} accessibilityLabel={`Recorded ${formatClock(model.clockMs)}`}>
           {formatClock(model.clockMs)}
         </Text>
@@ -261,7 +262,7 @@ function Dock({ model }: { model: Model }) {
       </View>
 
       <View style={styles.actions}>
-        <ActionButton label="Photo" icon="camera.fill" onPress={model.photo} />
+        <ActionButton label="Snap page" icon="camera.fill" onPress={model.photo} />
         <ActionButton label="Flag" icon="flag.fill" onPress={model.flag} flag />
       </View>
     </View>
@@ -318,6 +319,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   clock: { fontSize: 26, fontWeight: "600", fontVariant: ["tabular-nums"] },
+  pausedText: { fontSize: 15, fontWeight: "600" },
   stop: { flexDirection: "row", alignItems: "center", gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22 },
   buttonText: { fontSize: 16, fontWeight: "600" },
   wideButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 14 },

@@ -6,13 +6,13 @@ import { getGroup } from "../../core/groups/groups.ts";
 import { useQuery } from "../../platform/db.ts";
 import { invite, type HistoryChoice } from "../../platform/share.ts";
 import { toFailure } from "../../platform/tasks.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, CancelButton, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 
 type RoleChoice = "editor" | "viewer";
 
 const ROLES: { value: RoleChoice; label: string; explain: string }[] = [
-  { value: "editor", label: "Editor", explain: "Can add and change notes" },
-  { value: "viewer", label: "Viewer", explain: "Can only look" },
+  { value: "editor", label: "Can edit", explain: "Can add and change notes" },
+  { value: "viewer", label: "Can view", explain: "Can only look" },
 ];
 const HISTORY: { value: HistoryChoice; label: string }[] = [
   { value: "from_now", label: "From now" },
@@ -56,6 +56,7 @@ export default function InviteScreen() {
   if (group === null || !canInvite(group.role)) {
     return (
       <Screen>
+        <CancelButton />
         <Title>Invite someone</Title>
         <Caption>Only an owner can invite someone.</Caption>
       </Screen>
@@ -105,6 +106,7 @@ export default function InviteScreen() {
 
   return (
     <Screen>
+      <CancelButton />
       <Title>Invite someone</Title>
       <Caption>Role</Caption>
       <Choices options={ROLES} value={role} onChange={choose(setRole)} />

@@ -7,8 +7,8 @@ import { Body, Caption, PrimaryButton, Screen, Title } from "../ui/kit.tsx";
 import { useColors } from "../ui/theme.ts";
 
 const MESSAGE: Record<Exclude<RecoverResult, "approved">, string> = {
-  wrong_words: "Those words don't match your recovery key. Check each word and try again.",
-  no_recovery: "There's no recovery key for this account. Approve this iPhone from your other device instead.",
+  wrong_words: "Those words don't match your recovery words. Check each word and try again.",
+  no_recovery: "There are no recovery words for this account. Approve this iPhone from your other device instead.",
   offline: "You're offline. Connect and try again.",
   failed: "Something went wrong. Try again.",
 };
@@ -42,8 +42,8 @@ export default function RecoverScreen() {
 
   return (
     <Screen>
-      <Title>Use your recovery key</Title>
-      <Body>Type your 12 words, with spaces between them.</Body>
+      <Title>Use your recovery words</Title>
+      <Body>Type your 12 recovery words, with spaces between them.</Body>
       <TextInput
         value={text}
         onChangeText={setText}
@@ -56,7 +56,7 @@ export default function RecoverScreen() {
         textContentType="none"
         style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.line, color: colors.ink }]}
       />
-      <Caption>{`${count} of 12 words`}</Caption>
+      <Caption>{`${count} of 12 recovery words`}</Caption>
       {result !== null ? <Caption>{MESSAGE[result]}</Caption> : null}
       <View style={styles.actions}>
         <PrimaryButton label={busy ? "Checking…" : "Recover"} onPress={() => void recover()} style={count === 12 ? undefined : styles.dim} />

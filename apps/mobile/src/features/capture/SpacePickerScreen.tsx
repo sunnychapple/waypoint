@@ -6,7 +6,7 @@ import { getSession, moveSessionToSpace } from "../../core/capture/sessions.ts";
 import { getSavingTo, listSpaces, setSavingTo } from "../../core/db/spaces.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
-import { Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { CancelButton, Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 // Opened from the "Saving to" pill, or from a session with ?sessionId= (then only that session moves).
@@ -46,6 +46,7 @@ export default function SpacePickerScreen() {
 
   return (
     <Screen>
+      <CancelButton />
       <Title>Where should this go?</Title>
       {spaces.map((space) => {
         const parts = space.isDefault

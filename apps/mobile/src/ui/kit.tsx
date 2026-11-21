@@ -30,15 +30,29 @@ export function Body({ children, style }: { children: ReactNode; style?: StylePr
   return <Text style={[styles.body, { color: colors.ink2 }, style]}>{children}</Text>;
 }
 
-export function Caption({ children, style }: { children: ReactNode; style?: StyleProp<TextStyle> }) {
+export function Caption({ children, style, numberOfLines }: { children: ReactNode; style?: StyleProp<TextStyle>; numberOfLines?: number }) {
   const colors = useColors();
-  return <Text style={[styles.caption, { color: colors.ink3 }, style]}>{children}</Text>;
+  return (
+    <Text numberOfLines={numberOfLines} style={[styles.caption, { color: colors.ink3 }, style]}>
+      {children}
+    </Text>
+  );
 }
 
 // A screen opened from a link or a notification can be the only one in the stack: go home then.
 function goBack(): void {
   if (router.canGoBack()) router.back();
   else router.replace("/");
+}
+
+// The text button at the top left of a form sheet that has no other visible exit. It closes the sheet without acting.
+export function CancelButton() {
+  const colors = useColors();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Cancel" hitSlop={10} onPress={goBack} style={styles.cancel}>
+      <Text style={[styles.cancelText, { color: colors.accent }]}>Cancel</Text>
+    </Pressable>
+  );
 }
 
 // The round back button at the top left of a pushed screen. Screens that need a different exit pass onPress.
@@ -119,7 +133,7 @@ export function Row({
         <Text style={[styles.rowTitle, { color: colors.ink }]}>{title}</Text>
         {subtitle ? <Text style={[styles.rowSubtitle, { color: colors.ink3 }]}>{subtitle}</Text> : null}
       </View>
-      {right}
+      {right === undefined || right === null ? null : <View style={styles.rowRight}>{right}</View>}
     </>
   );
   if (onPress === undefined) return <View style={style}>{content}</View>;
@@ -164,8 +178,12 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 17, fontWeight: "600" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth },
   rowText: { flex: 1, gap: 2 },
+  // A long right-hand text wraps (Caption takes numberOfLines) and gives up width instead of squeezing the title.
+  rowRight: { flexShrink: 1, alignItems: "flex-end" },
   rowTitle: { fontSize: 17, fontWeight: "600" },
   rowSubtitle: { fontSize: 14 },
+  cancel: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center" },
+  cancelText: { fontSize: 17 },
   note: { flexDirection: "row", alignItems: "center", gap: 6 },
   noteText: { fontSize: 13, fontWeight: "500" },
 });

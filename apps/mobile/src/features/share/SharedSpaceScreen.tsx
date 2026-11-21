@@ -13,7 +13,7 @@ import { leave, pendingKeyChanges, removeMember, type PendingKeyChange } from ".
 import { BackButton, Body, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
-const ROLE_NAMES: Record<Role, string> = { owner: "Owner", editor: "Editor", viewer: "Viewer" };
+const ROLE_NAMES: Record<Role, string> = { owner: "Owner", editor: "Can edit", viewer: "Can view" };
 const day = shortDay;
 
 // A shared space: members, invites (owners), removing members, the security key notice, and leaving (M30a).
@@ -88,7 +88,7 @@ export default function SharedSpaceScreen() {
       {held.length === 0 ? <Caption>Waiting for the owner to let you in. Ask them to open NotePath on their phone.</Caption> : null}
       {spaceId !== null ? (
         <Row
-          title="Notes"
+          title="Sessions"
           right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
           onPress={() => router.push(`/space/${spaceId}`)}
         />
@@ -103,7 +103,7 @@ export default function SharedSpaceScreen() {
         </View>
       ))}
 
-      <Caption>Members</Caption>
+      <Caption>People</Caption>
       {group.members.map((m) => {
         const label = labels.get(m.user_id) ?? "Member";
         const access = m.ends_at === null ? "" : `. Access ends ${dateLine(m.ends_at, -new Date().getTimezoneOffset())}`;

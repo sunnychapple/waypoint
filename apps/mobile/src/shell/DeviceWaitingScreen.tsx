@@ -50,7 +50,7 @@ export default function DeviceWaitingScreen() {
         ) : (
           <PrimaryButton label={checking ? "Checking…" : restart ? "Start again" : "Check again"} onPress={() => void checkAgain()} />
         )}
-        {status === "waiting" ? <SecondaryButton label="Use my recovery key" icon="key" onPress={() => router.push("/recover")} /> : null}
+        {status === "waiting" ? <SecondaryButton label="Use my recovery words" icon="key" onPress={() => router.push("/recover")} /> : null}
         {status === "waiting" && notify === "ask" ? (
           <SecondaryButton label="Notify me when it's approved" icon="bell" onPress={() => void askForPush().then((ok) => setNotify(ok ? "on" : "off"))} />
         ) : null}
@@ -64,13 +64,13 @@ export default function DeviceWaitingScreen() {
 
 const COPY: Record<DeviceStatus, { title: string; body: string; caption: string }> = {
   waiting: {
-    title: "This iPhone needs approval",
+    title: "Approve this iPhone",
     body: "Your NotePath account is already set up on another iPhone or iPad. That device needs to approve this one before it can use credits.",
-    caption: "No other device? Use your recovery key.",
+    caption: "No other device? Use your recovery words.",
   },
-  checking: { title: "Setting up this iPhone", body: "NotePath is getting this iPhone ready to use credits.", caption: "" },
+  checking: { title: "Approving this iPhone", body: "NotePath is getting this iPhone ready to use credits.", caption: "" },
   offline: { title: "You're offline", body: "Connect to the internet so NotePath can set up this iPhone for credits.", caption: "" },
-  failed: { title: "Couldn't set up this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
+  failed: { title: "Couldn't approve this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
   too_many_waiting: { title: "Too many devices waiting", body: "Three devices are already waiting for approval. Try again in 10 minutes.", caption: "" },
   signed_out: { title: "Sign in to use credits", body: "Credits belong to your NotePath account.", caption: "" },
   approved: { title: "This iPhone is ready", body: "It can use credits now.", caption: "" },

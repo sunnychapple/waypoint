@@ -50,7 +50,7 @@ export default function ApproveDeviceScreen() {
       setDone("approved");
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "no_account_key") {
-        setProblem("This iPhone can't approve devices. Use another device, or the recovery key on the new one.");
+        setProblem("This iPhone can't approve devices. Use another device, or the recovery words on the new one.");
       } else {
         setProblem("Couldn't approve it. Try again.");
       }

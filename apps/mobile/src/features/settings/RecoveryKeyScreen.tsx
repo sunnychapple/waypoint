@@ -24,17 +24,17 @@ export default function RecoveryKeyScreen() {
   return (
     <Screen>
       <BackButton />
-      <Title>Recovery key</Title>
+      <Title>Recovery words</Title>
       <Row title="Status" right={<Caption>{state === null ? "Checking…" : LABEL[state]}</Caption>} />
-      <Body>If you lose all your devices, your recovery key is the only way back into your notes.</Body>
+      <Body>If you lose all your devices, your recovery words are the only way back into your notes.</Body>
       <View style={styles.actions}>
         {canMakeRecoveryKey() ? (
           <>
-            <PrimaryButton label="Make a new recovery key" onPress={() => router.push("/recovery-words")} />
-            <Caption>A new key replaces the old one. The old words stop working.</Caption>
+            <PrimaryButton label="Make new recovery words" onPress={() => router.push("/recovery-words")} />
+            <Caption>New recovery words replace the old ones. The old words stop working.</Caption>
           </>
         ) : (
-          <Caption>This iPhone can't make a recovery key yet.</Caption>
+          <Caption>This iPhone can't make recovery words yet.</Caption>
         )}
       </View>
     </Screen>

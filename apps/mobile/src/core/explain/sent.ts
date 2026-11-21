@@ -73,6 +73,6 @@ export function sentFields(sent: string): { label: string; text: string }[] {
     return [{ label: "Sent", text: sent }];
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) return [{ label: "Sent", text: sent }];
-  const labels: Record<string, string> = { word: "Word", transcript: "Transcript", answer: "Explanation" };
+  const labels: Record<string, string> = { word: "Word", transcript: "Transcript", answer: "Answer" };
   return Object.entries(body).map(([key, value]) => ({ label: labels[key] ?? key, text: typeof value === "string" ? value : JSON.stringify(value) }));
 }

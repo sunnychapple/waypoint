@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import Constants from "expo-constants";
 import { SymbolView } from "expo-symbols";
 import { downloadSpeechPack, getSpeechStatus, onSpeechPackProgress, type SpeechStatus } from "../../../modules/waypoint-audio/index.ts";
 import { getAvailability, type ModelAvailability } from "../../../modules/waypoint-model/index.ts";
 import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
+import { PRIVACY_URL, SUPPORT_EMAIL, TERMS_URL } from "../../core/links.ts";
 import { deleteSetting, getSetting, setSetting } from "../../core/db/settings.ts";
 import { percentLabel, versionLabel } from "../../core/settings/format.ts";
 import { useProfile, useSignOut } from "../../platform/auth.tsx";
@@ -120,11 +121,11 @@ export default function SettingsScreen() {
         right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
         onPress={() => router.push("/settings-cloud")}
       />
-      <Link title="Recovery key" onPress={() => router.push("/recovery-key")} />
+      <Link title="Recovery words" onPress={() => router.push("/recovery-key")} />
       <Link title="Devices" onPress={() => router.push("/devices")} />
 
       <Row
-        title="Things being made"
+        title="Made for you"
         right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />}
         onPress={() => router.push("/jobs")}
       />
@@ -141,6 +142,9 @@ export default function SettingsScreen() {
       <Row title="Offer a better transcript after each recording" right={<Switch accessibilityLabel="Offer a better transcript after each recording" value={offerSecond} onValueChange={setOffer} />} />
 
       <Caption style={styles.section}>ABOUT</Caption>
+      <Link title="Terms" external onPress={() => openLink(TERMS_URL)} />
+      <Link title="Privacy" external onPress={() => openLink(PRIVACY_URL)} />
+      <Link title="Help" external onPress={() => openLink(`mailto:${SUPPORT_EMAIL}`)} />
       <Row title={versionLabel(Constants.expoConfig?.version ?? null, Constants.nativeBuildVersion)} />
 
       <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={confirmSignOut} style={styles.signOut}>
@@ -155,9 +159,15 @@ export default function SettingsScreen() {
   );
 }
 
-function Link({ title, onPress }: { title: string; onPress: () => void }) {
+// A row that opens another screen (chevron) or a web page or mail (external).
+function Link({ title, onPress, external = false }: { title: string; onPress: () => void; external?: boolean }) {
   const colors = useColors();
-  return <Row title={title} onPress={onPress} right={<SymbolView name="chevron.right" tintColor={colors.ink3} size={14} />} />;
+  const icon = external ? "arrow.up.right" : "chevron.right";
+  return <Row title={title} onPress={onPress} right={<SymbolView name={icon} tintColor={colors.ink3} size={14} />} />;
+}
+
+function openLink(url: string): void {
+  Linking.openURL(url).catch(() => Alert.alert("Couldn't open that link"));
 }
 
 const styles = StyleSheet.create({

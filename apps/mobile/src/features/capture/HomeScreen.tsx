@@ -51,7 +51,7 @@ export default function HomeScreen() {
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
           <Text style={[styles.cardTitle, { color: colors.ink }]}>Approve this iPhone</Text>
           <Body>Open NotePath on your other iPhone or iPad and approve this one to get your notes here.</Body>
-          <PrimaryButton label="Set up this iPhone" onPress={() => router.push("/device-waiting")} />
+          <PrimaryButton label="Show me how" onPress={() => router.push("/device-waiting")} />
         </View>
       ) : null}
 
@@ -69,7 +69,7 @@ export default function HomeScreen() {
           <Text style={[styles.cardTitle, { color: colors.ink }]}>{latest.title}</Text>
           {latest.kind === "recording" ? <Body>{formatClock(latest.recordedMs)}</Body> : null}
           <View style={styles.chips}>
-            {latest.flags > 0 ? <Chip label={countLabel(latest.flags, "flag", "flags")} tone="flag" /> : null}
+            {latest.flags > 0 ? <Chip label={countLabel(latest.flags, "flagged moment", "flagged moments")} tone="flag" /> : null}
             {latest.photos > 0 ? <Chip label={countLabel(latest.photos, "photo", "photos")} /> : null}
             {latest.pages > 0 ? <Chip label={countLabel(latest.pages, "page", "pages")} /> : null}
           </View>
