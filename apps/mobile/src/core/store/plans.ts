@@ -37,7 +37,8 @@ export function needLine(need: string | undefined): string | null {
 export type BuyKind = "granted" | "pending" | "cancelled" | "not_ready" | "other_account" | "saved" | "failed";
 
 // What the Plans screen says after a purchase. null: say nothing (cancelled, or another screen was opened).
-export function buyMessage(kind: BuyKind, credits: number): string | null {
+// needed (opened from a task with ?need=): a cancelled purchase says so, without claiming anything about billing.
+export function buyMessage(kind: BuyKind, credits: number, needed = false): string | null {
   switch (kind) {
     case "granted":
       return credits > 0 ? `Added ${creditsLabel(credits)}.` : "Done.";
@@ -50,6 +51,7 @@ export function buyMessage(kind: BuyKind, credits: number): string | null {
     case "failed":
       return "The purchase didn't go through. If you were charged, NotePath keeps trying to add it.";
     case "cancelled":
+      return needed ? "The purchase was cancelled." : null;
     case "not_ready":
       return null;
   }

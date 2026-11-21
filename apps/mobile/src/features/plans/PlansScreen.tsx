@@ -6,7 +6,7 @@ import { balanceSummary, buyMessage, needLine, ownsOwnIt, restoreMessage } from 
 import { useConfig } from "../../platform/config.ts";
 import { buy, loadProducts, restorePurchases, type ShopProduct } from "../../platform/store.ts";
 import { useWallet } from "../../platform/wallet.ts";
-import { BackButton, Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Body, Caption, OnDeviceNote, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 const SUBSCRIPTIONS_URL = "https://apps.apple.com/account/subscriptions";
@@ -39,7 +39,10 @@ export default function PlansScreen() {
   const [products, setProducts] = useState<ShopProduct[] | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string } | null>(null);
+  // Set after a purchase made from a task that ran out of credits: credits added, waiting for Continue.
+  const [added, setAdded] = useState<number | null>(null);
   const mounted = useRef(true);
+  const continued = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -73,13 +76,15 @@ export default function PlansScreen() {
     setBuying(product.id);
     try {
       const result = await buy(product.info.id);
-      // Opened from a task that ran out of credits: once they are granted, go back to that task.
-      // Only if this screen is still open (leaving mid-purchase must not pop the screen underneath).
-      if (result.kind === "granted" && needLine(need) !== null && mounted.current && router.canGoBack()) {
-        router.back();
+      const needed = needLine(need) !== null;
+      // Opened from a task that ran out of credits: once they are granted, confirm here and let the person go back
+      // to that task with Continue. Nothing is run again. Only if this screen is still open (leaving mid-purchase
+      // must not change the screen underneath).
+      if (result.kind === "granted" && needed && result.reply.credits > 0 && mounted.current && router.canGoBack()) {
+        setAdded(result.reply.credits);
         return;
       }
-      const text = buyMessage(result.kind, result.kind === "granted" ? result.reply.credits : 0);
+      const text = buyMessage(result.kind, result.kind === "granted" ? result.reply.credits : 0, needed);
       if (text !== null) setBanner({ text });
     } catch {
       setBanner({ text: buyMessage("failed", 0) ?? "" });
@@ -217,13 +222,29 @@ export default function PlansScreen() {
         </View>
       ) : null}
 
-      {line ? (
+      {added !== null ? (
+        <View style={[styles.box, { backgroundColor: colors.surface2 }]}>
+          <Body>{buyMessage("granted", added)}</Body>
+          <PrimaryButton
+            label="Continue"
+            onPress={() => {
+              // A second tap before the screen closes must not also pop the task underneath.
+              if (continued.current) return;
+              continued.current = true;
+              if (router.canGoBack()) router.back();
+            }}
+            style={styles.continue}
+          />
+        </View>
+      ) : null}
+
+      {line && added === null ? (
         <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
           <Body style={{ color: colors.flagInk }}>{line}</Body>
         </View>
       ) : null}
 
-      {catalogue}
+      {added === null ? catalogue : null}
 
       <TextButton label="Restore purchases" onPress={() => void restore()} />
 
@@ -240,6 +261,7 @@ const styles = StyleSheet.create({
   total: { fontSize: 28, fontWeight: "700" },
   owed: { fontSize: 13 },
   box: { padding: 14, borderRadius: 16 },
+  continue: { marginTop: 12 },
   section: { marginTop: 8, letterSpacing: 0.5 },
   pill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
   pillText: { fontSize: 15, fontWeight: "600" },
