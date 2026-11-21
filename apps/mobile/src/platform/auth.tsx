@@ -4,8 +4,9 @@ import { tokenCache } from "@clerk/expo/token-cache";
 import { resourceCache } from "@clerk/expo/resource-cache";
 import { useSignInWithApple } from "@clerk/expo/apple";
 import { REQUIRE_SIGN_IN, decideGate, type Gate } from "../core/auth/gate.ts";
-import { notesStep } from "../core/db/users.ts";
-import { closeUserDb, dbUser, openUserDb } from "./db.ts";
+import { accountFiles, deleteAccountFailure, notesStep, type DeleteFailure } from "../core/db/users.ts";
+import { closeUserDb, dbUser, getDb, openUserDb } from "./db.ts";
+import { deleteFile, deleteSessionFiles } from "./files.ts";
 
 const publishableKey: string = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 
@@ -125,5 +126,62 @@ export function useSignOut(): () => Promise<void> {
   return async () => {
     await signOut();
     await closeUserDb();
+  };
+}
+
+// The notes file names the person's own sessions and overview audio, read before Clerk deletes the account. Only the
+// open person's notes are read (dbUser), never anyone else's; nothing is read when they cannot be.
+function ownNoteFiles(clerkUserId: string): { sessionIds: string[]; overviewFiles: string[] } {
+  if (dbUser() !== clerkUserId) return { sessionIds: [], overviewFiles: [] };
+  try {
+    const db = getDb();
+    return {
+      sessionIds: db.all<{ id: string }>("SELECT id FROM sessions").map((row) => row.id),
+      overviewFiles: db.all<{ file: string }>("SELECT file FROM overviews WHERE file IS NOT NULL").map((row) => row.file),
+    };
+  } catch {
+    return { sessionIds: [], overviewFiles: [] };
+  }
+}
+
+export type DeleteAccountOutcome = "deleted" | DeleteFailure;
+
+// Deletes the signed-in person's Clerk account (App Store 5.1.1(v)). When Clerk refuses, nothing is signed out or
+// deleted here, and the outcome says why. When it succeeds: the session ends, their notes close (nothing else is
+// touched), and this person's notes database and their sessions and overview audio are removed from this iPhone.
+export function useDeleteAccount(): () => Promise<DeleteAccountOutcome> {
+  const { user } = useUser();
+  const { signOut } = useAuth();
+  return async () => {
+    if (!user) return "failed";
+    const clerkUserId = user.id;
+    const { sessionIds, overviewFiles } = ownNoteFiles(clerkUserId);
+    try {
+      await user.delete();
+    } catch (error) {
+      return deleteAccountFailure(error);
+    }
+    try {
+      await signOut();
+    } catch {
+      // Clerk had already ended the session with the account.
+    }
+    await closeUserDb();
+    const local = accountFiles({ clerkUserId, sessionIds, overviewFiles });
+    for (const file of local.files) {
+      try {
+        deleteFile(file);
+      } catch {
+        // Already gone, or in use: the rest are still removed.
+      }
+    }
+    for (const id of local.sessionIds) {
+      try {
+        deleteSessionFiles(id);
+      } catch {
+        // As above.
+      }
+    }
+    return "deleted";
   };
 }

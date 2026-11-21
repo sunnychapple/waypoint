@@ -80,6 +80,7 @@ function RootStack() {
         <Stack.Screen name="share/[sessionId]" />
         <Stack.Screen name="shared/keys" />
         <Stack.Screen name="photo" options={{ presentation: "fullScreenModal" }} />
+        <Stack.Screen name="delete-account" />
       </Stack.Protected>
       <Stack.Protected guard={gate === "sign_in"}>
         <Stack.Screen name="sign-in" />
