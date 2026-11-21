@@ -18,6 +18,13 @@ export default function RecoveryWordsScreen() {
   const [typed, setTyped] = useState<string[]>(["", "", ""]);
   const [caption, setCaption] = useState("");
   const [mismatch, setMismatch] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Closes without saving anything: the words count as saved only after the check passes. Not while a save is running.
+  function notNow(): void {
+    if (saving) return;
+    router.back();
+  }
 
   async function showWords(): Promise<void> {
     setCaption("");
@@ -50,7 +57,8 @@ export default function RecoveryWordsScreen() {
       setCaption("That doesn't match. Look at your paper and try again.");
       return;
     }
-    const result = await saveRecoveryKey(made);
+    setSaving(true);
+    const result = await saveRecoveryKey(made).finally(() => setSaving(false));
     if (result === "saved") {
       setStep("done");
     } else if (result === "offline") {
@@ -96,6 +104,7 @@ export default function RecoveryWordsScreen() {
         <Caption>In this order. Anyone with these words can open your notes.</Caption>
         <View style={styles.actions}>
           <PrimaryButton label="I wrote them down" onPress={startCheck} />
+          <SecondaryButton label="Not now" onPress={notNow} />
         </View>
       </Screen>
     );
@@ -111,6 +120,7 @@ export default function RecoveryWordsScreen() {
             <TextInput
               value={typed[i] ?? ""}
               onChangeText={(text) => setTyped((list) => list.map((old, j) => (j === i ? text : old)))}
+              accessibilityLabel={`Word ${p + 1}`}
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -123,6 +133,7 @@ export default function RecoveryWordsScreen() {
         <View style={styles.actions}>
           <PrimaryButton label="Check" onPress={() => void check()} />
           {mismatch ? <SecondaryButton label="Show the words again" onPress={showWordsAgain} /> : null}
+          <SecondaryButton label="Not now" onPress={notNow} style={saving ? styles.dim : undefined} />
         </View>
       </Screen>
     );
@@ -144,5 +155,6 @@ const styles = StyleSheet.create({
   word: { width: "50%", fontSize: 20, lineHeight: 36 },
   field: { marginTop: 12, gap: 6 },
   input: { height: 52, borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, fontSize: 17 },
+  dim: { opacity: 0.4 },
   actions: { gap: 12, marginTop: 24 },
 });

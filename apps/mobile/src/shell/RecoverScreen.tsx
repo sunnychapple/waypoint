@@ -48,6 +48,7 @@ export default function RecoverScreen() {
         value={text}
         onChangeText={setText}
         multiline
+        accessibilityLabel="Your 12 recovery words"
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
