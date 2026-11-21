@@ -35,7 +35,7 @@ export default function LaterScreen() {
 
       {data.notes.length > 0 ? (
         <View style={styles.section}>
-          <Caption>Saved explanations</Caption>
+          <Caption>Saved answers</Caption>
           {data.notes.map((note) => (
             <NoteItem key={note.id} note={note} colors={colors} />
           ))}
@@ -58,7 +58,7 @@ function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
         {word !== null ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Get the answer for ${word}`}
+            accessibilityLabel={`Explain ${word}`}
             onPress={() =>
               router.push({
                 pathname: "/explain",
@@ -67,7 +67,7 @@ function FlagItem({ flag, colors }: { flag: OpenFlag; colors: Colors }) {
             }
             style={styles.action}
           >
-            <Text style={[styles.link, { color: colors.accent }]}>Get the answer</Text>
+            <Text style={[styles.link, { color: colors.accent }]}>Explain</Text>
           </Pressable>
         ) : null}
         <Pressable

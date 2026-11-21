@@ -32,7 +32,7 @@ export default function ExplainSheet() {
   );
 }
 
-const HEADINGS: Record<InstantSentTask, string> = { explain: "Explanation", more_detail: "More detail", double_check: "Double-check" };
+const HEADINGS: Record<InstantSentTask, string> = { explain: "Answer", more_detail: "More detail", double_check: "Double-check" };
 const RUNNING: Record<InstantSentTask, string> = { explain: "Explaining…", more_detail: "Adding more detail…", double_check: "Double-checking…" };
 // Used only until the live price table (M13) has loaded.
 const FALLBACK_PRICES: Record<InstantSentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
@@ -204,7 +204,7 @@ const ACTION_LABELS: Record<FailureAction, string> = {
   try_again: "Try again",
   get_credits: "Get credits",
   ask_later: "Ask later",
-  approve_device: "Set up this iPhone",
+  approve_device: "Approve this iPhone",
   close: "Close",
 };
 

@@ -54,7 +54,7 @@ describe("sent", () => {
     expect(sentFields(JSON.stringify({ word: "w", transcript: "t", answer: "a" }))).toEqual([
       { label: "Word", text: "w" },
       { label: "Transcript", text: "t" },
-      { label: "Explanation", text: "a" },
+      { label: "Answer", text: "a" },
     ]);
     expect(sentFields(JSON.stringify({ minutes: 4 }))).toEqual([{ label: "minutes", text: "4" }]);
     expect(sentFields("not json")).toEqual([{ label: "Sent", text: "not json" }]);

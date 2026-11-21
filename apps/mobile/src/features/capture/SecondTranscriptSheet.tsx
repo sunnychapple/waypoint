@@ -9,7 +9,7 @@ import { bytesLabel } from "../../core/settings/format.ts";
 import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
 import { MAX_SECOND_MINUTES, secondPlan, startSecondTranscript } from "../../platform/second.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { Body, CancelButton, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -17,7 +17,7 @@ const ACTION_LABELS: Record<FailureAction, string> = {
   try_again: "Try again",
   get_credits: "Get credits",
   ask_later: "Ask later",
-  approve_device: "Set up this iPhone",
+  approve_device: "Approve this iPhone",
   close: "Close",
 };
 
@@ -64,10 +64,11 @@ export default function SecondTranscriptSheet() {
 
   return (
     <Screen>
+      <CancelButton />
       <Title>Better transcript</Title>
 
       {plan === null ? <Body>This session has no recording.</Body> : null}
-      {tooLong ? <Body>This recording is too long for a second transcript.</Body> : null}
+      {tooLong ? <Body>This recording is too long for a better transcript.</Body> : null}
       {plan !== null && !plan.complete ? <Body>This recording's audio isn't on this iPhone.</Body> : null}
 
       {offered ? (
@@ -75,7 +76,7 @@ export default function SecondTranscriptSheet() {
           <Body style={[styles.first, { color: colors.ink }]}>
             {"Your recording's audio will be sent to NotePath's cloud for this one job, and deleted when it ends."}
           </Body>
-          <Caption>{"A second, more careful transcript. Words that differ from this iPhone's transcript are highlighted."}</Caption>
+          <Caption>{"A better, more careful transcript. Words that differ from this iPhone's transcript are highlighted."}</Caption>
 
           <QuoteBox state={quote} onShowSent={showSent} onRetry={quote.retry} />
 

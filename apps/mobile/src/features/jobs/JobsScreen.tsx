@@ -11,7 +11,7 @@ export default function JobsScreen() {
   return (
     <Screen>
       <BackButton />
-      <Title>Things being made</Title>
+      <Title>Made for you</Title>
       {jobs.length === 0 ? <Caption>Nothing is being made yet.</Caption> : null}
       {jobs.map((job) => (
         <Row

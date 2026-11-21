@@ -1,6 +1,6 @@
 import { StyleSheet, View } from "react-native";
 import { router } from "expo-router";
-import { Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
+import { CancelButton, Caption, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { SavingToPill } from "./SavingToPill.tsx";
 import { StartTile } from "./StartTile.tsx";
@@ -20,6 +20,7 @@ export default function CaptureSheet() {
 
   return (
     <Screen>
+      <CancelButton />
       <Title>Capture</Title>
 
       <View style={styles.savingTo}>

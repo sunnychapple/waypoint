@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creditsLabel, isStale, needsUpdate, parseCachedConfig, parseVersion, priceOf, CONFIG_MAX_AGE_MS } from "../src/core/config/config.ts";
+import { creditsLabel, isStale, needsUpdate, parseCachedConfig, parseVersion, priceNote, priceOf, CONFIG_MAX_AGE_MS } from "../src/core/config/config.ts";
 
 const CONFIG = { prices: { version: "2026-11-16.2", credits: { explain: 1, more_detail: 3 } }, routes_version: "r1", flags: {}, min_native: { ios: "0.2.0" }, voice_pack: { version: "1", url: "https://x.test/p", sha256: "a".repeat(64), size: 1 } };
 
@@ -36,4 +36,16 @@ describe("config", () => {
     expect(creditsLabel(3)).toBe("3 credits");
     expect(creditsLabel(20000)).toBe("20,000 credits");
   });
+  it("says what Explain, a Practice set and an audio overview cost, or no numbers until the prices are known", () => {
+    const priced = parseCachedConfig(JSON.stringify({ ...CONFIG, prices: { version: "v", credits: { explain: 1, practice: 8, overview_script: 40 } } }));
+    expect(priceNote(priced)).toBe("1 credit = one Explain. A Practice set is about 8; an audio overview about 40.");
+    expect(priceNote(withoutPrice("practice"))).toBe("Prices are shown before you make anything.");
+    expect(priceNote(null)).toBe("Prices are shown before you make anything.");
+  });
 });
+
+function withoutPrice(key: string) {
+  const credits: Record<string, number> = { explain: 1, practice: 8, overview_script: 40 };
+  delete credits[key];
+  return parseCachedConfig(JSON.stringify({ ...CONFIG, prices: { version: "v", credits } }));
+}

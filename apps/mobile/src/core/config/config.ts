@@ -46,6 +46,16 @@ export function priceOf(config: ConfigResponse | null, key: string): number | nu
   return config.prices.credits[key] ?? null;
 }
 
+// The line under the credit packs: what Explain, a Practice set and an audio overview cost, from the live price table.
+// Until the table is known, it says so instead of guessing numbers.
+export function priceNote(config: ConfigResponse | null): string {
+  const explain = priceOf(config, "explain");
+  const practice = priceOf(config, "practice");
+  const audio = priceOf(config, "overview_script");
+  if (explain === null || practice === null || audio === null) return "Prices are shown before you make anything.";
+  return `${creditsLabel(explain)} = one Explain. A Practice set is about ${practice}; an audio overview about ${audio}.`;
+}
+
 // "1 credit", "3 credits", "2,000 credits".
 export function creditsLabel(credits: number): string {
   const digits = String(credits).replace(/\B(?=(\d{3})+(?!\d))/g, ",");

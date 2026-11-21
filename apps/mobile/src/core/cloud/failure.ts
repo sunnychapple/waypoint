@@ -73,7 +73,7 @@ export function failureCopy(failure: CloudFailure, context: CopyContext = "expla
         ? { title: "You're offline", body: "Connect to the internet to make this.", actions: ["try_again"] }
         : { title: "You're offline", body: "Tap Ask later to keep your question. It will wait in Questions for later.", actions: ["ask_later", "try_again"] };
     case "device":
-      return { title: "This iPhone isn't ready", body: "It needs to be set up before it can use credits.", actions: ["approve_device"] };
+      return { title: "Approve this iPhone", body: "It needs to be set up before it can use credits.", actions: ["approve_device"] };
     case "signed_out":
       return { title: "Sign in again", body: "Your sign-in has ended. Sign in again to use the cloud.", actions: ["close"], signIn: true };
     case "failed":

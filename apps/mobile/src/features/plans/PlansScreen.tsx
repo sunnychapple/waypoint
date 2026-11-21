@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { creditsLabel } from "../../core/config/config.ts";
+import { creditsLabel, priceNote } from "../../core/config/config.ts";
 import { balanceSummary, buyMessage, needLine, ownsOwnIt, restoreMessage } from "../../core/store/plans.ts";
+import { useConfig } from "../../platform/config.ts";
 import { buy, loadProducts, restorePurchases, type ShopProduct } from "../../platform/store.ts";
 import { useWallet } from "../../platform/wallet.ts";
 import { BackButton, Body, Caption, OnDeviceNote, Row, Screen, Title } from "../../ui/kit.tsx";
@@ -34,6 +35,7 @@ export default function PlansScreen() {
   const colors = useColors();
   const { need } = useLocalSearchParams<{ need?: string }>();
   const { wallet, error, reload } = useWallet();
+  const config = useConfig();
   const [products, setProducts] = useState<ShopProduct[] | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string } | null>(null);
@@ -152,6 +154,7 @@ export default function PlansScreen() {
                 onPress={() => void purchase(p)}
               />
             ))}
+            <Caption>{priceNote(config)}</Caption>
           </>
         ) : null}
 

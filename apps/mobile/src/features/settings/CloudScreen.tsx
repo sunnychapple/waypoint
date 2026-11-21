@@ -114,7 +114,7 @@ export default function CloudScreen() {
             <Row
               title={line.title}
               subtitle={line.detail}
-              right={onDevice ? <Caption style={{ color: colors.accent }}>See what was sent</Caption> : <Caption>What was sent isn't on this iPhone.</Caption>}
+              right={onDevice ? <Caption numberOfLines={2} style={{ color: colors.accent }}>See what was sent</Caption> : <Caption numberOfLines={2}>What was sent isn't on this iPhone.</Caption>}
               onPress={onDevice ? () => router.push(`/sent?id=${key}`) : undefined}
             />
             <View style={styles.cloud}>

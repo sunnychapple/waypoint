@@ -47,7 +47,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="spaces" options={{ title: "Spaces", tabBarIcon: icon("folder") }} />
       <Tabs.Screen
         name="record"
-        options={{ title: "Record", tabBarIcon: icon("mic.circle.fill") }}
+        options={{ title: "Capture", tabBarIcon: icon("mic.circle.fill") }}
         listeners={{
           tabPress: (event) => {
             event.preventDefault();

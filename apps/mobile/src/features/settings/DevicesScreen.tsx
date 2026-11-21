@@ -99,8 +99,8 @@ export default function DevicesScreen() {
         <Title>Devices</Title>
         {needsKey ? (
           <View style={styles.notice}>
-            <Caption>Make a new recovery key: your old one stopped working.</Caption>
-            <SecondaryButton label="Make a new recovery key" onPress={() => router.push("/recovery-words")} />
+            <Caption>Make new recovery words: your old ones stopped working.</Caption>
+            <SecondaryButton label="Make new recovery words" onPress={() => router.push("/recovery-words")} />
           </View>
         ) : null}
         {keyProblem ? <Caption>This iPhone can't unlock your notes. Remove it from another device and add it again.</Caption> : null}

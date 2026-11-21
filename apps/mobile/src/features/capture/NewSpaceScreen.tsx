@@ -9,7 +9,7 @@ import { spaceGroups } from "../../core/groups/groups.ts";
 import { newSharedSpace } from "../../platform/share.ts";
 import { toFailure } from "../../platform/tasks.ts";
 import { getDb, useQuery, writeDb } from "../../platform/db.ts";
-import { Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
+import { CancelButton, Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 type Belongs = "just_me" | "shared";
@@ -112,6 +112,7 @@ export default function NewSpaceScreen() {
 
   return (
     <Screen>
+      <CancelButton />
       <Title>New space</Title>
       <View style={styles.field}>
         <TextInput

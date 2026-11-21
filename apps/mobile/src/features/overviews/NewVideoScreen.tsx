@@ -19,7 +19,7 @@ import { useColors } from "../../ui/theme.ts";
 const ACTION_LABELS: Partial<Record<FailureAction, string>> = {
   try_again: "Try again",
   get_credits: "Get credits",
-  approve_device: "Set up this iPhone",
+  approve_device: "Approve this iPhone",
   close: "Close",
 };
 
