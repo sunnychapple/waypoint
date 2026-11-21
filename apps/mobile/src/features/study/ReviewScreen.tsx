@@ -100,7 +100,7 @@ export default function ReviewScreen() {
       </Pressable>
 
       {source === null ? null : (
-        <Pressable accessibilityRole="button" onPress={() => router.push(`/session/${card.sessionId}`)} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
+        <Pressable accessibilityRole="button" onPress={() => router.push(card.t === null ? `/session/${card.sessionId}` : `/session/${card.sessionId}?t=${card.t}`)} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
           <Text style={[styles.chipText, { color: colors.accent }]}>{source}</Text>
         </Pressable>
       )}
