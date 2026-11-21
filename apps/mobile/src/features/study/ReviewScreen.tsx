@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { listPages } from "../../core/capture/pages.ts";
@@ -11,6 +11,7 @@ import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
+import { FlipCard, useReduceMotion } from "./FlipCard.tsx";
 import { MadeScreen } from "./MadeScreen.tsx";
 
 const DECK_SIZE = 200;
@@ -49,6 +50,7 @@ export default function ReviewScreen() {
   const [deck, setDeck] = useState<CardRow[]>(() => deckFor(sessionId, all === "1"));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const [right, setRight] = useState(0);
   const [missed, setMissed] = useState<CardRow[]>([]);
 
@@ -57,6 +59,7 @@ export default function ReviewScreen() {
     setDeck(cards);
     setIndex(0);
     setFlipped(false);
+    setRevealed(false);
     setRight(0);
     setMissed([]);
   }
@@ -113,6 +116,13 @@ export default function ReviewScreen() {
     else setRight(right + 1);
     setIndex(index + 1);
     setFlipped(false);
+    setRevealed(false);
+  }
+
+  // The first flip to the answer reveals the rating buttons; flipping back keeps them.
+  function flip() {
+    if (!flipped) setRevealed(true);
+    setFlipped(!flipped);
   }
 
   return (
@@ -126,16 +136,7 @@ export default function ReviewScreen() {
         </View>
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={flipped ? `${card.front}. ${card.back}` : card.front}
-        accessibilityHint="Double-tap to flip"
-        onPress={() => setFlipped(!flipped)}
-        style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}
-      >
-        <Caption>{KIND_LABEL[card.kind]}</Caption>
-        <Text style={[styles.front, { color: colors.ink }]}>{flipped ? card.back : card.front}</Text>
-      </Pressable>
+      <FlipCard key={card.id} kindLabel={KIND_LABEL[card.kind]} front={card.front} back={card.back} flipped={flipped} onPress={flip} />
 
       {source === null ? null : (
         <Pressable accessibilityRole="button" onPress={() => router.push(cardSourceHref(card))} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
@@ -143,23 +144,58 @@ export default function ReviewScreen() {
         </Pressable>
       )}
 
-      {flipped ? null : <Caption style={styles.centered}>Flip the card to rate it.</Caption>}
-      <View style={styles.ratings}>
-        {ratings.map((item) => (
-          <Pressable
-            key={item.label}
-            accessibilityRole="button"
-            accessibilityLabel={RATING_SPOKEN[item.rating]}
-            disabled={!flipped}
-            onPress={() => rate(item.rating)}
-            style={[styles.rating, { backgroundColor: item.fill, opacity: flipped ? 1 : 0.4 }]}
-          >
-            <Text style={[styles.ratingLabel, { color: item.ink }]}>{item.label}</Text>
-            <Text style={[styles.ratingInterval, { color: item.ink }]}>{intervalLabel(previews[item.rating])}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {revealed ? (
+        <>
+          <Caption style={styles.centered}>How well did you know it?</Caption>
+          <RatingRow>
+            {ratings.map((item) => (
+              <Pressable
+                key={item.label}
+                accessibilityRole="button"
+                accessibilityLabel={RATING_SPOKEN[item.rating]}
+                onPress={() => rate(item.rating)}
+                style={[styles.rating, { backgroundColor: item.fill }]}
+              >
+                <Text style={[styles.ratingLabel, { color: item.ink }]}>{item.label}</Text>
+                <Text style={[styles.ratingInterval, { color: item.ink }]}>{intervalLabel(previews[item.rating])}</Text>
+              </Pressable>
+            ))}
+          </RatingRow>
+        </>
+      ) : (
+        <PrimaryButton label="Show answer" onPress={flip} />
+      )}
     </Screen>
+  );
+}
+
+// The rating buttons fade in and rise 24 pt once, when the answer is revealed. Reduce Motion: they appear at once.
+function RatingRow({ children }: { children: ReactNode }) {
+  const reduceMotion = useReduceMotion();
+  const [progress] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    const animation = Animated.timing(progress, { toValue: 1, duration: 240, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [progress]);
+
+  useEffect(() => {
+    if (reduceMotion) progress.setValue(1);
+  }, [reduceMotion, progress]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.ratings,
+        {
+          opacity: progress,
+          transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
   );
 }
 
@@ -194,8 +230,6 @@ const styles = StyleSheet.create({
   close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   track: { height: 6, borderRadius: 3, overflow: "hidden" },
   fill: { height: 6, borderRadius: 3 },
-  card: { minHeight: 300, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, padding: 24, alignItems: "center", justifyContent: "center", gap: 20 },
-  front: { fontFamily: "Georgia", fontSize: 30, fontWeight: "700", textAlign: "center", lineHeight: 38 },
   chip: { alignSelf: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
   chipText: { fontSize: 14, fontWeight: "600" },
   ratings: { flexDirection: "row", gap: 8 },
