@@ -3,7 +3,7 @@ import { createSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { HelpDraft } from "../src/core/study/drafts.ts";
-import { pagesWithLines, problemContext, problemOf, showAnswer, showNextStep, startHelp } from "../src/core/study/help.ts";
+import { pagesWithLines, problemContext, problemOf, showAnswer, showNextStep, startHelp, typedProblemOf } from "../src/core/study/help.ts";
 import type { Block } from "../src/core/pages/blocks.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
@@ -81,5 +81,31 @@ describe("pages and problems from the database", () => {
     expect(problemOf(db, "p1", 0)).toBeNull();
     expect(problemOf(db, "p2", 2)).toBeNull();
     expect(problemOf(db, "ph", 0)).toBeNull();
+  });
+});
+
+describe("a problem typed in by the student", () => {
+  function setup(found: string | null) {
+    const db = createMemoryDb();
+    migrate(db);
+    const space = ensureDefaultSpace(db, { now: () => 1, newId: () => "space" });
+    createSession(db, { now: () => 1, newId: () => "s1" }, { spaceId: space.id, kind: "pages", title: "Worksheet", state: "saved" });
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file, found_text) VALUES ('p1', 's1', 'page', 0, 0, 'p1.jpg', ?)", [found]);
+    return db;
+  }
+
+  it("uses the typed text as the problem, with the page text as context", () => {
+    const db = setup("Worksheet\n\nSolve 3x = 6.");
+    expect(typedProblemOf(db, "p1", "  Solve\n 3x = 6.  ")).toEqual({ text: "Solve 3x = 6.", context: "Worksheet Solve 3x = 6." });
+  });
+
+  it("with no text on the page, the context is the typed problem alone", () => {
+    expect(typedProblemOf(setup(""), "p1", "What is 2 + 2?")).toEqual({ text: "What is 2 + 2?", context: "What is 2 + 2?" });
+  });
+
+  it("is null for blank text or a page that is not there", () => {
+    const db = setup("Worksheet");
+    expect(typedProblemOf(db, "p1", "   ")).toBeNull();
+    expect(typedProblemOf(db, "missing", "Solve 3x = 6.")).toBeNull();
   });
 });

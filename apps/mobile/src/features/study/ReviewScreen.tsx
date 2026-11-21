@@ -6,10 +6,10 @@ import { listPages } from "../../core/capture/pages.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
-import { dueCards, nextDueAt, previewIntervals, reviewCard, type CardRow } from "../../core/study/cards.ts";
+import { dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
 import { intervalLabel } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
-import { Body, Caption, PrimaryButton, Screen, Title } from "../../ui/kit.tsx";
+import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { MadeScreen } from "./MadeScreen.tsx";
 
@@ -32,15 +32,34 @@ export function nextDueLabel(next: number, now: number): string {
   return `on ${MONTHS[due.getMonth()]} ${due.getDate()}`;
 }
 
+// The cards to review: the cards due, or with `all`, every card of the session (due or not).
+function deckFor(sessionId: string | undefined, all: boolean): CardRow[] {
+  const db = getDb();
+  if (sessionId === undefined) return dueCards(db, Date.now(), { limit: DECK_SIZE });
+  return all ? sessionCards(db, sessionId, DECK_SIZE) : dueCards(db, Date.now(), { sessionId, limit: DECK_SIZE });
+}
+
 // Runs one review of the cards due: a session's cards when sessionId is given, otherwise all of them.
+// With all=1 every card of the session is practised, due or not. Each rating is a normal review.
 // "Made" is shown first when the route says the cards were just made.
 export default function ReviewScreen() {
   const colors = useColors();
-  const { sessionId, made } = useLocalSearchParams<{ sessionId?: string; made?: string }>();
+  const { sessionId, made, all } = useLocalSearchParams<{ sessionId?: string; made?: string; all?: string }>();
   const [showMade, setShowMade] = useState(made === "1" && sessionId !== undefined);
-  const [deck] = useState(() => dueCards(getDb(), Date.now(), sessionId === undefined ? { limit: DECK_SIZE } : { sessionId, limit: DECK_SIZE }));
+  const [deck, setDeck] = useState<CardRow[]>(() => deckFor(sessionId, all === "1"));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [right, setRight] = useState(0);
+  const [missed, setMissed] = useState<CardRow[]>([]);
+
+  // Runs the given cards again from the first, with the count starting over.
+  function practise(cards: CardRow[]) {
+    setDeck(cards);
+    setIndex(0);
+    setFlipped(false);
+    setRight(0);
+    setMissed([]);
+  }
 
   if (showMade && sessionId !== undefined) {
     return (
@@ -52,6 +71,21 @@ export default function ReviewScreen() {
 
   const card = deck[index];
   if (card === undefined) {
+    if (deck.length > 0) {
+      const finishedMissed = missed.length > 0;
+      return (
+        <Screen>
+          <Title>Review complete</Title>
+          <Body>{`You got ${right} of ${deck.length}`}</Body>
+          {finishedMissed ? <PrimaryButton label="Practise the ones I missed" onPress={() => practise(missed)} /> : null}
+          {finishedMissed ? (
+            <SecondaryButton label="Done" onPress={() => router.back()} />
+          ) : (
+            <PrimaryButton label="Done" onPress={() => router.back()} />
+          )}
+        </Screen>
+      );
+    }
     const next = nextDueAt(getDb(), Date.now());
     return (
       <Screen>
@@ -71,9 +105,12 @@ export default function ReviewScreen() {
     { rating: 4 as const, label: "Easy", fill: colors.localSoft, ink: colors.local },
   ];
 
+  const current: CardRow = card;
   const cardId = card.id;
   function rate(rating: 1 | 2 | 3 | 4) {
     writeDb((db) => reviewCard(db, cardId, rating, Date.now()));
+    if (rating === 1) setMissed([...missed, current]);
+    else setRight(right + 1);
     setIndex(index + 1);
     setFlipped(false);
   }

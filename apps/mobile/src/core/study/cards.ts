@@ -111,17 +111,26 @@ export function countDue(db: SqlDb, now: number): number {
   return db.get<{ n: number }>("SELECT count(*) AS n FROM cards WHERE due_at <= ?", [now])?.n ?? 0;
 }
 
+// The card after one review. A review card practised before it is due keeps its schedule unless it was forgotten,
+// so practising again and again cannot push it out further each time. The time never runs back past the last
+// review (a clock set back would make ts-fsrs throw).
+function scheduled(card: Card, rating: 1 | 2 | 3 | 4, now: number): Card {
+  if (card.state === State.Review && rating !== 1 && now < card.due.getTime()) return card;
+  const at = Math.max(now, card.last_review?.getTime() ?? 0);
+  return f.next(card, new Date(at), GRADES[rating]).card;
+}
+
 // Milliseconds until the card is due again, for each rating, if it were rated now.
 export function previewIntervals(db: SqlDb, cardId: string, now: number): Record<1 | 2 | 3 | 4, number> {
-  const preview = f.repeat(fromStored(storedOf(db, cardId).fsrs), new Date(now));
-  const ms = (rating: 1 | 2 | 3 | 4): number => preview[GRADES[rating]].card.due.getTime() - now;
+  const card = fromStored(storedOf(db, cardId).fsrs);
+  const ms = (rating: 1 | 2 | 3 | 4): number => Math.max(0, scheduled(card, rating, now).due.getTime() - now);
   return { 1: ms(1), 2: ms(2), 3: ms(3), 4: ms(4) };
 }
 
 // Schedules one review with ts-fsrs, and writes the review and the card's new state.
 export function reviewCard(db: SqlDb, cardId: string, rating: 1 | 2 | 3 | 4, now: number): CardRow {
   const before = storedOf(db, cardId);
-  const next = f.next(fromStored(before.fsrs), new Date(now), GRADES[rating]).card;
+  const next = scheduled(fromStored(before.fsrs), rating, now);
   db.transaction(() => {
     db.run("UPDATE cards SET fsrs = ?, due_at = ? WHERE id = ?", [toStored(next), next.due.getTime(), cardId]);
     db.run("INSERT INTO reviews (card_id, rating, reviewed_at, due_before, due_after) VALUES (?, ?, ?, ?, ?)", [
@@ -138,6 +147,11 @@ export function reviewCard(db: SqlDb, cardId: string, rating: 1 | 2 | 3 | 4, now
 // The earliest due time after `now`, or null when no card is scheduled later.
 export function nextDueAt(db: SqlDb, now: number): number | null {
   return db.get<{ due: number | null }>("SELECT min(due_at) AS due FROM cards WHERE due_at > ?", [now])?.due ?? null;
+}
+
+// Every card of one session, due or not, oldest due first. For practising a session's cards.
+export function sessionCards(db: SqlDb, sessionId: string, limit: number): CardRow[] {
+  return db.all<CardDbRow>(`SELECT ${COLUMNS} FROM cards WHERE session_id = ? ORDER BY due_at, id LIMIT ?`, [sessionId, limit]).map(toRow);
 }
 
 export function sessionCardCount(db: SqlDb, sessionId: string): number {

@@ -22,6 +22,11 @@ export function next(state: QuizState): QuizState {
   return { ...state, index: state.index + 1, picked: null };
 }
 
+// A fresh run through only the questions missed in `state`, for practising them again.
+export function retryMissed(state: QuizState): QuizState {
+  return startQuiz(state.missed);
+}
+
 export function isDone(state: QuizState): boolean {
   return state.index >= state.questions.length;
 }
