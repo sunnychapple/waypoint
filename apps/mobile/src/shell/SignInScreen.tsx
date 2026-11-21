@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useColorScheme,
+} from "react-native";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useRouter } from "expo-router";
 import { normalizeEmail } from "../core/auth/email.ts";
@@ -19,6 +30,7 @@ export default function SignInScreen() {
   const [sending, setSending] = useState(false);
 
   async function sendCode() {
+    if (sending) return;
     const address = normalizeEmail(email);
     if (!address) {
       setMessage("Enter an email address like name@example.com");
@@ -36,80 +48,95 @@ export default function SignInScreen() {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.bg }]}>
-      <View style={styles.top}>
-        <Text style={[styles.wordmark, { color: colors.ink }]}>NotePath</Text>
-        <Text style={[styles.headline, { color: colors.ink }]}>
-          Record the class. Ask about anything. <Text style={{ color: colors.accent }}>Remember</Text> it.
-        </Text>
-        <Text style={[styles.body, { color: colors.ink2 }]}>
-          Record a class, snap your homework pages, and turn them into notes, flashcards and quizzes.
-        </Text>
-      </View>
+    <KeyboardAvoidingView
+      style={[styles.flex, { backgroundColor: colors.bg }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
+        <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+          <View style={styles.top}>
+            <Text style={[styles.wordmark, { color: colors.ink }]}>NotePath</Text>
+            <Text style={[styles.headline, { color: colors.ink }]}>
+              Record the class. Ask about anything. <Text style={{ color: colors.accent }}>Remember</Text> it.
+            </Text>
+            <Text style={[styles.body, { color: colors.ink2 }]}>
+              Record a class, snap your homework pages, and turn them into notes, flashcards and quizzes.
+            </Text>
+          </View>
 
-      <View style={styles.actions}>
-        <AppleAuthentication.AppleAuthenticationButton
-          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-          buttonStyle={isDark ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-          cornerRadius={14}
-          style={styles.apple}
-          onPress={() => {
-            void signInWithApple().then((result) => {
-              setMessage(result === "error" ? "Couldn't sign in with Apple. Check your connection and try again." : null);
-            });
-          }}
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setShowEmail((open) => !open)}
-          style={[styles.secondary, { backgroundColor: colors.surface, borderColor: colors.line }]}
-        >
-          <Text style={[styles.secondaryLabel, { color: colors.ink }]}>Continue with email</Text>
-        </Pressable>
-
-        {showEmail ? (
-          <View style={styles.emailBlock}>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="name@example.com"
-              placeholderTextColor={colors.ink4}
-              keyboardType="email-address"
-              autoComplete="email"
-              autoCapitalize="none"
-              style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.line, color: colors.ink }]}
+          <View style={styles.actions}>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+              buttonStyle={isDark ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={14}
+              style={styles.apple}
+              onPress={() => {
+                void signInWithApple().then((result) => {
+                  setMessage(result === "error" ? "Couldn't sign in with Apple. Check your connection and try again." : null);
+                });
+              }}
             />
+
             <Pressable
               accessibilityRole="button"
-              disabled={sending}
-              onPress={() => void sendCode()}
-              style={[styles.primary, { backgroundColor: colors.accent, opacity: sending ? 0.6 : 1 }]}
+              onPress={() => setShowEmail((open) => !open)}
+              style={[styles.secondary, { backgroundColor: colors.surface, borderColor: colors.line }]}
             >
-              <Text style={[styles.primaryLabel, { color: colors.onAccent }]}>Send code</Text>
+              <Text style={[styles.secondaryLabel, { color: colors.ink }]}>Continue with email</Text>
             </Pressable>
+
+            {showEmail ? (
+              <View style={styles.emailBlock}>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="name@example.com"
+                  placeholderTextColor={colors.ink4}
+                  accessibilityLabel="Email address"
+                  autoFocus
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="send"
+                  onSubmitEditing={() => void sendCode()}
+                  style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.line, color: colors.ink }]}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={sending}
+                  onPress={() => void sendCode()}
+                  style={[styles.primary, { backgroundColor: colors.accent, opacity: sending ? 0.6 : 1 }]}
+                >
+                  <Text style={[styles.primaryLabel, { color: colors.onAccent }]}>Send code</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {message ? <Text style={[styles.message, { color: colors.danger }]}>{message}</Text> : null}
           </View>
-        ) : null}
 
-        {message ? <Text style={[styles.message, { color: colors.danger }]}>{message}</Text> : null}
-      </View>
-
-      <Text style={[styles.footer, { color: colors.ink3 }]}>
-        By continuing you agree to the{" "}
-        <Text accessibilityRole="link" onPress={() => void Linking.openURL(TERMS_URL).catch(() => undefined)} style={styles.link}>
-          Terms
-        </Text>{" "}
-        and{" "}
-        <Text accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_URL).catch(() => undefined)} style={styles.link}>
-          Privacy Policy
-        </Text>
-        .
-      </Text>
-    </View>
+          <Text style={[styles.footer, { color: colors.ink3 }]}>
+            By continuing you agree to the{" "}
+            <Text accessibilityRole="link" onPress={() => void Linking.openURL(TERMS_URL).catch(() => undefined)} style={styles.link}>
+              Terms
+            </Text>{" "}
+            and{" "}
+            <Text accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_URL).catch(() => undefined)} style={styles.link}>
+              Privacy Policy
+            </Text>
+            .
+          </Text>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
   screen: { flex: 1, paddingHorizontal: 16, paddingTop: 96, paddingBottom: 40, justifyContent: "space-between" },
   top: { gap: 16 },
   wordmark: { fontSize: 18, fontWeight: "700" },
