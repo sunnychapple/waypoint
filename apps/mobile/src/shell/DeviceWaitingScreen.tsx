@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { DeviceStatus } from "../core/device/registration.ts";
+import { isNotApproved, type DeviceStatus } from "../core/device/registration.ts";
 import { refreshDeviceNow, startPairingAgain, useDeviceStatus, usePairing } from "../platform/device.ts";
 import { askForPush } from "../platform/push.ts";
 import { Body, Caption, OnDeviceNote, PrimaryButton, Screen, SecondaryButton, Title } from "../ui/kit.tsx";
@@ -15,17 +15,16 @@ export default function DeviceWaitingScreen() {
   const pairing = usePairing();
   const [checking, setChecking] = useState(false);
   const [notify, setNotify] = useState<"ask" | "on" | "off">("ask");
-  const restart = status === "waiting" && pairing.kind === "expired";
+  const notApproved = isNotApproved(status, pairing.kind === "expired");
 
   async function checkAgain(): Promise<void> {
     setChecking(true);
-    await (restart ? startPairingAgain() : refreshDeviceNow());
+    await (notApproved ? startPairingAgain() : refreshDeviceNow());
     setChecking(false);
   }
 
-  const copy = COPY[status];
-  const body =
-    status !== "waiting" ? copy.body : restart ? "This request ran out of time." : "Open NotePath on your other iPhone or iPad, go to Settings › Devices, and approve this one.";
+  const copy = notApproved ? NOT_APPROVED : COPY[status];
+  const body = status === "waiting" && !notApproved ? "Open NotePath on your other iPhone or iPad, go to Settings › Devices, and approve this one." : copy.body;
   return (
     <Screen>
       <View style={[styles.badge, { backgroundColor: colors.accentSoft }]}>
@@ -33,7 +32,7 @@ export default function DeviceWaitingScreen() {
       </View>
       <Title>{copy.title}</Title>
       <Body>{body}</Body>
-      {status === "waiting" && pairing.kind === "code" ? (
+      {status === "waiting" && !notApproved && pairing.kind === "code" ? (
         <View style={styles.codeBlock}>
           <Caption>Your code</Caption>
           <Text style={[styles.code, { color: colors.ink }]}>
@@ -46,16 +45,16 @@ export default function DeviceWaitingScreen() {
       <OnDeviceNote text="Everything on this iPhone keeps working: recording, pages, flashcards and search." />
       <View style={styles.actions}>
         {status === "approved" ? (
-          <PrimaryButton label="Done" onPress={() => router.back()} />
+          <PrimaryButton label="Continue" onPress={() => router.back()} />
         ) : (
-          <PrimaryButton label={checking ? "Checking…" : restart ? "Start again" : "Check again"} onPress={() => void checkAgain()} />
+          <PrimaryButton label={checking ? "Checking…" : notApproved ? "Ask again" : "Check again"} onPress={() => void checkAgain()} disabled={checking} />
         )}
         {status === "waiting" ? <SecondaryButton label="Use my recovery words" icon="key" onPress={() => router.push("/recover")} /> : null}
-        {status === "waiting" && notify === "ask" ? (
+        {status === "waiting" && !notApproved && notify === "ask" ? (
           <SecondaryButton label="Notify me when it's approved" icon="bell" onPress={() => void askForPush().then((ok) => setNotify(ok ? "on" : "off"))} />
         ) : null}
-        {status === "waiting" && notify === "on" ? <Caption>We'll let you know.</Caption> : null}
-        {status === "waiting" && notify === "off" ? <Caption>Notifications are off. Turn them on in Settings to hear when it's approved.</Caption> : null}
+        {status === "waiting" && !notApproved && notify === "on" ? <Caption>We'll let you know.</Caption> : null}
+        {status === "waiting" && !notApproved && notify === "off" ? <Caption>Notifications are off. Turn them on in Settings to hear when it's approved.</Caption> : null}
         {status === "approved" ? null : <SecondaryButton label="Close" onPress={() => router.back()} />}
       </View>
     </Screen>
@@ -73,7 +72,13 @@ const COPY: Record<DeviceStatus, { title: string; body: string; caption: string 
   failed: { title: "Couldn't approve this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
   too_many_waiting: { title: "Too many devices waiting", body: "Three devices are already waiting for approval. Try again in 10 minutes.", caption: "" },
   signed_out: { title: "Sign in to use credits", body: "Credits belong to your NotePath account.", caption: "" },
-  approved: { title: "This iPhone is ready", body: "It can use credits now.", caption: "" },
+  approved: { title: "You're in", body: "This iPhone can use your credits now.", caption: "" },
+};
+
+const NOT_APPROVED = {
+  title: "Not approved",
+  body: "This request was declined or ran out of time. Ask again to send a new one, or use your recovery words.",
+  caption: "",
 };
 
 const styles = StyleSheet.create({

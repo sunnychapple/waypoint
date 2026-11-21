@@ -1,6 +1,6 @@
 import type { DeviceView } from "@waypoint/contracts";
 import { describe, expect, it } from "vitest";
-import { accountKeyLost, deviceName, planRegistration, statusKey, userIdKey } from "../src/core/device/registration.ts";
+import { accountKeyLost, deviceName, isNotApproved, planRegistration, statusKey, userIdKey } from "../src/core/device/registration.ts";
 
 const KEY_A = "A".repeat(87);
 const KEY_B = "B".repeat(87);
@@ -30,6 +30,20 @@ describe("planRegistration", () => {
   });
   it("the account row itself never counts as our device", () => {
     expect(planRegistration([row({ id: "dev_1", kind: "account" })], LOCAL)).toEqual({ kind: "start_over" });
+  });
+});
+
+describe("isNotApproved", () => {
+  it("waiting with a pairing that ended (declined or expired) is not approved", () => {
+    expect(isNotApproved("waiting", true)).toBe(true);
+  });
+  it("waiting with a pairing still open is not yet 'not approved'", () => {
+    expect(isNotApproved("waiting", false)).toBe(false);
+  });
+  it("an ended pairing does not count once this iPhone is approved, checking or offline", () => {
+    expect(isNotApproved("approved", true)).toBe(false);
+    expect(isNotApproved("checking", true)).toBe(false);
+    expect(isNotApproved("offline", true)).toBe(false);
   });
 });
 
