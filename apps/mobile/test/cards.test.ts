@@ -5,6 +5,7 @@ import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import {
+  cardSourceHref,
   countDue,
   dueCards,
   nextDueAt,
@@ -192,5 +193,19 @@ describe("cards", () => {
       expect(reviewCard(db, "card-1", Rating.Good, at).dueAt).toBe(expected.due.getTime());
     }
     expect(expected.scheduled_days).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a card from a recording opens at its moment", () => {
+    expect(cardSourceHref({ sessionId: "session", captureId: "cap-1", t: 4000 })).toBe("/session/session?t=4000");
+    expect(cardSourceHref({ sessionId: "session", captureId: null, t: 0 })).toBe("/session/session?t=0");
+  });
+
+  it("a card from a page opens that page", () => {
+    expect(cardSourceHref({ sessionId: "session", captureId: "cap-1", t: null })).toBe("/session/session?page=cap-1");
+    expect(cardSourceHref({ sessionId: "session", captureId: "a b&c", t: null })).toBe("/session/session?page=a%20b%26c");
+  });
+
+  it("a card with no source opens the session", () => {
+    expect(cardSourceHref({ sessionId: "session", captureId: null, t: null })).toBe("/session/session");
   });
 });

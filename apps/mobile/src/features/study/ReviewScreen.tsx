@@ -6,7 +6,7 @@ import { listPages } from "../../core/capture/pages.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
-import { dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
+import { cardSourceHref, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
 import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -138,7 +138,7 @@ export default function ReviewScreen() {
       </Pressable>
 
       {source === null ? null : (
-        <Pressable accessibilityRole="button" onPress={() => router.push(card.t === null ? `/session/${card.sessionId}` : `/session/${card.sessionId}?t=${card.t}`)} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
+        <Pressable accessibilityRole="button" onPress={() => router.push(cardSourceHref(card))} style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
           <Text style={[styles.chipText, { color: colors.accent }]}>{source}</Text>
         </Pressable>
       )}
