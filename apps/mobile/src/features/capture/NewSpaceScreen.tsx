@@ -1,11 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { randomUUID } from "expo-crypto";
 import { createSpace, setSavingTo, SpaceNameError } from "../../core/db/spaces.ts";
 import { newSharedSpace } from "../../platform/share.ts";
-import { writeDb } from "../../platform/db.ts";
+import { getDb, writeDb } from "../../platform/db.ts";
 import { Caption, PrimaryButton, Row, Screen, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -21,6 +21,14 @@ export default function NewSpaceScreen() {
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false); // a second tap before a shared space's request ends is ignored
 
+  const mounted = useRef(true); // the sheet may be swiped away while a shared space is being made
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   async function create(): Promise<void> {
     const trimmed = name.trim();
     if (trimmed === "") {
@@ -34,12 +42,15 @@ export default function NewSpaceScreen() {
         writeDb((db) => setSavingTo(db, space.id, Date.now()));
         router.dismiss(2); // closes this sheet and the space picker under it
       } else {
-        router.back();
-        router.push(`/space/${space.id}`);
+        router.replace(`/space/${space.id}`); // swaps the sheet for the space (a back then a push in one tick can be lost)
       }
     } catch (e) {
       if (e instanceof SpaceNameError && e.message === "taken") {
         setError(`You already have a space called ${trimmed}.`);
+        return;
+      }
+      if (e instanceof SpaceNameError) {
+        setError(e.message === "too_long" ? "That name is too long." : "Give it a name.");
         return;
       }
       throw e;
@@ -52,9 +63,16 @@ export default function NewSpaceScreen() {
     inFlight.current = true;
     try {
       const groupId = await newSharedSpace(trimmed);
-      router.replace(`/shared/${encodeURIComponent(groupId)}`);
+      if (!mounted.current) return; // closed meanwhile: do not navigate from whatever screen is on top now
+      if (fromPicker) {
+        // Saving to the new shared space, then close this sheet and the space picker under it.
+        const row = getDb().get<{ space_id: string }>("SELECT space_id FROM space_groups WHERE group_id = ?", [groupId]);
+        if (row !== null) writeDb((db) => setSavingTo(db, row.space_id, Date.now()));
+        router.dismiss(2);
+      } else router.replace(`/shared/${encodeURIComponent(groupId)}`);
     } catch (e) {
       inFlight.current = false;
+      if (!mounted.current) return;
       if (e instanceof SpaceNameError && e.message === "taken") {
         setError(`You already have a space called ${trimmed}.`);
         return;
