@@ -159,8 +159,10 @@ const NEGATIONS = new Set(["not", "no", "never", "none"]);
 const tokens = (text: string): string[] => {
   const s = text
     .toLowerCase()
-    .replace(/\bcannot\b/g, "can not")
+    .replace(/\bcan(?:not|['’]t)\b/g, "can not")
     .replace(/n['’]t\b/g, " not")
+    // 3.5 and 1,000 stay one word, so "3" does not match inside "3.5".
+    .replace(/(\p{N})[.,](?=\p{N})/gu, "$1p")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
   return s === "" ? [] : s.split(" ");
@@ -173,22 +175,48 @@ const contentWords = (text: string): string[] => {
 };
 const phrase = (text: string): string => ` ${stems(text).join(" ")} `;
 
-// A line that starts a new item: a number or letter, a bullet, or "term: meaning".
-const LIST_ITEM = /^\s*(?:\(?\d{1,3}[.)]|\(?[a-z][.)]\s|[-•*]|\p{L}[\p{L} '’-]{0,30}:)/iu;
+// A line that can start a new item: a number or letter, a bullet, or "term: meaning".
+const LIST_ITEM = /^\s*(?:\(?\d{1,3}(?:\)|\.\s)|\(?[a-z][.)]\s|[-•*]\s|\p{L}[\p{L} '’-]{0,30}:)/iu;
+const ABBREVIATION = /(?:^|[\s(])(?:mr|mrs|ms|dr|st|vs|etc|e\.g|i\.e|u\.s|\p{L})\.$/iu;
 
-// The page cut into sentences and list items. Other line breaks are only wrapped text and do not end a passage.
+// A word broken across a line by a hyphen is one word again.
+const unwrapped = (pageText: string): string => pageText.replace(/(\p{L})-[ \t]*\n[ \t]*(\p{L})/gu, "$1$2");
+
+// Splits at the end of a sentence, but not after an abbreviation such as "Mr." or "e.g.".
+function sentences(block: string): string[] {
+  const out: string[] = [];
+  let start = 0;
+  for (const match of block.matchAll(/[.?!]+\s+/g)) {
+    const end = match.index + match[0].trimEnd().length;
+    if (ABBREVIATION.test(block.slice(start, end))) continue;
+    out.push(block.slice(start, end));
+    start = match.index + match[0].length;
+  }
+  out.push(block.slice(start));
+  return out;
+}
+
+// The page cut into sentences and list items. Other line breaks are only wrapped text and do not end a passage. A line that
+// looks like an item starts one only after a finished line, a short heading, or another item, so wrapped text stays together.
 function passages(pageText: string): string[] {
   const blocks: string[] = [];
   let current = "";
-  for (const line of pageText.split("\n")) {
-    if (line.trim() === "" || LIST_ITEM.test(line)) {
+  let inItem = false;
+  let previous = "";
+  for (const line of unwrapped(pageText).split("\n")) {
+    const looksLikeItem = LIST_ITEM.test(line);
+    const afterBreak: boolean = current === "" || inItem || /[.?!:]\s*$/.test(previous) || tokens(previous).length <= 3;
+    const startsItem: boolean = looksLikeItem && afterBreak;
+    if (line.trim() === "" || startsItem) {
       if (current !== "") blocks.push(current);
       current = "";
+      inItem = startsItem;
     }
     if (line.trim() !== "") current = current === "" ? line : `${current} ${line}`;
+    previous = line;
   }
   if (current !== "") blocks.push(current);
-  return blocks.flatMap((block) => block.split(/(?<=[.?!])\s+/)).filter((text) => text.trim() !== "");
+  return blocks.flatMap(sentences).filter((text) => text.trim() !== "");
 }
 
 // The longest run of `want` found in order in `words`: which words of `want` matched, and where they are in `words`.
@@ -247,7 +275,7 @@ function grounded(quiz: SourcedQuizDraft, pageText: string): boolean {
   if (!quoteSupports(quiz, pageText)) return false;
   const quoteWords = stems(quiz.evidence);
   if (quoteWords.some((word) => NEGATIONS.has(word)) && !stems(quiz.question).some((word) => NEGATIONS.has(word))) return false;
-  if (tokens(quiz.answer).some((word) => /\p{N}/u.test(word)) && !phrase(pageText).includes(phrase(quiz.answer))) return false;
+  if (tokens(quiz.answer).some((word) => /\p{N}/u.test(word)) && !phrase(unwrapped(pageText)).includes(phrase(quiz.answer))) return false;
   const quotePhrase = phrase(quiz.evidence);
   const answerPhrase = phrase(quiz.answer);
   return quiz.choices.every((choice, index) => {

@@ -197,6 +197,28 @@ describe("quiz grounding on real wording", () => {
     expect(quiz.map((q) => q.question)).toEqual(["What splits?"]);
   });
 
+  it.each([
+    ["a sentence wrapped before a word and colon", "The heart pumps blood to the\nbody: it has four chambers.", "The heart pumps blood to the body", "blood"],
+    ["a decimal at the start of a wrapped line", "The distance is about\n3.5 million miles from here.", "The distance is about 3.5 million miles", "3.5 million miles"],
+    ["a title abbreviation", "Mr. Smith was born in Ohio.", "Mr. Smith was born in Ohio", "Ohio"],
+    ["e.g. inside a sentence", "Mammals, e.g. dogs and cats, have fur.", "Mammals, e.g. dogs and cats, have fur", "fur"],
+    ["a word hyphenated across lines", "Plants make food by photo-\nsynthesis in leaves.", "Plants make food by photosynthesis", "photosynthesis"],
+  ])("keeps a correct question on %s", async (_name, page, evidence, answer) => {
+    const { port } = fakePort(() => [quizItem("Question?", answer, evidence)]);
+    expect(await makeQuizFromUnits(port, [unit(page)], 5)).toHaveLength(1);
+  });
+
+  it("does not match 3 inside 3.5", async () => {
+    const { port } = fakePort(() => [quizItem("How far?", "3", "about 3 miles")]);
+    expect(await makeQuizFromUnits(port, [unit("It is about 3.5 miles away.")], 5)).toEqual([]);
+  });
+
+  it("keeps list entries apart after a heading, even when one wraps", async () => {
+    const page = "Vocabulary\ncoefficient: the number\nmultiplied by a variable\nconstant: a number with no variable";
+    const { port } = fakePort(() => [quizItem("What is a coefficient?", "a number with no variable", "coefficient: a number with no variable")]);
+    expect(await makeQuizFromUnits(port, [unit(page)], 5)).toEqual([]);
+  });
+
   it("drops a quote stitched from two sentences into a false fact", async () => {
     const { port } = fakePort(() => [quizItem("Where was Washington born?", "Kentucky", "Washington was born in Kentucky")]);
     expect(await makeQuizFromUnits(port, [unit("Lincoln was born in Kentucky. Washington was born in Virginia.")], 5)).toEqual([]);
