@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { countSavedExplanations, addToThread, getExplanation, saveExplanation, saveExplanationNow, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
-import { countOpenFlags, markAnswered } from "../src/core/explain/later.ts";
+import { lineAt, type SegmentLine } from "../src/core/capture/segments.ts";
+import { countOpenFlags, markAnswered, openFlags, phraseForFlag } from "../src/core/explain/later.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 function setup() {
@@ -65,5 +66,71 @@ describe("saveExplanationNow", () => {
     ).toThrow("nothing to save yet");
     expect(getExplanation(db, e.id)?.thread).toEqual([]);
     expect(countOpenFlags(db)).toBe(1);
+  });
+});
+
+describe("Get the answer for a flag with no word", () => {
+  const addLine = (db: ReturnType<typeof setup>["db"], tStart: number, tEnd: number, text: string, source = "device") =>
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('s1', ?, ?, ?, ?)", [tStart, tEnd, text, source]);
+  const plainFlag = (db: ReturnType<typeof setup>["db"], t: number) => {
+    db.run("INSERT INTO flags (id, session_id, t, question) VALUES ('plain', 's1', ?, '')", [t]);
+    return openFlags(db).find((f) => f.id === "plain")!;
+  };
+
+  it("uses the transcript line at the flag's time, collapsed", () => {
+    const { db } = setup();
+    addLine(db, 40_000, 44_000, "Osmosis  moves water\nacross a membrane");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBe("Osmosis moves water across a membrane");
+  });
+  it("a moment at the end of a line still finds it", () => {
+    const { db } = setup();
+    addLine(db, 40_000, 44_000, "end of line");
+    expect(phraseForFlag(db, plainFlag(db, 44_000))).toBe("end of line");
+  });
+  it("null when no transcript line is at or just before the time (still being transcribed)", () => {
+    const { db } = setup();
+    addLine(db, 0, 10_000, "earlier");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBeNull();
+  });
+  it("a flag tapped in the pause just after a line uses that line", () => {
+    const { db } = setup();
+    addLine(db, 30_000, 36_000, "the line just heard");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBe("the line just heard");
+  });
+  it("null when the only line at that time is empty", () => {
+    const { db } = setup();
+    addLine(db, 40_000, 44_000, "   ");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBeNull();
+  });
+  it("ignores cloud lines", () => {
+    const { db } = setup();
+    addLine(db, 40_000, 44_000, "cloud only", "cloud");
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBeNull();
+  });
+  it("cuts a long line to the 100-character word limit", () => {
+    const { db } = setup();
+    addLine(db, 40_000, 44_000, "a".repeat(150));
+    expect(phraseForFlag(db, plainFlag(db, 42_000))).toBe("a".repeat(100));
+  });
+});
+
+describe("lineAt", () => {
+  const lines: SegmentLine[] = [
+    { tStart: 0, tEnd: 1_000, text: "one" },
+    { tStart: 2_000, tEnd: 3_000, text: "   " },
+    { tStart: 3_000, tEnd: 4_000, text: "two" },
+  ];
+  it("finds the line containing t, skipping blank lines", () => {
+    expect(lineAt(lines, 500)?.text).toBe("one");
+    expect(lineAt(lines, 3_000)?.text).toBe("two");
+  });
+  it("in a short pause, the latest line before it (blank lines skipped)", () => {
+    expect(lineAt(lines, 1_500)?.text).toBe("one");
+    expect(lineAt(lines, 2_500)?.text).toBe("one");
+  });
+  it("null when the nearest line ended more than 10 s before, or there are no lines", () => {
+    expect(lineAt(lines, 14_000)?.text).toBe("two");
+    expect(lineAt(lines, 14_001)).toBeNull();
+    expect(lineAt([], 0)).toBeNull();
   });
 });
