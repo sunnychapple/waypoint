@@ -9,6 +9,7 @@ import {
   discardIfUnsaved,
   getExplanation,
   saveExplanation,
+  saveExplanationNow,
   shownAnswer,
   startExplanation,
   unsaveExplanation,
@@ -114,14 +115,18 @@ export function useExplain(sessionId: string, t: number, word: string, flagId?: 
         if (cancelled.current) return null;
         const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
         idRef.current = id;
-        let updated = addToThread(db, id, item);
-        // Explain answered a question from Questions for later: that flag is answered now, and the answer is saved
-        // for later (owner decision). Only in the notes the flag came from.
-        if (task === "explain" && flagId !== undefined && stillSame(generation)) {
-          markAnswered(db, flagId);
-          saveExplanation(db, deps, id);
-          updated = { ...updated, saved: true };
-        }
+        let updated: Explanation | null = null;
+        // One transaction: the thread item, the answered flag and the save all land, or none does.
+        db.transaction(() => {
+          updated = addToThread(db, id, item);
+          // Explain answered a question from Questions for later: that flag is answered now, and the answer is saved
+          // for later (owner decision). Only in the notes the flag came from.
+          if (task === "explain" && flagId !== undefined && stillSame(generation)) {
+            markAnswered(db, flagId);
+            saveExplanationNow(db, deps, id);
+            updated = { ...updated, saved: true };
+          }
+        });
         return updated;
       });
     } catch {

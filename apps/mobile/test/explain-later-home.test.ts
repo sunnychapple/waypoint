@@ -51,3 +51,19 @@ describe("answer from a flag is saved with the flag marked answered", () => {
     expect(loaded?.thread.map((i) => i.kind)).toEqual(["explain", "more_detail"]);
   });
 });
+
+describe("saveExplanationNow", () => {
+  it("rolls back the thread item, the answered flag and the save together", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 0, "osmosis");
+    expect(() =>
+      db.transaction(() => {
+        addToThread(db, e.id, item("more_detail", "x"));
+        markAnswered(db, "f1");
+        saveExplanationNow(db, deps, e.id); // no explain item yet: throws
+      }),
+    ).toThrow("nothing to save yet");
+    expect(getExplanation(db, e.id)?.thread).toEqual([]);
+    expect(countOpenFlags(db)).toBe(1);
+  });
+});

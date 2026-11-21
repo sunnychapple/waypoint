@@ -52,21 +52,24 @@ export function discardIfUnsaved(db: SqlDb, id: string): void {
 // Save keeps the explanation after the sheet closes and adds the word to the session's terms, with the first answer
 // as its meaning. Saving twice changes nothing.
 export function saveExplanation(db: SqlDb, deps: Deps, id: string): void {
+  db.transaction(() => saveExplanationNow(db, deps, id));
+}
+
+// The same save without its own transaction, for a caller that already runs inside one (transactions do not nest).
+export function saveExplanationNow(db: SqlDb, deps: Deps, id: string): void {
   const e = getExplanation(db, id);
   if (e === null) throw new Error("no such explanation");
   const first = e.thread.find((item) => item.kind === "explain");
   if (first === undefined) throw new Error("nothing to save yet");
-  db.transaction(() => {
-    db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [id]);
-    db.run("INSERT OR IGNORE INTO terms (id, session_id, explanation_id, term, meaning, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
-      deps.newId(),
-      e.sessionId,
-      id,
-      e.term,
-      first.text,
-      deps.now(),
-    ]);
-  });
+  db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [id]);
+  db.run("INSERT OR IGNORE INTO terms (id, session_id, explanation_id, term, meaning, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
+    deps.newId(),
+    e.sessionId,
+    id,
+    e.term,
+    first.text,
+    deps.now(),
+  ]);
 }
 
 // How many explanations are saved: Home shows "Saved answers" when there are no open questions.
