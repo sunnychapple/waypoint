@@ -53,7 +53,7 @@ export default function ResearchScreen() {
         </View>
       ) : null}
 
-      <Caption>Sent for this task only. Pages were read by Waypoint's cloud.</Caption>
+      <Caption>Sent for this task only. Pages were read by NotePath's cloud.</Caption>
     </Screen>
   );
 }

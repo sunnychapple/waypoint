@@ -44,6 +44,6 @@ export function syncLimitCopy(againAt: string): { title: string; body: string; b
     title: `You've synced ${bytesLabel(SYNC_DAILY_BYTES)} today`,
     body: `Add ${extra} more for today for ${SYNC_EXTRA_CREDITS} credits, or wait until ${againAt}, when sync starts again. Your notes stay on this iPhone meanwhile.`,
     buy: `Add ${extra} · ${SYNC_EXTRA_CREDITS} credits`,
-    priceChanged: "The price of more sync has changed, and nothing was charged. Update Waypoint to see the new price.",
+    priceChanged: "The price of more sync has changed, and nothing was charged. Update NotePath to see the new price.",
   };
 }

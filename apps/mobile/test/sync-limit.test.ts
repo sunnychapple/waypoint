@@ -27,7 +27,7 @@ describe("the daily sync limit", () => {
       title: "You've synced 200 MB today",
       body: "Add 1 GB more for today for 100 credits, or wait until 7:00 PM, when sync starts again. Your notes stay on this iPhone meanwhile.",
       buy: "Add 1 GB · 100 credits",
-      priceChanged: "The price of more sync has changed, and nothing was charged. Update Waypoint to see the new price.",
+      priceChanged: "The price of more sync has changed, and nothing was charged. Update NotePath to see the new price.",
     });
   });
 });

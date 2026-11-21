@@ -38,7 +38,7 @@ export type ApnsNotification = {
 // Fixed text per kind. The payload carries only the kind and ref, never anything from a note.
 const ALERTS: Readonly<Record<Exclude<PushKind, "sync">, string>> = {
   job_ready: "Your result is ready.",
-  device_request: "A new device wants to sign in. Open Waypoint to compare the code.",
+  device_request: "A new device wants to sign in. Open NotePath to compare the code.",
   device_approved: "Your new device was approved.",
 };
 
@@ -57,7 +57,7 @@ export function notificationFor(message: PushMessage): ApnsNotification {
     priority: 10,
     collapseId,
     payload: {
-      aps: { alert: { title: "Waypoint", body: ALERTS[message.kind] }, sound: "default" },
+      aps: { alert: { title: "NotePath", body: ALERTS[message.kind] }, sound: "default" },
       kind: message.kind,
       ref: message.ref,
     },

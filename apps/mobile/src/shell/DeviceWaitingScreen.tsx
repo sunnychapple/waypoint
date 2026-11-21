@@ -25,7 +25,7 @@ export default function DeviceWaitingScreen() {
 
   const copy = COPY[status];
   const body =
-    status !== "waiting" ? copy.body : restart ? "This request ran out of time." : "Open Waypoint on your other iPhone or iPad, go to Settings › Devices, and approve this one.";
+    status !== "waiting" ? copy.body : restart ? "This request ran out of time." : "Open NotePath on your other iPhone or iPad, go to Settings › Devices, and approve this one.";
   return (
     <Screen>
       <View style={[styles.badge, { backgroundColor: colors.accentSoft }]}>
@@ -65,14 +65,14 @@ export default function DeviceWaitingScreen() {
 const COPY: Record<DeviceStatus, { title: string; body: string; caption: string }> = {
   waiting: {
     title: "This iPhone needs approval",
-    body: "Your Waypoint account is already set up on another iPhone or iPad. That device needs to approve this one before it can use credits.",
+    body: "Your NotePath account is already set up on another iPhone or iPad. That device needs to approve this one before it can use credits.",
     caption: "No other device? Use your recovery key.",
   },
-  checking: { title: "Setting up this iPhone", body: "Waypoint is getting this iPhone ready to use credits.", caption: "" },
-  offline: { title: "You're offline", body: "Connect to the internet so Waypoint can set up this iPhone for credits.", caption: "" },
+  checking: { title: "Setting up this iPhone", body: "NotePath is getting this iPhone ready to use credits.", caption: "" },
+  offline: { title: "You're offline", body: "Connect to the internet so NotePath can set up this iPhone for credits.", caption: "" },
   failed: { title: "Couldn't set up this iPhone", body: "Something went wrong while getting this iPhone ready for credits.", caption: "Tap Check again to try once more." },
   too_many_waiting: { title: "Too many devices waiting", body: "Three devices are already waiting for approval. Try again in 10 minutes.", caption: "" },
-  signed_out: { title: "Sign in to use credits", body: "Credits belong to your Waypoint account.", caption: "" },
+  signed_out: { title: "Sign in to use credits", body: "Credits belong to your NotePath account.", caption: "" },
   approved: { title: "This iPhone is ready", body: "It can use credits now.", caption: "" },
 };
 

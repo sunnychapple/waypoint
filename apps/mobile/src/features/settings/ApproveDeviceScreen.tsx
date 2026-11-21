@@ -116,7 +116,7 @@ export default function ApproveDeviceScreen() {
       <Title>Approve a new device</Title>
       {view === null || view.kind === "waiting_reveal" ? (
         <>
-          <Body>Open Waypoint on the new device. It shows a 6-digit code in a moment.</Body>
+          <Body>Open NotePath on the new device. It shows a 6-digit code in a moment.</Body>
           <ActivityIndicator color={colors.accent} style={styles.spinner} />
         </>
       ) : null}

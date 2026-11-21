@@ -51,7 +51,7 @@ function render(item: SharedItem): void {
     nodes.push(el("h2", "Pages"));
     item.pages.forEach((page, i) => nodes.push(el("h3", `Page ${i + 1}`), el("p", page.text, "page")));
   }
-  nodes.push(el("p", "Shared from Waypoint. Only people with this link can open it.", "muted"));
+  nodes.push(el("p", "Shared from NotePath. Only people with this link can open it.", "muted"));
   show(...nodes);
 }
 

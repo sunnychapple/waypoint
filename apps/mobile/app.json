@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Waypoint",
+    "name": "NotePath",
     "slug": "waypoint",
     "scheme": "waypoint",
     "version": "0.1.0",
@@ -14,12 +14,12 @@
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Waypoint records a class or a talk so it can write down what is said, on this iPhone.",
+        "NSMicrophoneUsageDescription": "NotePath records a class or a talk so it can write down what is said, on this iPhone.",
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSCameraUsageDescription": "Waypoint uses the camera to snap pages of homework and books. Pages are read on this iPhone.",
-        "NSSpeechRecognitionUsageDescription": "Waypoint turns your recording into text on this iPhone. Nothing is sent anywhere.",
+        "NSCameraUsageDescription": "NotePath uses the camera to snap pages of homework and books. Pages are read on this iPhone.",
+        "NSSpeechRecognitionUsageDescription": "NotePath turns your recording into text on this iPhone. Nothing is sent anywhere.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "usesAppleSignIn": true

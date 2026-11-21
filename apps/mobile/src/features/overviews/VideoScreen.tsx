@@ -51,8 +51,8 @@ export default function VideoScreen() {
             <Text style={[styles.note, { color: colors.ink }]}>Waiting for your recording to finish</Text>
           ) : (
             <>
-              <Text style={[styles.note, { color: colors.ink }]}>Making the video… Keep Waypoint open.</Text>
-              <Caption>Keep Waypoint open while the video is made.</Caption>
+              <Text style={[styles.note, { color: colors.ink }]}>Making the video… Keep NotePath open.</Text>
+              <Caption>Keep NotePath open while the video is made.</Caption>
             </>
           )}
         </>

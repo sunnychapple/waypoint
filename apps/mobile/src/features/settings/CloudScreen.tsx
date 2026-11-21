@@ -146,7 +146,7 @@ export default function CloudScreen() {
         </Pressable>
       ) : null}
 
-      <OnDeviceNote text="The text you send is kept only on this iPhone. Waypoint's server keeps the task, its size, the credits and the time." />
+      <OnDeviceNote text="The text you send is kept only on this iPhone. NotePath's server keeps the task, its size, the credits and the time." />
     </Screen>
   );
 }

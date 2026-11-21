@@ -13,8 +13,8 @@ export default function UpdateScreen() {
       <View style={[styles.badge, { backgroundColor: colors.accentSoft }]}>
         <SymbolView name="arrow.down.app" tintColor={colors.accent} size={44} />
       </View>
-      <Title>Update Waypoint</Title>
-      <Body>This version of Waypoint is too old for the cloud. Update it from the App Store to keep using Explain and credits.</Body>
+      <Title>Update NotePath</Title>
+      <Body>This version of NotePath is too old for the cloud. Update it from the App Store to keep using Explain and credits.</Body>
       <OnDeviceNote text="Everything on this iPhone keeps working: your notes, recording, pages, flashcards and search." />
       {/^\d+$/.test(appStoreId) ? <PrimaryButton label="Open the App Store" onPress={() => void Linking.openURL(`itms-apps://apps.apple.com/app/id${appStoreId}`)} /> : null}
       <SecondaryButton label="Not now" onPress={() => router.back()} />

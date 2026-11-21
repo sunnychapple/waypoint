@@ -46,9 +46,9 @@ export function buyMessage(kind: BuyKind, credits: number): string | null {
     case "saved":
       return "Paid. The credits arrive as soon as you're back online.";
     case "other_account":
-      return "This purchase belongs to another Waypoint account.";
+      return "This purchase belongs to another NotePath account.";
     case "failed":
-      return "The purchase didn't go through. If you were charged, Waypoint keeps trying to add it.";
+      return "The purchase didn't go through. If you were charged, NotePath keeps trying to add it.";
     case "cancelled":
     case "not_ready":
       return null;

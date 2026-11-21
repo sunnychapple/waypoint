@@ -92,7 +92,7 @@ export default function SettingsScreen() {
   }
 
   function confirmSignOut() {
-    Alert.alert("Sign out of Waypoint?", undefined, [
+    Alert.alert("Sign out of NotePath?", undefined, [
       { text: "Cancel", style: "cancel" },
       { text: "Sign out", style: "destructive", onPress: () => void signOut() },
     ]);
