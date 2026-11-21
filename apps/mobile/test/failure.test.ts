@@ -55,7 +55,7 @@ describe("copy by context", () => {
     });
     expect(failureCopy({ kind: "model_failed" }, "make")).toEqual({
       title: "Couldn't get an answer",
-      body: "Nothing was charged. You can try again.",
+      body: "The purchase was cancelled. You can try again.",
       actions: ["try_again"],
     });
   });

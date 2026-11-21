@@ -45,7 +45,7 @@ describe("plans copy", () => {
     expect(buyMessage("granted", 0)).toBe("Done.");
     expect(buyMessage("cancelled", 0)).toBeNull();
     expect(buyMessage("cancelled", 0, false)).toBeNull();
-    expect(buyMessage("cancelled", 0, true)).toBe("Nothing was charged.");
+    expect(buyMessage("cancelled", 0, true)).toBe("The purchase was cancelled.");
     // A failed purchase is not known to be uncharged, so it never says "Nothing was charged", with or without ?need=.
     expect(buyMessage("failed", 0, true)).toBe(buyMessage("failed", 0));
     expect(buyMessage("failed", 0, true)).not.toMatch(/Nothing was charged/);
