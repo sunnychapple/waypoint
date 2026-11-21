@@ -62,12 +62,13 @@ function ExplainBody({
   const signOut = useSignOut();
   const model = useExplain(sessionId, t, word, flagId, explanationId, pageId);
   const [showSent, setShowSent] = useState(false);
-  const { phase, explanation, unsavedItem, offerResearch, pageNumber } = model;
+  const { phase, explanation, unsavedItem, offerResearch, pageNumber, pageId: resolvedPageId } = model;
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
-  // A page has no Ask later, so its failure copy is the one that does not point at Questions for later.
-  const failure = phase.kind === "failed" ? failureCopy(phase.failure, pageId === undefined ? "explain" : "make") : null;
+  const failure = phase.kind === "failed" ? failureCopy(phase.failure, "explain") : null;
+  // A saved answer reopened with nothing left to send: its page or transcript is gone, so it cannot be explained further.
+  const contextGone = explanationId !== undefined && model.excerpt === "";
   const cost = (task: InstantSentTask): string => creditsLabel(priceOf(config, task) ?? FALLBACK_PRICES[task]);
 
   // A "Try again" after "already finished" starts a new paid request, so the button says what it costs.
@@ -92,7 +93,7 @@ function ExplainBody({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open in session"
-          onPress={() => router.push(pageId === undefined ? `/session/${sessionId}?t=${t}` : `/session/${sessionId}?page=${encodeURIComponent(pageId)}`)}
+          onPress={() => router.push(resolvedPageId === undefined ? `/session/${sessionId}?t=${t}` : `/session/${sessionId}?page=${encodeURIComponent(resolvedPageId)}`)}
           style={styles.touch}
         >
           <Text style={[styles.link, { color: colors.accent }]}>Open in session</Text>
@@ -104,7 +105,7 @@ function ExplainBody({
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.content}>
         <Title>{word}</Title>
         <Caption>
-          {timed
+          {timed && resolvedPageId === undefined
             ? `“${word}” · at ${formatOffset(t)}`
             : pageNumber === null
               ? `“${word}”`
@@ -113,10 +114,10 @@ function ExplainBody({
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
-            <Body>{contextCopy(pageId !== undefined).missing}</Body>
+            <Body>{contextCopy(resolvedPageId !== undefined).missing}</Body>
           ) : (
             <>
-              <Body style={{ color: colors.ink2 }}>{contextCopy(pageId !== undefined).sent}</Body>
+              <Body style={{ color: colors.ink2 }}>{contextCopy(resolvedPageId !== undefined).sent}</Body>
               <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
                 <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
               </Pressable>
@@ -160,8 +161,7 @@ function ExplainBody({
             {model.askedLater ? <Caption>Saved as a question for later.</Caption> : null}
             {failure?.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
             {(failure?.actions ?? []).map((action, index) =>
-              // A page has no time, so a question for later could not point back to it: Ask later is left off.
-              action === "ask_later" && (model.askedLater || pageId !== undefined) ? null : index === 0 ? (
+              action === "ask_later" && model.askedLater ? null : index === 0 ? (
                 <PrimaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
               ) : (
                 <SecondaryButton key={action} label={actionLabel(action)} onPress={() => act(action)} />
@@ -181,8 +181,14 @@ function ExplainBody({
             ) : null}
             {hasAnswer ? (
               <>
-                <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
-                <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
+                {contextGone ? (
+                  <Caption>The page this came from is gone, so it can't be explained further.</Caption>
+                ) : (
+                  <>
+                    <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
+                    <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
+                  </>
+                )}
                 <SecondaryButton
                   label={explanation?.saved === true ? "Saved" : "Save"}
                   icon={explanation?.saved === true ? "bookmark.fill" : "bookmark"}

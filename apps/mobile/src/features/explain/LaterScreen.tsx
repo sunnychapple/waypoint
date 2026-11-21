@@ -29,7 +29,7 @@ export default function LaterScreen() {
       </View>
       <Title>Questions for later</Title>
 
-      {empty ? <Body>Nothing saved for later. Tap the flag while recording, or Ask later in Explain.</Body> : null}
+      {empty ? <Body>Nothing saved for later. Tap a word in your notes to explain it, or flag a moment while recording.</Body> : null}
 
       {groups.map((group) => (
         <View key={group.sessionId} style={styles.section}>
@@ -52,14 +52,18 @@ export default function LaterScreen() {
   );
 }
 
+// A flag made on a page opens that page and is explained with it; a flag from a recording moment keeps its time.
 function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | null; colors: Colors }) {
   const word = wordFromQuestion(flag.question);
+  const pageId = flag.captureId;
+  const openHref = pageId === null ? `/session/${flag.sessionId}?t=${flag.t}` : `/session/${flag.sessionId}?page=${encodeURIComponent(pageId)}`;
+  const where = pageId === null ? { t: String(flag.t) } : { page: pageId };
   return (
     <View style={styles.item}>
       <Row
         title={flag.question === "" ? "Flagged moment" : flag.question}
-        subtitle={formatOffset(flag.t)}
-        onPress={() => router.push(`/session/${flag.sessionId}?t=${flag.t}`)}
+        subtitle={flag.pageNumber !== null ? `Page ${flag.pageNumber}` : formatOffset(flag.t)}
+        onPress={() => router.push(openHref)}
       />
       <View style={styles.actions}>
         {word === null && phrase !== null ? (
@@ -80,7 +84,7 @@ function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | n
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open"
-            onPress={() => router.push(`/session/${flag.sessionId}?t=${flag.t}`)}
+            onPress={() => router.push(openHref)}
             style={styles.action}
           >
             <Text style={[styles.link, { color: colors.accent }]}>Open</Text>
@@ -92,7 +96,7 @@ function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | n
             onPress={() =>
               router.push({
                 pathname: "/explain",
-                params: { sessionId: flag.sessionId, t: String(flag.t), word, flagId: flag.id },
+                params: { sessionId: flag.sessionId, ...where, word, flagId: flag.id },
               })
             }
             style={styles.action}
@@ -121,7 +125,7 @@ function NoteItem({ note, colors }: { note: SavedExplanation; colors: Colors }) 
       onPress={() =>
         router.push({
           pathname: "/explain",
-          params: { sessionId: note.sessionId, t: String(note.t), word: note.term, explanationId: note.id },
+          params: { sessionId: note.sessionId, ...(note.captureId === null ? { t: String(note.t) } : { page: note.captureId }), word: note.term, explanationId: note.id },
         })
       }
       style={[styles.note, { backgroundColor: colors.surface, borderColor: colors.line }]}

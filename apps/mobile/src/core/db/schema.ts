@@ -400,4 +400,11 @@ CREATE TABLE links (
 CREATE INDEX links_session ON links (session_id, created_at);
 `,
   },
+  {
+    version: 10,
+    sql: `
+ALTER TABLE flags ADD COLUMN capture_id TEXT REFERENCES captures (id) ON DELETE SET NULL;
+ALTER TABLE explanations ADD COLUMN capture_id TEXT REFERENCES captures (id) ON DELETE SET NULL;
+`,
+  },
 ];

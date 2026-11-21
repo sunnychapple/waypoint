@@ -13,7 +13,7 @@ export const SYNC_COLUMNS: Record<SyncTable, readonly string[]> = {
   spaces: ["id", "name", "created_at"],
   sessions: ["id", "space_id", "kind", "title", "state", "transcript", "started_at", "ended_at", "recorded_ms"],
   captures: ["id", "session_id", "kind", "t", "position", "duration_ms", "found_text", "found_lines", "blob_id"],
-  flags: ["id", "session_id", "t", "question", "state"],
+  flags: ["id", "session_id", "t", "question", "state", "capture_id"],
   cards: ["id", "session_id", "kind", "front", "back", "capture_id", "t", "made_by", "created_at", "due_at", "fsrs"],
 };
 
@@ -337,7 +337,9 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   const here = spaceOf(db, change.table, key);
   if (here !== null && here !== space) return "rejected";
   const row = { ...change.row };
-  if (change.table === "cards" && typeof row.capture_id === "string") {
+  // A flag sent by an app version before capture_id keeps this iPhone's value rather than losing it.
+  if (change.table === "flags" && !("capture_id" in row)) row.capture_id = db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags WHERE id = ?", [key])?.capture_id ?? null;
+  if ((change.table === "cards" || change.table === "flags") && typeof row.capture_id === "string") {
     const photo = spaceOf(db, "captures", row.capture_id);
     if (photo === null && !wasDeleted(db, "captures", row.capture_id)) return defer(db, groupId, change, deviceId, table, key, row.capture_id);
     if (photo === null) row.capture_id = null;

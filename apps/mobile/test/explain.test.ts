@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { listSegments } from "../src/core/capture/segments.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
+import { addToThread, discardIfUnsaved, getExplanation, pageForTerm, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
 import { cleanWord, contextCopy, excerptAround, pageContext, splitWords, trimExcerpt } from "../src/core/explain/excerpt.ts";
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { failureCopy } from "../src/core/cloud/failure.ts";
@@ -172,7 +172,7 @@ describe("questions for later", () => {
   });
 
   it("groupFlagsBySession keeps the order of the first flag of each session", () => {
-    const flag = (id: string, sessionId: string, title: string) => ({ id, sessionId, sessionTitle: title, startedAt: 0, t: 0, question: "" });
+    const flag = (id: string, sessionId: string, title: string) => ({ id, sessionId, sessionTitle: title, startedAt: 0, t: 0, question: "", captureId: null, pageNumber: null });
     const groups = groupFlagsBySession([flag("a", "s2", "Two"), flag("b", "s1", "One"), flag("c", "s2", "Two")]);
     expect(groups.map((g) => [g.sessionTitle, g.flags.map((f) => f.id)])).toEqual([
       ["Two", ["a", "c"]],
@@ -216,8 +216,8 @@ describe("saved explanations", () => {
     startExp(db, { now: () => 300, newId: d.newId }, "s1", 1_000, "unsaved");
 
     expect(savedExplanations(db)).toEqual([
-      { id: newer.id, sessionId: "s1", sessionTitle: "Bio", t: 9000, term: "osmosis", answer: "Water moves across a membrane.", createdAt: 200 },
-      { id: older.id, sessionId: "s1", sessionTitle: "Bio", t: 5000, term: "mitosis", answer: "Cell division.", createdAt: 100 },
+      { id: newer.id, sessionId: "s1", sessionTitle: "Bio", t: 9000, term: "osmosis", answer: "Water moves across a membrane.", createdAt: 200 , captureId: null },
+      { id: older.id, sessionId: "s1", sessionTitle: "Bio", t: 5000, term: "mitosis", answer: "Cell division.", createdAt: 100 , captureId: null },
     ]);
   });
 });
@@ -258,5 +258,54 @@ describe("page explain copy", () => {
       expect(copy.actions).not.toContain("ask_later");
       expect(copy.body).not.toMatch(/question/i);
     }
+  });
+});
+
+describe("questions and saved answers from a page", () => {
+  function pagesSetup() {
+    const { db, deps: d } = setup();
+    const spaceId = db.get<{ space_id: string }>("SELECT space_id FROM sessions WHERE id = 's1'")!.space_id;
+    const pages = startPagesSession(db, d, spaceId, "Pages");
+    const [first, second, third] = addPages(db, d, pages.id, ["a.jpg", "b.jpg", "c.jpg"]);
+    db.run("UPDATE captures SET found_text = ? WHERE id = ?", ["Cells divide.", first!]);
+    db.run("UPDATE captures SET found_text = ? WHERE id = ?", ["Osmosis moves water. Cells swell.", second!]);
+    db.run("UPDATE captures SET found_text = ? WHERE id = ?", ["OSMOSIS again.", third!]);
+    return { db, d, pagesId: pages.id, first: first!, second: second!, third: third! };
+  }
+
+  it("askLater keeps the page, and openFlags gives its number; a recording flag has neither", () => {
+    const { db, d, pagesId, second } = pagesSetup();
+    askLater(db, d, pagesId, 0, "osmosis", second);
+    askLater(db, d, "s1", 500, "cell");
+    expect(openFlags(db).map((f) => [f.sessionId, f.captureId, f.pageNumber])).toEqual([
+      [pagesId, second, 2],
+      ["s1", null, null],
+    ]);
+  });
+
+  it("deleting a page clears the flag's page instead of deleting the flag", () => {
+    const { db, d, pagesId, second } = pagesSetup();
+    askLater(db, d, pagesId, 0, "osmosis", second);
+    db.run("DELETE FROM captures WHERE id = ?", [second]);
+    expect(openFlags(db).map((f) => [f.captureId, f.pageNumber])).toEqual([[null, null]]);
+  });
+
+  it("pageForTerm is the first page whose text has the term, ignoring case; null when none does or there are no pages", () => {
+    const { db, pagesId } = pagesSetup();
+    expect(pageForTerm(db, pagesId, "osmosis")).toBe(db.get<{ id: string }>("SELECT id FROM captures WHERE session_id = ? AND position = 1", [pagesId])?.id);
+    expect(pageForTerm(db, pagesId, "CELLS")).toBe(db.get<{ id: string }>("SELECT id FROM captures WHERE session_id = ? AND position = 0", [pagesId])?.id);
+    expect(pageForTerm(db, pagesId, "mitosis")).toBeNull();
+    expect(pageForTerm(db, "s1", "osmosis")).toBeNull();
+  });
+
+  it("a saved explanation keeps its page, and a recording explanation has none", () => {
+    const { db, d, pagesId, third } = pagesSetup();
+    const page = startExp(db, d, pagesId, 0, "osmosis", third);
+    const moment = startExp(db, d, "s1", 9_000, "mitosis");
+    expect(getExplanation(db, page.id)?.captureId).toBe(third);
+    expect(getExplanation(db, moment.id)?.captureId).toBeNull();
+    db.run("UPDATE explanations SET thread = ? WHERE id = ?", [JSON.stringify([{ kind: "explain", text: "Water.", at: 1, retention: "standard", sentId: "k" }]), page.id]);
+    saveExplanation(db, d, page.id);
+    expect(savedExplanations(db).map((e) => [e.term, e.captureId])).toEqual([["osmosis", third]]);
   });
 });

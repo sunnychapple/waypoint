@@ -8,6 +8,7 @@ import {
   addToThread,
   discardIfUnsaved,
   getExplanation,
+  pageForTerm,
   saveExplanation,
   saveExplanationNow,
   shownAnswer,
@@ -33,7 +34,8 @@ export type ExplainPhase =
 // One tapped word: the excerpt around it, the thread of answers, and what is running. Each request gets an
 // Idempotency-Key when the person taps; "Try again" re-uses it only when the request did not run (keepsKey).
 // With explanationId, the saved explanation's thread is shown and follow-ups continue it.
-// With pageId, the word was tapped on a page: the context is that page's found text, and t is 0 (a page's time).
+// With pageId, the word was tapped on a page: the context is that page's found text, and t is 0 (a page's time). A saved
+// explanation reopened without pageId uses the page it was saved from.
 export function useExplain(
   sessionId: string,
   t: number,
@@ -42,10 +44,16 @@ export function useExplain(
   explanationId?: string | undefined,
   pageId?: string | undefined,
 ) {
-  const [page] = useState(() => (pageId === undefined ? null : pageContext(getDb(), sessionId, pageId)));
-  const [excerpt] = useState(() => (pageId === undefined ? excerptAround(listSegments(getDb(), sessionId), t) : trimExcerpt(page?.text ?? "")));
-  const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [loaded] = useState<Explanation | null>(() => (explanationId === undefined ? null : getExplanation(getDb(), explanationId)));
+  // The page this word is explained with. An explanation saved before captureId existed has none, so its page is the
+  // first one with the word.
+  const [pageRef] = useState<string | undefined>(() => {
+    if (pageId !== undefined || loaded === null) return pageId;
+    return loaded.captureId ?? pageForTerm(getDb(), sessionId, word) ?? undefined;
+  });
+  const [page] = useState(() => (pageRef === undefined ? null : pageContext(getDb(), sessionId, pageRef)));
+  const [excerpt] = useState(() => (pageRef === undefined ? excerptAround(listSegments(getDb(), sessionId), t) : trimExcerpt(page?.text ?? "")));
+  const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [explanation, setExplanation] = useState<Explanation | null>(loaded);
   // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.
   const [unsavedItem, setUnsavedItem] = useState<ThreadItem | null>(null);
@@ -123,7 +131,7 @@ export function useExplain(
       next = writeDb((db) => {
         settleSent(db, key, credits, retention);
         if (cancelled.current) return null;
-        const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word).id;
+        const id = idRef.current ?? startExplanation(db, deps, sessionId, t, word, pageRef).id;
         idRef.current = id;
         let updated: Explanation | null = null;
         // One transaction: the thread item, the save and the answered flag all land, or none does.
@@ -172,9 +180,9 @@ export function useExplain(
 
   function saveForLater(): void {
     if (askedLater) return;
-    writeDb((db) => askLater(db, deps, sessionId, t, word));
+    writeDb((db) => askLater(db, deps, sessionId, t, word, pageRef));
     setAskedLater(true);
   }
 
-  return { excerpt, pageNumber: page?.number ?? null, phase, explanation, unsavedItem, askedLater, offerResearch, run, toggleSave, saveForLater };
+  return { excerpt, pageId: pageRef, pageNumber: page?.number ?? null, phase, explanation, unsavedItem, askedLater, offerResearch, run, toggleSave, saveForLater };
 }
