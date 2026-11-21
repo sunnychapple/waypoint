@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
+import { AppState } from "react-native";
 import { router } from "expo-router";
 import { ApiCallError, NetworkError } from "@waypoint/api-client";
 import {
@@ -11,7 +12,14 @@ import {
   type MadeRecoveryKey,
 } from "../../modules/waypoint-keys/index.ts";
 import { cleanPhrase, recoveryState, type RecoveryState } from "../core/device/recovery.ts";
+import {
+  finishedSessionCount,
+  markRecoveryPromptShown,
+  recoveryPromptShownAt,
+  shouldPromptRecovery,
+} from "../core/device/recoveryPrompt.ts";
 import { api } from "./api.ts";
+import { dbGeneration, useQuery, writeDbIf } from "./db.ts";
 import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { recoverGroupKeys } from "./groups.ts";
 
@@ -94,16 +102,42 @@ export async function recoverWithWords(words: string): Promise<RecoverResult> {
   }
 }
 
-// Once per launch: an approved iPhone holding the account key, with no recovery key on the server, opens the words
-// screen (it has "Later"). Called once in (tabs)/_layout.tsx.
+// The words screen is a reminder, not a gate. It opens for an approved iPhone holding the account key, with no recovery
+// key on the server, once the person has a finished session, and at most once a week (shouldPromptRecovery). Checked
+// when the device is approved, when a session count changes (a session is saved), and on each return to the app.
+// Called once in (tabs)/_layout.tsx.
 export function useRecoveryPrompt(): void {
   const status = useDeviceStatus();
-  const asked = useRef(false);
+  const sessions = useQuery((db) => finishedSessionCount(db));
+  const lastShownAt = useQuery((db) => recoveryPromptShownAt(db));
+  const [foreground, setForeground] = useState(0);
   useEffect(() => {
-    if (status !== "approved" || asked.current || !canMakeRecoveryKey()) return;
-    asked.current = true;
-    void loadRecoveryState().then((state) => {
-      if (state === "missing") router.push("/recovery-words");
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") setForeground((n) => n + 1);
     });
-  }, [status]);
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (status !== "approved" || !canMakeRecoveryKey()) return;
+    // A check still waiting on the server when the inputs change is dropped; the new run decides with fresh inputs.
+    let cancelled = false;
+    const generation = dbGeneration();
+    void loadRecoveryState().then((state) => {
+      if (cancelled) return;
+      const now = Date.now();
+      // "unknown" (the server could not be asked) counts as saved: nothing is shown on a guess.
+      const ask = shouldPromptRecovery({ saved: state !== "missing", sessionCount: sessions, lastShownAt, now });
+      if (!ask) return;
+      // Recorded before the screen opens, so a later check does not open it again within the week.
+      const recorded = writeDbIf(generation, (db) => {
+        markRecoveryPromptShown(db, now);
+        return true;
+      });
+      if (recorded !== true) return;
+      router.push("/recovery-words");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, sessions, lastShownAt, foreground]);
 }
