@@ -33,13 +33,34 @@ export function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// Total credits the command `admin:<key>` put in the wallet. A grant that first pays off a balance owed writes one
+// entry for the debt (negative) and one for the bucket, ids `admin:<key>:0`, `admin:<key>:1`, so the total is the sum
+// of their sizes.
+async function grantedByKey(
+  wallet: { ledger(after: number, limit: number): Promise<{ entries: { id: string; credits: number }[]; next: number }> },
+  key: string,
+): Promise<number> {
+  const prefix = `admin:${key}:`;
+  let total = 0;
+  let after = 0;
+  for (;;) {
+    const page = await wallet.ledger(after, 500);
+    if (page.entries.length === 0) return total;
+    for (const entry of page.entries) {
+      if (entry.id.startsWith(prefix) && /^\d+$/.test(entry.id.slice(prefix.length))) total += Math.abs(entry.credits);
+    }
+    after = page.next;
+  }
+}
+
 export function adminCreditsRoute() {
   return new Hono<AppEnv>().post("/admin/credits", async (c) => {
-    const token = c.env.ADMIN_TOKEN;
-    if (token === undefined || token.length < ADMIN_TOKEN_MIN_LENGTH) throw notFound();
+    const token = c.env.ADMIN_TOKEN ?? "";
     const header = c.req.header("Authorization") ?? "";
     const presented = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
-    if (!constantTimeEqual(presented, token)) throw notFound();
+    // The comparison runs even when the token is unset or short, so those refusals cost the same as a wrong token.
+    const matches = constantTimeEqual(presented, token);
+    if (token.length < ADMIN_TOKEN_MIN_LENGTH || !matches) throw notFound();
 
     let json: unknown;
     try {
@@ -66,7 +87,11 @@ export function adminCreditsRoute() {
       ref: "admin",
       user_id: user.id,
     });
+    // A replayed command id returns the first result whatever credits it now carries, so read back what the key
+    // actually granted. A key reused with a different amount is refused rather than reported as a new grant.
+    const stored = await grantedByKey(wallet, key);
+    if (stored !== credits) throw new ApiFailure("conflict", "key_reused");
     const view = await wallet.read();
-    return c.json({ granted: credits, balance: view.monthly + view.purchased });
+    return c.json({ granted: stored, balance: view.monthly + view.purchased });
   });
 }

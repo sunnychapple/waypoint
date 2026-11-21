@@ -31,6 +31,7 @@ async function fixture() {
           return wallet.apply(command, NOW);
         },
         read: async () => wallet.read(),
+        ledger: async (after: number, limit: number) => wallet.ledger(after, limit),
       };
     },
   };
@@ -92,6 +93,34 @@ describe("POST /admin/credits: refusals look like a missing route", () => {
   test("a token that is a prefix of the real one is 404", async () => {
     const { res } = await post(GOOD, { auth: `Bearer ${TOKEN.slice(0, 39)}` });
     expect(res.status).toBe(404);
+  });
+
+  test("a non-ASCII token never matches or crashes, and a multi-byte lookalike of the same length is refused", async () => {
+    expect((await post(GOOD, { auth: `Bearer ${"é".repeat(40)}` })).res.status).toBe(404);
+    const wide = "é".repeat(20) + "t".repeat(20);
+    expect((await post(GOOD, { token: wide, auth: `Bearer ${wide}` })).res.status).toBe(200);
+    expect((await post(GOOD, { token: wide, auth: `Bearer ${"e".repeat(20) + "t".repeat(20)}` })).res.status).toBe(404);
+  });
+
+  test("HEAD, OPTIONS, GET and path variants do not reach the route", async () => {
+    const f = await fixture();
+    const env = { DB: f.db, WALLET: f.WALLET, ADMIN_TOKEN: TOKEN };
+    const headers = { Authorization: `Bearer ${TOKEN}` };
+    for (const method of ["HEAD", "OPTIONS", "GET", "PUT"]) {
+      expect((await app().request("/admin/credits", { method, headers }, env)).status).toBe(404);
+    }
+    for (const path of ["/admin/credits/", "/Admin/credits", "/admin//credits", "/admin/credits%2F"]) {
+      expect((await app().request(path, { method: "POST", headers, body: JSON.stringify(GOOD) }, env)).status).toBe(404);
+    }
+    expect(f.applied).toHaveLength(0);
+  });
+
+  test("an unset token answers exactly like a wrong token", async () => {
+    const unset = (await post(GOOD, { token: undefined })).res;
+    const wrong = (await post(GOOD, { auth: `Bearer ${"x".repeat(40)}` })).res;
+    expect(unset.status).toBe(wrong.status);
+    expect(await unset.text()).toBe(await wrong.text());
+    expect([...unset.headers]).toEqual([...wrong.headers]);
   });
 
   test("no Authorization header, or not Bearer, is 404", async () => {
@@ -172,6 +201,46 @@ describe("POST /admin/credits: grant", () => {
     expect(second.status).toBe(200);
     expect(f.wallet.read().purchased).toBe(500);
     expect(f.wallet.ledger(0, 100).entries).toHaveLength(1);
+  });
+
+  test("the same key with a different amount is 409 and grants nothing more", async () => {
+    const f = await fixture();
+    const send = (credits: number) =>
+      app().request(
+        "/admin/credits",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", Authorization: `Bearer ${TOKEN}` },
+          body: JSON.stringify({ ...GOOD, credits }),
+        },
+        { DB: f.db, WALLET: f.WALLET, ADMIN_TOKEN: TOKEN },
+      );
+    expect((await send(500)).status).toBe(200);
+    const second = await send(900);
+    expect(second.status).toBe(409);
+    expect(JSON.stringify(await second.json())).not.toContain("900");
+    expect(f.wallet.read().purchased).toBe(500);
+  });
+
+  test("a grant that pays off a balance owed reports the full amount, and a retry agrees", async () => {
+    const f = await fixture();
+    f.wallet.apply({ type: "clawback", id: "cb-1", credits: 200, ref: "x" }, NOW);
+    expect(f.wallet.read().owed).toBe(200);
+    const send = () =>
+      app().request(
+        "/admin/credits",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", Authorization: `Bearer ${TOKEN}` },
+          body: JSON.stringify(GOOD),
+        },
+        { DB: f.db, WALLET: f.WALLET, ADMIN_TOKEN: TOKEN },
+      );
+    const first = await send();
+    expect(await first.json()).toEqual({ granted: 500, balance: 300 });
+    const retry = await send();
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ granted: 500, balance: 300 });
   });
 
   test("a different key grants again", async () => {
