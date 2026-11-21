@@ -6,7 +6,7 @@ import { SymbolView } from "expo-symbols";
 import { saveCards, sessionCardCount } from "../../core/study/cards.ts";
 import { makeCardsFromUnits, type ModelPort } from "../../core/study/generate.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
-import { isUnsupportedLanguage, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
+import { isUnsupportedLanguage, NO_TEXT_BODY, NO_TEXT_TITLE, UNSUPPORTED_LANGUAGE_LINE } from "../../core/study/labels.ts";
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { usePendingText } from "../../platform/pending.ts";
@@ -26,7 +26,7 @@ export default function MakeCardsScreen() {
   const [making, setMaking] = useState(existing === 0);
   const [availability] = useState(getAvailability);
   const [attempt, setAttempt] = useState(0);
-  const [outcome, setOutcome] = useState<"working" | "failed" | "empty" | "unsupported">("working");
+  const [outcome, setOutcome] = useState<"working" | "failed" | "no_text" | "unsupported">("working");
   // Unread pages or a transcript still being made: nothing is generated until they are read.
   const { pending, skipped } = usePendingText(sessionId);
 
@@ -36,10 +36,15 @@ export default function MakeCardsScreen() {
     setOutcome("working");
     async function run() {
       try {
-        const drafts = await makeCardsFromUnits(PORT, studyUnits(getDb(), sessionId), 12);
+        const units = studyUnits(getDb(), sessionId);
+        if (units.length === 0) {
+          if (active) setOutcome("no_text");
+          return;
+        }
+        const drafts = await makeCardsFromUnits(PORT, units, 12);
         if (!active) return;
         if (drafts.length === 0) {
-          setOutcome("empty");
+          setOutcome("failed");
           return;
         }
         writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, drafts, "device_model"));
@@ -101,12 +106,15 @@ export default function MakeCardsScreen() {
         <>
           <Title>Couldn't make flashcards this time.</Title>
           <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
+          <SecondaryButton label="Make a Practice set" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
         </>
       ) : null}
-      {outcome === "empty" ? (
+      {outcome === "no_text" ? (
         <>
-          <Title>There wasn't enough here to make flashcards.</Title>
+          <Title>{skipped === null ? NO_TEXT_TITLE : skippedCopy(skipped)}</Title>
+          <Body>{NO_TEXT_BODY}</Body>
           <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
+          <SecondaryButton label="Open my notes" onPress={() => router.replace(`/session/${sessionId}`)} />
         </>
       ) : null}
     </Screen>

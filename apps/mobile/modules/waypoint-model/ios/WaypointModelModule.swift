@@ -28,25 +28,33 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("makeCards") { (text: String, max: Int) async throws -> [[String: Any]] in
-      try await self.run {
-        let session = LanguageModelSession(instructions: studyInstructions)
-        let response = try await session.respond(
-          to: "Make up to \(max) flashcards from this text.\n\nText:\n\(text)",
-          generating: CardSet.self)
-        return response.content.cards.map { (card: CardDraft) -> [String: Any] in
-          ["kind": card.kind == .term ? "term" : "problem", "front": card.front, "back": card.back]
+      try await self.run { () async throws -> [[String: Any]] in
+        let prompt = "Make up to \(max) flashcards from this text.\n\nText:\n\(text)"
+        do {
+          let session = LanguageModelSession(instructions: studyInstructions)
+          let response = try await session.respond(to: prompt, generating: CardSet.self)
+          return response.content.cards.map { (card: CardDraft) -> [String: Any] in
+            ["kind": card.kind == .term ? "term" : "problem", "front": card.front, "back": card.back]
+          }
+        } catch where modelErrorCode(error) == "declined" {
+          return try await self.respondAsJSON(prompt, keys: "kind (term or problem), front, back")
         }
       }
     }
 
     AsyncFunction("makeQuiz") { (text: String, count: Int) async throws -> [[String: Any]] in
-      try await self.run {
-        let session = LanguageModelSession(instructions: studyInstructions)
-        let response = try await session.respond(
-          to: "Make \(count) quiz questions from this text. Each has four choices.\n\nText:\n\(text)",
-          generating: QuizSet.self)
-        return response.content.questions.map { (q: QuizDraft) -> [String: Any] in
-          ["question": q.question, "evidence": q.evidence, "answer": q.answer, "wrongChoices": q.wrongChoices, "why": q.why]
+      try await self.run { () async throws -> [[String: Any]] in
+        let prompt = "Make up to \(count) quiz questions from this text. Each has four choices. Ask only about things the text states. Do not ask the student to calculate or solve anything.\n\nText:\n\(text)"
+        do {
+          let session = LanguageModelSession(instructions: studyInstructions)
+          let response = try await session.respond(to: prompt, generating: QuizSet.self)
+          return response.content.questions.map { (q: QuizDraft) -> [String: Any] in
+            ["question": q.question, "evidence": q.evidence, "answer": q.answer, "wrongChoices": q.wrongChoices, "why": q.why]
+          }
+        } catch where modelErrorCode(error) == "declined" {
+          return try await self.respondAsJSON(
+            prompt,
+            keys: "question, evidence (exact words copied from the text), answer (short, taken from the evidence), wrongChoices (three strings), why")
         }
       }
     }
@@ -63,6 +71,19 @@ public class WaypointModelModule: Module {
         return ["steps": steps, "answer": response.content.answer]
       }
     }
+  }
+
+  // Apple's default filter refuses ordinary schoolwork such as a page about a war. The text is the student's own page, so a
+  // refused request is asked again in the mode meant for transforming the person's text. That mode only returns plain text.
+  private func respondAsJSON(_ prompt: String, keys: String) async throws -> [[String: Any]] {
+    let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+    let session = LanguageModelSession(model: model, instructions: studyInstructions)
+    let reply = try await session.respond(to: "\(prompt)\n\nReply with only a JSON array. Each item has the keys \(keys).").content
+    guard let start = reply.firstIndex(of: "["), let end = reply.lastIndex(of: "]"), start < end,
+      let data = String(reply[start...end]).data(using: .utf8),
+      let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+    else { throw Exception(name: "Model", description: "The reply was not a list", code: "failed") }
+    return list
   }
 
   private func claim() -> Bool {
