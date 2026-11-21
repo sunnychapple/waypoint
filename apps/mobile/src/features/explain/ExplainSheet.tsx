@@ -189,7 +189,7 @@ function ExplainBody({
                   tone={explanation?.saved === true ? "accent" : "surface"}
                   onPress={model.toggleSave}
                 />
-                {explanation?.saved === true ? <Caption>Saved to Questions for later.</Caption> : null}
+                {explanation?.saved === true ? <Caption>Saved to Questions for later. Tap Saved to remove it.</Caption> : null}
               </>
             ) : null}
           </View>

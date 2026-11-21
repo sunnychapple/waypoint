@@ -6,7 +6,7 @@ import { addToThread, discardIfUnsaved, getExplanation, startExplanation, type T
 import { cleanWord, contextCopy, excerptAround, pageContext, splitWords, trimExcerpt } from "../src/core/explain/excerpt.ts";
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { failureCopy } from "../src/core/cloud/failure.ts";
-import { saveExplanation, savedExplanations, startExplanation as startExp } from "../src/core/explain/explanations.ts";
+import { saveExplanation, savedExplanations, startExplanation as startExp, unsaveExplanation } from "../src/core/explain/explanations.ts";
 import {
   askLater,
   countOpenFlags,
@@ -84,6 +84,17 @@ describe("explanations and sent_log", () => {
     db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [e.id]);
     discardIfUnsaved(db, e.id);
     expect(getExplanation(db, e.id)).toMatchObject({ id: e.id, saved: true });
+  });
+  it("an answer saved as it arrives survives closing; removing it with Saved lets closing discard it", () => {
+    const { db, deps } = setup();
+    const e = startExplanation(db, deps, "s1", 0, "osmosis");
+    addToThread(db, e.id, { kind: "explain", text: "Water moves.", at: 2_000, retention: "standard", sentId: "key_1" });
+    saveExplanation(db, deps, e.id);
+    discardIfUnsaved(db, e.id);
+    expect(getExplanation(db, e.id)).toMatchObject({ saved: true });
+    unsaveExplanation(db, e.id);
+    discardIfUnsaved(db, e.id);
+    expect(getExplanation(db, e.id)).toBeNull();
   });
   it("a corrupt thread throws", () => {
     const { db, deps } = setup();
