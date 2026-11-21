@@ -10,6 +10,7 @@ import type { MadeKind } from "../../core/made/made.ts";
 import { keyForRequest } from "../../core/research/research.ts";
 import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
+import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
 import { madeText, startMade } from "../../platform/made.ts";
 import { usePendingText } from "../../platform/pending.ts";
@@ -58,6 +59,7 @@ export default function NewMadeScreen() {
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
   const quote = useQuote(available ? { task: kind } : null);
+  const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
   const text = sessionId !== null ? madeText(sessionId, kind) : "";
   const hasText = text !== "";
@@ -86,7 +88,7 @@ export default function NewMadeScreen() {
     else if (action === "close") router.back();
   }
 
-  const copy = failure === null ? null : failureCopy(failure);
+  const copy = failure === null ? null : failureCopy(failure, "make");
 
   return (
     <Screen>
@@ -122,7 +124,7 @@ export default function NewMadeScreen() {
         <Caption>This session has no text yet.</Caption>
       ) : null}
 
-      <QuoteBox state={quote} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
+      <QuoteBox state={quote} onRetry={quote.retry} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
       {showSent && hasText ? (
         <ScrollView style={[styles.sent, { backgroundColor: colors.surface2 }]} nestedScrollEnabled>
           <Text style={[styles.sentText, { color: colors.ink3 }]}>{text}</Text>
@@ -142,9 +144,11 @@ export default function NewMadeScreen() {
         <PrimaryButton
           label={price === null ? "Make" : `Make · ${creditsLabel(price)}`}
           icon={KIND_COPY[kind].icon}
+          disabled={price === null}
           onPress={() => void start()}
         />
       ) : null}
+      {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
       {copy !== null
         ? copy.actions
             .filter((action) => ACTION_LABELS[action] !== undefined)

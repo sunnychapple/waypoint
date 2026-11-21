@@ -38,9 +38,15 @@ export function keepsKey(failure: CloudFailure): boolean {
 }
 
 export type FailureAction = "try_again" | "get_credits" | "ask_later" | "approve_device" | "close";
-export type FailureCopy = { title: string; body: string; actions: FailureAction[] };
+// signIn: the copy offers "Sign in again" (the screen signs out so the gate shows sign-in). Not a FailureAction, so
+// screens that label actions by a Record (ExplainSheet) keep compiling.
+export type FailureCopy = { title: string; body: string; actions: FailureAction[]; signIn?: boolean };
+// "explain": the Explain sheet, whose offline copy points at Questions for later. "make": every other cloud screen,
+// which has no Ask later button.
+export type CopyContext = "explain" | "make";
 
-export function failureCopy(failure: CloudFailure): FailureCopy {
+export function failureCopy(failure: CloudFailure, context: CopyContext = "explain"): FailureCopy {
+  const make = context === "make";
   switch (failure.kind) {
     case "out_of_credits":
       return {
@@ -55,17 +61,21 @@ export function failureCopy(failure: CloudFailure): FailureCopy {
         actions: ["close"],
       };
     case "model_failed":
-      return { title: "Couldn't get an answer", body: "Nothing was charged. You can try again, or keep it as a question for later.", actions: ["try_again", "ask_later"] };
+      return make
+        ? { title: "Couldn't get an answer", body: "Nothing was charged. You can try again.", actions: ["try_again"] }
+        : { title: "Couldn't get an answer", body: "Nothing was charged. You can try again, or keep it as a question for later.", actions: ["try_again", "ask_later"] };
     case "already_finished":
       return { title: "That's already done.", body: "Try again to ask once more.", actions: ["try_again"] };
     case "busy":
       return { title: "Still working on it", body: "Your last request hasn't finished yet. Try again in a moment.", actions: ["try_again"] };
     case "offline":
-      return { title: "You're offline", body: "Tap Ask later to keep your question. It will wait in Questions for later.", actions: ["ask_later", "try_again"] };
+      return make
+        ? { title: "You're offline", body: "Connect to the internet to make this.", actions: ["try_again"] }
+        : { title: "You're offline", body: "Tap Ask later to keep your question. It will wait in Questions for later.", actions: ["ask_later", "try_again"] };
     case "device":
       return { title: "This iPhone isn't ready", body: "It needs to be set up before it can use credits.", actions: ["approve_device"] };
     case "signed_out":
-      return { title: "Sign in again", body: "Your sign-in has ended. Sign in again to use the cloud.", actions: ["close"] };
+      return { title: "Sign in again", body: "Your sign-in has ended. Sign in again to use the cloud.", actions: ["close"], signIn: true };
     case "failed":
       return { title: "Something went wrong", body: "Try again in a moment.", actions: ["try_again"] };
   }

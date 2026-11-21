@@ -1,14 +1,18 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { creditsLabel } from "../core/config/config.ts";
 import { failureCopy } from "../core/cloud/failure.ts";
+import { useSignOut } from "../platform/auth.tsx";
 import type { QuoteState } from "../platform/jobs.ts";
-import { Caption, Row } from "./kit.tsx";
+import { Caption, Row, SecondaryButton } from "./kit.tsx";
 import { useColors } from "./theme.ts";
 
 // "Before you run it": the price from the quote, what is kept, and what is sent (docs/architecture.md section 6).
-export function QuoteBox({ state, onShowSent }: { state: QuoteState; onShowSent?: () => void }) {
+// A failed quote shows its reason and, with onRetry, a "Try again" that asks for the quote again.
+export function QuoteBox({ state, onShowSent, onRetry }: { state: QuoteState; onShowSent?: () => void; onRetry?: () => void }) {
   const colors = useColors();
   const { quote, failure } = state;
+  const signOut = useSignOut();
+  const copy = failure === null ? null : failureCopy(failure, "make");
   return (
     <View style={[styles.box, { backgroundColor: colors.surface2, borderColor: colors.line }]}>
       <Caption style={styles.caps}>BEFORE YOU RUN IT</Caption>
@@ -26,8 +30,10 @@ export function QuoteBox({ state, onShowSent }: { state: QuoteState; onShowSent?
       ) : null}
       {failure !== null ? (
         <>
-          <Text style={[styles.title, { color: colors.ink }]}>{failureCopy(failure).title}</Text>
-          <Caption>{failureCopy(failure).body}</Caption>
+          <Text style={[styles.title, { color: colors.ink }]}>{copy?.title}</Text>
+          <Caption>{copy?.body}</Caption>
+          {copy?.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
+          {onRetry !== undefined && copy?.signIn !== true ? <SecondaryButton label="Try again" onPress={onRetry} /> : null}
         </>
       ) : null}
     </View>

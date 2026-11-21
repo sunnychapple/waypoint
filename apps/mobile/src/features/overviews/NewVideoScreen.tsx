@@ -7,6 +7,7 @@ import { JOB_PROMPT_MAX_CHARS } from "@waypoint/contracts";
 import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel } from "../../core/config/config.ts";
 import { keyForRequest } from "../../core/research/research.ts";
+import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
 import { overviewText } from "../../platform/overviews.ts";
 import { startVideo } from "../../platform/videos.ts";
@@ -34,6 +35,7 @@ export default function NewVideoScreen() {
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
   const quote = useQuote({ task: "video_slides" });
+  const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
   // Read once per session: the text shown under "Show what's sent" is the text that is sent.
   const text = useMemo(() => (sessionId !== null ? overviewText(sessionId) : ""), [sessionId]);
@@ -63,7 +65,7 @@ export default function NewVideoScreen() {
     else if (action === "close") router.back();
   }
 
-  const copy = failure === null ? null : failureCopy(failure);
+  const copy = failure === null ? null : failureCopy(failure, "make");
 
   return (
     <Screen>
@@ -92,7 +94,7 @@ export default function NewVideoScreen() {
         <Caption>This session has no text yet.</Caption>
       )}
 
-      <QuoteBox state={quote} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
+      <QuoteBox state={quote} onRetry={quote.retry} {...(hasText ? { onShowSent: () => setShowSent((v) => !v) } : {})} />
       {showSent && hasText ? (
         <ScrollView style={[styles.sent, { backgroundColor: colors.surface2 }]} nestedScrollEnabled>
           {prompt !== null ? <Text style={[styles.sentText, { color: colors.ink3 }]}>{`Focus: ${prompt}`}</Text> : null}
@@ -108,8 +110,9 @@ export default function NewVideoScreen() {
       ) : null}
 
       {hasText ? (
-        <PrimaryButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="play.rectangle" onPress={() => void start()} />
+        <PrimaryButton label={price === null ? "Make" : `Make · ${creditsLabel(price)}`} icon="play.rectangle" disabled={price === null} onPress={() => void start()} />
       ) : null}
+      {copy !== null && copy.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
       {copy !== null
         ? copy.actions
             .filter((action) => ACTION_LABELS[action] !== undefined)

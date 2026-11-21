@@ -3,13 +3,43 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { failureCopy } from "../../core/cloud/failure.ts";
-import { getJob, JOB_LABELS, jobLine } from "../../core/jobs/jobs.ts";
+import { getJob, JOB_LABELS, jobLine, type LocalJob } from "../../core/jobs/jobs.ts";
 import { useQuery } from "../../platform/db.ts";
 import { askForPush } from "../../platform/push.ts";
 import { cancelJob, followJob } from "../../platform/jobs.ts";
 import { RESULT_ROUTES } from "../../platform/jobResults.ts";
 import { BackButton, Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
+
+// "Try again" for a failed job: the screen that makes this kind, with the same session (and the same question for
+// research), so the price is quoted again and the person taps Make. The job keeps no request body to re-send.
+function retryHref(job: LocalJob): string | null {
+  let detail: { question?: unknown; kind?: unknown } = {};
+  try {
+    detail = JSON.parse(job.detail) as typeof detail;
+  } catch {
+    detail = {};
+  }
+  const query = new URLSearchParams();
+  if (job.sessionId !== null) query.set("sessionId", job.sessionId);
+  switch (job.type) {
+    case "research":
+      if (typeof detail.question === "string") query.set("q", detail.question);
+      return `/research/new?${query.toString()}`;
+    case "overview_script":
+      return job.sessionId !== null ? `/overview/new?${query.toString()}` : null;
+    case "video_slides":
+      return job.sessionId !== null ? `/video/new?${query.toString()}` : null;
+    case "practice":
+    case "diagram":
+    case "mini_app":
+      if (job.sessionId === null) return null;
+      query.set("kind", job.type);
+      return `/made/new?${query.toString()}`;
+    case "retranscribe":
+      return job.sessionId !== null ? `/second-transcript?${query.toString()}` : null;
+  }
+}
 
 // One cloud job: its state, its result when it is saved, and cancel while it runs.
 export default function JobScreen() {
@@ -42,6 +72,7 @@ export default function JobScreen() {
   }
 
   const route = RESULT_ROUTES[job.type];
+  const retry = job.problem === null && job.state === "failed" ? retryHref(job) : null;
   const running = job.state === "queued" || job.state === "running";
 
   function confirmCancel() {
@@ -85,7 +116,12 @@ export default function JobScreen() {
       {job.problem === null && job.state === "succeeded" && job.savedAt !== null && route !== undefined ? (
         <PrimaryButton label="Open" onPress={() => router.push(route(job))} />
       ) : null}
-      {job.problem === null && job.state === "failed" ? <Body>It didn't work. Nothing was charged.</Body> : null}
+      {job.problem === null && job.state === "failed" ? (
+        <View style={styles.block}>
+          <Body>It didn't work. Nothing was charged.</Body>
+          {retry !== null ? <PrimaryButton label="Try again" onPress={() => router.push(retry)} /> : null}
+        </View>
+      ) : null}
       {job.problem === null && job.state === "cancelled" ? <Body>{jobLine(job)}</Body> : null}
     </Screen>
   );

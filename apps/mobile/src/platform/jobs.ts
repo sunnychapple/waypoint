@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { ApiCallError, NetworkError } from "@waypoint/api-client";
 import type { CreateJobRequest, JobView, QuoteRequest, QuoteResponse } from "@waypoint/contracts";
@@ -158,21 +158,42 @@ export function useJobs(): void {
 
 export type QuoteState = { loading: boolean; quote: QuoteResponse | null; failure: CloudFailure | null };
 
-// POST /v1/tasks/quote for the "Before you run it" box. null: nothing to quote yet.
-export function useQuote(request: QuoteRequest | null): QuoteState {
+// POST /v1/tasks/quote for the "Before you run it" box. null: nothing to quote yet. retry asks again after a failure;
+// while a quote is loading it does nothing, so rapid taps send one request.
+export function useQuote(request: QuoteRequest | null): QuoteState & { retry: () => void } {
   const key = request === null ? "" : JSON.stringify(request);
+  const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<QuoteState>({ loading: request !== null, quote: null, failure: null });
+  const loading = useRef(request !== null);
   useEffect(() => {
-    if (request === null) return;
+    if (request === null) {
+      loading.current = false;
+      return;
+    }
     let live = true;
+    loading.current = true;
     setState({ loading: true, quote: null, failure: null });
     api.quote(request).then(
-      (quote) => live && setState({ loading: false, quote, failure: null }),
-      (error: unknown) => live && setState({ loading: false, quote: null, failure: toFailure(error) }),
+      (quote) => {
+        if (!live) return;
+        loading.current = false;
+        setState({ loading: false, quote, failure: null });
+      },
+      (error: unknown) => {
+        if (!live) return;
+        loading.current = false;
+        setState({ loading: false, quote: null, failure: toFailure(error) });
+      },
     );
     return () => {
       live = false;
     };
-  }, [key]);
-  return state;
+  }, [key, attempt]);
+  const retry = useCallback(() => {
+    if (!loading.current) {
+      loading.current = true;
+      setAttempt((n) => n + 1);
+    }
+  }, []);
+  return { ...state, retry };
 }

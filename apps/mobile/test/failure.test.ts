@@ -36,3 +36,37 @@ describe("keys and copy", () => {
     expect(failureCopy({ kind: "model_failed" }).actions).toEqual(["try_again", "ask_later"]);
   });
 });
+
+describe("copy by context", () => {
+  it("keeps the Explain copy by default: offline points at Ask later", () => {
+    const offline = failureCopy({ kind: "offline" });
+    expect(offline).toEqual({
+      title: "You're offline",
+      body: "Tap Ask later to keep your question. It will wait in Questions for later.",
+      actions: ["ask_later", "try_again"],
+    });
+    expect(failureCopy({ kind: "offline" }, "explain")).toEqual(offline);
+  });
+  it("the make screens say what to do without Ask later", () => {
+    expect(failureCopy({ kind: "offline" }, "make")).toEqual({
+      title: "You're offline",
+      body: "Connect to the internet to make this.",
+      actions: ["try_again"],
+    });
+    expect(failureCopy({ kind: "model_failed" }, "make")).toEqual({
+      title: "Couldn't get an answer",
+      body: "Nothing was charged. You can try again.",
+      actions: ["try_again"],
+    });
+  });
+  it("only the sign-in failure offers Sign in again, in every context", () => {
+    const all: CloudFailure[] = [
+      { kind: "out_of_credits", shortfall: 1 }, { kind: "zero_retention" }, { kind: "model_failed" }, { kind: "already_finished" },
+      { kind: "busy" }, { kind: "offline" }, { kind: "device" }, { kind: "signed_out" }, { kind: "failed" },
+    ];
+    for (const context of ["explain", "make"] as const) {
+      for (const f of all) expect(failureCopy(f, context).signIn === true).toBe(f.kind === "signed_out");
+      expect(failureCopy({ kind: "signed_out" }, context).actions).toEqual(["close"]);
+    }
+  });
+});

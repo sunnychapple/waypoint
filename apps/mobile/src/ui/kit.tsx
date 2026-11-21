@@ -58,14 +58,17 @@ export function BackButton({ onPress }: { onPress?: () => void }) {
 
 type ButtonProps = { label: string; onPress: () => void; icon?: SFSymbol; style?: StyleProp<ViewStyle> };
 
-export function PrimaryButton({ label, onPress, icon, style }: ButtonProps) {
+// disabled: dimmed, ignores taps, and VoiceOver reads it as dimmed (Pressable passes disabled to accessibilityState).
+export function PrimaryButton({ label, onPress, icon, style, disabled = false }: ButtonProps & { disabled?: boolean }) {
   const colors = useColors();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       onPress={onPress}
-      style={[styles.button, { backgroundColor: colors.accent }, style]}
+      style={[styles.button, { backgroundColor: colors.accent, opacity: disabled ? 0.4 : 1 }, style]}
     >
       {icon ? <SymbolView name={icon} tintColor={colors.onAccent} size={18} /> : null}
       <Text style={[styles.buttonText, { color: colors.onAccent }]}>{label}</Text>

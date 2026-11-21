@@ -6,6 +6,7 @@ import { failureCopy, keepsKey, type CloudFailure, type FailureAction } from "..
 import { creditsLabel } from "../../core/config/config.ts";
 import { countLabel } from "../../core/format.ts";
 import { bytesLabel } from "../../core/settings/format.ts";
+import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
 import { MAX_SECOND_MINUTES, secondPlan, startSecondTranscript } from "../../platform/second.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -28,6 +29,7 @@ export default function SecondTranscriptSheet() {
   const tooLong = plan !== null && plan.minutes > MAX_SECOND_MINUTES;
   const offered = plan !== null && plan.complete && !tooLong;
   const quote = useQuote(offered ? { task: "retranscribe", minutes: plan.minutes } : null);
+  const signOut = useSignOut();
   // Made once when the sheet opens; "Try again" re-sends with it only when the request did not run (keepsKey).
   const [key, setKey] = useState(() => randomUUID());
   const [failure, setFailure] = useState<CloudFailure | null>(null);
@@ -75,17 +77,21 @@ export default function SecondTranscriptSheet() {
           </Body>
           <Caption>{"A second, more careful transcript. Words that differ from this iPhone's transcript are highlighted."}</Caption>
 
-          <QuoteBox state={quote} onShowSent={showSent} />
+          <QuoteBox state={quote} onShowSent={showSent} onRetry={quote.retry} />
 
           {failure !== null ? (
             <View style={[styles.box, { backgroundColor: colors.flagSoft }]}>
-              <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(failure).title}</Text>
-              <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(failure).body}</Text>
+              <Text style={[styles.boxTitle, { color: colors.flagInk }]}>{failureCopy(failure, "make").title}</Text>
+              <Text style={[styles.boxBody, { color: colors.flagInk }]}>{failureCopy(failure, "make").body}</Text>
             </View>
           ) : null}
 
+          {failure !== null && failureCopy(failure, "make").signIn === true ? (
+            <SecondaryButton label="Sign in again" onPress={() => void signOut()} />
+          ) : null}
+
           {failure !== null
-            ? failureCopy(failure)
+            ? failureCopy(failure, "make")
                 .actions.filter((action) => action !== "ask_later")
                 .map((action, index) =>
                   index === 0 ? (
@@ -94,9 +100,11 @@ export default function SecondTranscriptSheet() {
                     <SecondaryButton key={action} label={ACTION_LABELS[action]} onPress={() => act(action)} />
                   ),
                 )
-            : quote.quote !== null
-              ? <PrimaryButton label={`Send audio · ${creditsLabel(quote.quote.credits)}`} onPress={() => void send()} />
-              : null}
+            : <PrimaryButton
+                label={quote.quote !== null ? `Send audio · ${creditsLabel(quote.quote.credits)}` : "Send audio"}
+                disabled={quote.quote === null}
+                onPress={() => void send()}
+              />}
         </>
       ) : null}
     </Screen>
