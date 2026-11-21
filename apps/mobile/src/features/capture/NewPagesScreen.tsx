@@ -43,15 +43,20 @@ export default function NewPagesScreen() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active" || !cameraBlocked.current) return;
       void cameraGranted().then((granted) => {
-        if (!granted || !cameraBlocked.current) return;
+        // Gone already (the student pressed Back while the check ran): do not open the scanner behind them.
+        if (!mounted || !granted || !cameraBlocked.current) return;
         setCameraBlocked(false);
         void capture(false, sessionId);
       });
     });
-    return () => subscription.remove();
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
   }, [sessionId]);
 
   function fromPhotosInstead() {
