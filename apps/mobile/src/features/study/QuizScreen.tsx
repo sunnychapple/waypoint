@@ -148,7 +148,7 @@ export default function QuizScreen() {
           />
         ) : null}
         {quiz.missed.length > 0 ? (
-          <SecondaryButton label="See the flashcards" onPress={() => router.push(`/study/review?sessionId=${sessionId}`)} />
+          <SecondaryButton label="See the flashcards" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
         ) : null}
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>

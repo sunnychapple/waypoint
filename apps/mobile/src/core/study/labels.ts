@@ -46,7 +46,7 @@ export function availabilityMessage(availability: Unavailable): string {
 export const CLOUD_PRACTICE_LINE = "You can still make a Practice set with NotePath's cloud (uses credits).";
 
 // Shown instead of "Try again" when the on-device model rejects the notes' language.
-export const UNSUPPORTED_LANGUAGE_LINE = "This only works for English notes for now.";
+export const UNSUPPORTED_LANGUAGE_LINE = "NotePath can't make this for notes in this language yet.";
 
 // The on-device model's error code for notes in a language it doesn't support. Retrying the same notes cannot help.
 export function isUnsupportedLanguage(error: unknown): boolean {

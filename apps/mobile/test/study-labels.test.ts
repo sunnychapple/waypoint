@@ -74,8 +74,8 @@ describe("study labels", () => {
     ]);
   });
 
-  it("the unsupported language line says the notes must be English for now", () => {
-    expect(UNSUPPORTED_LANGUAGE_LINE).toBe("This only works for English notes for now.");
+  it("the unsupported language line says the language is not supported yet", () => {
+    expect(UNSUPPORTED_LANGUAGE_LINE).toBe("NotePath can't make this for notes in this language yet.");
   });
 
   it("isUnsupportedLanguage matches only the on-device unsupported_language code", () => {
