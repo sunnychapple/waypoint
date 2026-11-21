@@ -54,7 +54,7 @@ export default function CloudScreen() {
   function askToTurnOn() {
     Alert.alert(
       "Turn on “Don't keep my text”?",
-      "Cloud tasks will use only AI providers that delete what you send right after answering. None is available yet, so Explain and every other cloud task will stop working until one is.",
+      "Cloud tasks will use only AI providers that keep nothing of what you send. None is available yet, so Explain and every other cloud task will stop working until one is.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Turn on", onPress: () => void change(true) },
@@ -73,7 +73,7 @@ export default function CloudScreen() {
           <Caption style={styles.section}>DON'T KEEP MY TEXT</Caption>
           <Row
             title="Don't keep my text"
-            subtitle="AI providers delete what you send right after answering."
+            subtitle="AI providers keep nothing of what you send."
             right={
               <Switch
                 accessibilityLabel="Don't keep my text"
@@ -94,7 +94,7 @@ export default function CloudScreen() {
           ) : on ? (
             <View style={[styles.warning, { backgroundColor: colors.flagSoft }]}>
               <Text style={[styles.warningText, { color: colors.flagInk }]}>
-                “Don't keep my text” is on. No AI provider that deletes what you send is available yet, so Explain and other cloud tasks won't work until one is. Everything on this iPhone keeps working.
+                “Don't keep my text” is on. No AI provider that keeps nothing is available yet, so Explain and other cloud tasks won't work until one is. Everything on this iPhone keeps working.
               </Text>
             </View>
           ) : (

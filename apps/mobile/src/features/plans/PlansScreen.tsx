@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { creditsLabel } from "../../core/config/config.ts";
@@ -37,6 +37,13 @@ export default function PlansScreen() {
   const [products, setProducts] = useState<ShopProduct[] | null>(null);
   const [buying, setBuying] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -65,7 +72,8 @@ export default function PlansScreen() {
     try {
       const result = await buy(product.info.id);
       // Opened from a task that ran out of credits: once they are granted, go back to that task.
-      if (result.kind === "granted" && needLine(need) !== null) {
+      // Only if this screen is still open (leaving mid-purchase must not pop the screen underneath).
+      if (result.kind === "granted" && needLine(need) !== null && mounted.current && router.canGoBack()) {
         router.back();
         return;
       }

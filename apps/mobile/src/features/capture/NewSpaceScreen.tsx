@@ -45,13 +45,10 @@ export default function NewSpaceScreen() {
       setError("Give it a name.");
       return;
     }
-    // Moving a session into or out of a shared space is confirmed: everyone there gains or loses it (M30b).
-    if (fromPicker && sessionId && !confirmed && (belongs === "shared" || leaving !== null)) {
-      const lines = [
-        leaving !== null ? `It will be removed for everyone in ${leaving}.` : null,
-        belongs === "shared" ? `Everyone in ${trimmed} will see this session.` : null,
-      ];
-      Alert.alert("Move this session?", lines.filter((line) => line !== null).join(" "), [
+    // Moving a session out of a shared space is confirmed: everyone there loses it (M30b). A brand-new space has no one
+    // else in it yet, so moving into it needs no confirmation.
+    if (fromPicker && sessionId && !confirmed && leaving !== null) {
+      Alert.alert("Move this session?", `It will be removed for everyone in ${leaving}.`, [
         { text: "Cancel", style: "cancel" },
         { text: "Move", onPress: () => void create(true) },
       ]);

@@ -51,7 +51,7 @@ export function failureCopy(failure: CloudFailure): FailureCopy {
     case "zero_retention":
       return {
         title: "“Don't keep my text” is on",
-        body: "No AI provider that deletes what you send is available yet, so cloud tasks can't run. Turn off “Don't keep my text” in Settings › Cloud & privacy to use this.",
+        body: "No AI provider that keeps nothing is available yet, so cloud tasks can't run. Turn off “Don't keep my text” in Settings › Cloud & privacy to use this.",
         actions: ["close"],
       };
     case "model_failed":
