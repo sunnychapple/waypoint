@@ -218,7 +218,7 @@ describe("math review cases", () => {
     expect(solveMath("2 x (x+1) = 6")).toBeNull();
   });
 
-  it.each(["Tim 4, Sam 3. How many in total?", "There are 7 kids: Mark 5, Sam 2. How many boys?"])("treats the names in %s as people", (problem) => {
+  it.each(["Isaiah 4, Jeremiah 3. How many in total?", "Tim 4, Sam 3. How many in total?", "There are 7 kids: Mark 5, Sam 2. How many boys?"])("treats the names in %s as people", (problem) => {
     expect(needsMathPlan(problem)).toBe(true);
     expect(looksLikeMath(problem)).toBe(true);
   });

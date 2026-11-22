@@ -75,7 +75,7 @@ const BIBLE_BOOKS =
   "genesis|gen|exodus|exod|ex|leviticus|lev|numbers|num|deuteronomy|deut|joshua|josh|judges|judg|ruth|samuel|sam|kings|kgs|ki|chronicles|chron|chr|ezra|nehemiah|neh|esther|esth|job|psalms?|pss?|psa|proverbs?|prov|ecclesiastes|eccl|song of solomon|song of songs|isaiah|isa|jeremiah|jer|lamentations|lam|ezekiel|ezek|daniel|dan|hosea|hos|joel|amos|obadiah|obad|jonah|jon|micah|mic|nahum|nah|habakkuk|hab|zephaniah|zeph|haggai|hag|zechariah|zech|malachi|mal|matthew|matt|mat|mt|mark|mk|luke|lk|john|jn|acts|romans|rom|corinthians|cor|galatians|gal|ephesians|eph|philippians|phil|colossians|col|thessalonians|thess|timothy|tim|titus|tit|philemon|philem|hebrews|heb|james|jas|peter|pet|jude|revelation|rev";
 // Book names that are not also people's names, so "Psalm 23" alone is a reference while "Mark 5" or "Sam 3" needs more to go on.
 const PLAIN_BOOKS =
-  "genesis|exodus|leviticus|deuteronomy|judges|psalms?|proverbs|ecclesiastes|isaiah|jeremiah|lamentations|ezekiel|hosea|obadiah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|hebrews|revelation";
+  "genesis|exodus|leviticus|deuteronomy|judges|psalms?|proverbs|ecclesiastes|lamentations|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|hebrews|revelation";
 const CHAPTER_END = "(?=\\s*(?:$|[.,;:)?!]))";
 // A reference has a verse, a numbered book, a plain book name, a word that points to it ("read Mark 5"), or a verb ("John 3 says").
 const SCRIPTURE = new RegExp(
