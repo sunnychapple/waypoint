@@ -37,7 +37,8 @@ public class WaypointModelModule: Module {
             ["kind": card.kind == .term ? "term" : "problem", "front": card.front, "back": card.back]
           }
         } catch where modelErrorCode(error) == "declined" {
-          return try await self.respondAsJSON(prompt, keys: "kind (term or problem), front, back")
+          let p = "Make up to \(max) flashcards from this text.\n\nText:\n\(text)\n\nWrite each flashcard as exactly two lines, with a blank line between flashcards:\nFRONT: the word, idea, or question\nBACK: what it means, or the answer, in one or two sentences\nWrite nothing else."
+          return [["plainText": try await self.respondAsText(p)]]
         }
       }
     }
@@ -60,21 +61,32 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("helpWithProblem") { (problem: String, context: String) async throws -> [String: Any] in
-      try await self.run {
-        let session = LanguageModelSession(instructions: studyInstructions)
-        let response = try await session.respond(
-          to: "Help me solve this problem step by step.\n\nProblem:\n\(problem)\n\nThe page it is on:\n\(context)",
-          generating: ProblemHelpDraft.self)
-        let steps = response.content.steps.map { (step: HelpStepDraft) -> [String: Any] in
-          ["title": step.title, "detail": step.detail]
+      try await self.run { () async throws -> [String: Any] in
+        let prompt = "Help me solve this problem step by step.\n\nProblem:\n\(problem)\n\nThe page it is on:\n\(context)"
+        do {
+          let session = LanguageModelSession(instructions: studyInstructions)
+          let response = try await session.respond(to: prompt, generating: ProblemHelpDraft.self)
+          let steps = response.content.steps.map { (step: HelpStepDraft) -> [String: Any] in
+            ["title": step.title, "detail": step.detail]
+          }
+          return ["steps": steps, "answer": response.content.answer]
+        } catch where modelErrorCode(error) == "declined" {
+          let p = prompt + "\n\nUse only the numbers the problem needs and ignore any others. Write two to six steps, then the answer, in exactly this form:\nSTEP: a short name for the step\nDO: what to do in this step and why, without giving the final answer\nANSWER: the final answer\nWrite nothing else."
+          return ["plainText": try await self.respondAsText(p)]
         }
-        return ["steps": steps, "answer": response.content.answer]
       }
     }
   }
 
   // Apple's default filter refuses ordinary schoolwork such as a page about a war. The text is the student's own page, so a
-  // refused request is asked again in the mode meant for transforming the person's text. That mode only returns plain text.
+  // refused request is asked again in the mode meant for transforming the person's text. Quizzes ask that mode for JSON;
+  // flashcards and problem help ask for labeled plain lines instead, because that mode does not reliably follow JSON keys.
+  private func respondAsText(_ prompt: String) async throws -> String {
+    let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+    let session = LanguageModelSession(model: model, instructions: studyInstructions)
+    return try await session.respond(to: prompt).content
+  }
+
   private func respondAsJSON(_ prompt: String, keys: String) async throws -> [[String: Any]] {
     let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
     let session = LanguageModelSession(model: model, instructions: studyInstructions)
