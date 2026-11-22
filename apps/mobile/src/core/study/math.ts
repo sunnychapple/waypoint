@@ -73,9 +73,19 @@ const INSTRUCTION =
 const PERCENT_OF = /(\d+(?:\.\d+)?)\s*%\s+of\s+(\d+(?:\.\d+)?|\([^()]*\))/gi;
 const BIBLE_BOOKS =
   "genesis|gen|exodus|exod|ex|leviticus|lev|numbers|num|deuteronomy|deut|joshua|josh|judges|judg|ruth|samuel|sam|kings|kgs|ki|chronicles|chron|chr|ezra|nehemiah|neh|esther|esth|job|psalms?|pss?|psa|proverbs?|prov|ecclesiastes|eccl|song of solomon|song of songs|isaiah|isa|jeremiah|jer|lamentations|lam|ezekiel|ezek|daniel|dan|hosea|hos|joel|amos|obadiah|obad|jonah|jon|micah|mic|nahum|nah|habakkuk|hab|zephaniah|zeph|haggai|hag|zechariah|zech|malachi|mal|matthew|matt|mat|mt|mark|mk|luke|lk|john|jn|acts|romans|rom|corinthians|cor|galatians|gal|ephesians|eph|philippians|phil|colossians|col|thessalonians|thess|timothy|tim|titus|tit|philemon|philem|hebrews|heb|james|jas|peter|pet|jude|revelation|rev";
-// A book and chapter counts as a reference only with a verse, or when the chapter ends the phrase, so "Mark 5 papers" stays math.
+// Book names that are not also people's names, so "Psalm 23" alone is a reference while "Mark 5" or "Sam 3" needs more to go on.
+const PLAIN_BOOKS =
+  "genesis|exodus|leviticus|deuteronomy|judges|psalms?|proverbs|ecclesiastes|isaiah|jeremiah|lamentations|ezekiel|hosea|obadiah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|hebrews|revelation";
+const CHAPTER_END = "(?=\\s*(?:$|[.,;:)?!]))";
+// A reference has a verse, a numbered book, a plain book name, a word that points to it ("read Mark 5"), or a verb ("John 3 says").
 const SCRIPTURE = new RegExp(
-  `(?:\\b[123]\\s*)?\\b(?:${BIBLE_BOOKS})\\.?\\s+\\d+(?::\\d+(?:[-–]\\d+)?|(?=\\s*(?:$|[.,;:)?!]|(?:says?|tells?|teaches)\\b)))`,
+  [
+    `(?:\\b[123]\\s*)?\\b(?:${BIBLE_BOOKS})\\.?\\s+\\d+:\\d+(?:[-–]\\d+)?`,
+    `\\b[123]\\s+(?:${BIBLE_BOOKS})\\.?\\s+\\d+${CHAPTER_END}`,
+    `\\b(?:${PLAIN_BOOKS})\\s+\\d+(?=\\s*(?:$|[.,;:)?!]|(?:says?|tells?|teaches)\\b))`,
+    `\\b(?:read|in|see|turn to|from)\\s+(?:${BIBLE_BOOKS})\\.?\\s+\\d+${CHAPTER_END}`,
+    `\\b(?:${BIBLE_BOOKS})\\.?\\s+\\d+\\s+(?:says?|tells?|teaches)\\b`,
+  ].join("|"),
   "gi",
 );
 // Numbers that label a place in a text and are not part of a problem.
@@ -278,7 +288,7 @@ function tokenize(text: string): { toks: Tok[]; decimal: boolean } {
 // then right-associative ^ with a whole exponent, then % after a number, then numbers, letters, parens and √.
 function parseText(text: string): { node: Node; decimal: boolean } {
   // A fraction right after ÷ is one number: 1/2 ÷ 1/4 divides by a quarter.
-  const grouped = text.replace(/÷\s*((?:\d+\s+)?\d+\s*\/\s*\d+)(?![\d^])/g, "÷ ($1)");
+  const grouped = text.replace(/÷\s*((?:\d+\s+)?\d+\/\d+)(?![\d^])/g, "÷ ($1)");
   const { toks, decimal } = tokenize(normalize(grouped));
   let pos = 0;
   const at = (): Tok | undefined => toks[pos];
@@ -738,7 +748,7 @@ function solveUnsafe(problem: string): HelpDraft | null {
   const letter = (instruction?.[1] ?? instruction?.[2] ?? instruction?.[3])?.toLowerCase();
   if (instruction !== null) text = text.slice(instruction[0].length);
   // "3 x 4" uses x as a times sign.
-  text = trimTail(text).replace(/(\d)\s+[xX]\s+(?=[\d(])/g, "$1 * ").replace(PERCENT_OF, (_all: string, a: string, b: string) => `(${a}/100)*(${b})`).replace(/sqrt/gi, "√");
+  text = trimTail(text).replace(/(\d)\s+[xX]\s+(?=\d|\([^a-z)]*\))/gi, "$1 * ").replace(PERCENT_OF, (_all: string, a: string, b: string) => `(${a}/100)*(${b})`).replace(/sqrt/gi, "√");
   // Any word left over (two or more letters together) means it is not math. A single letter is a variable.
   if (/[a-z]{2,}/i.test(text) || !/\d/.test(text)) return null;
   const sides = text.split("=");
@@ -766,7 +776,7 @@ function solveUnsafe(problem: string): HelpDraft | null {
 // A date, a phone number, or a range such as 3-5, none of which is a sum to work out. 12-5 with no spaces is still subtraction.
 function isDateOrRange(text: string): boolean {
   const t = text.trim();
-  if (/^\d{1,4}([/-])\d{1,4}\1\d{1,4}$/.test(t)) return true;
+  if (/^\d{1,4}([/-])\d{1,4}\1\d{1,4}$/.test(t) || /\d-\d{3}-\d{3,4}/.test(t) || /\)\s*\d{3}-\d{4}/.test(t)) return true;
   const range = /^(\d+)-(\d+)$/.exec(t);
   return range !== null && Number(range[1]) < Number(range[2]);
 }
@@ -912,6 +922,6 @@ export async function helpFor(port: MathPort, problem: { text: string; context: 
 
 // An unchecked step keeps its method but loses any sentence that states a worked-out result.
 function withoutResults(detail: string): string {
-  const kept = detail.split(/(?<=[.!?])\s+/).filter((sentence) => !/\d\s*=|=\s*\d/.test(sentence));
+  const kept = detail.split(/(?<=[.!?])\s+/).filter((sentence) => !/\d\s*=|=\s*\d|\b(?:to get|gets?|is|are|equals?|makes?|gives?|answer)\b[^.!?]*\d/i.test(sentence));
   return kept.length > 0 ? kept.join(" ") : "Try this part yourself.";
 }

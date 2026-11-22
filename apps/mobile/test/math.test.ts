@@ -202,6 +202,42 @@ describe("math review cases", () => {
     },
   );
 
+  it.each([
+    ["10 ÷ 5 / 2", "1"],
+    ["12 ÷ 3 / 2", "2"],
+    ["3 x (4 + 1)", "15"],
+  ])("works %s left to right", (problem, answer) => {
+    expect(solveMath(problem)?.answer).toBe(answer);
+  });
+
+  it.each(["1-800-555-1234", "(555) 123-4567"])("does not solve the phone number %s", (problem) => {
+    expect(solveMath(problem)).toBeNull();
+  });
+
+  it("solves for x when x is next to parentheses", () => {
+    expect(solveMath("2 x (x+1) = 6")).toBeNull();
+  });
+
+  it.each(["Tim 4, Sam 3. How many in total?", "There are 7 kids: Mark 5, Sam 2. How many boys?"])("treats the names in %s as people", (problem) => {
+    expect(needsMathPlan(problem)).toBe(true);
+    expect(looksLikeMath(problem)).toBe(true);
+  });
+
+  it.each(["Read Psalm 23.", "What does 1 John 4:8 say?", "In Acts 2, how many were baptized?", "Read Mark 5.", "John 3 says what?", "How many stones in 1 Samuel 17?"])(
+    "treats %s as a reference",
+    (problem) => {
+      expect(looksLikeMath(problem)).toBe(false);
+    },
+  );
+
+  it("removes a stated result from an unchecked step", async () => {
+    const port: MathPort = {
+      planMath: async () => ({ expression: "1", unit: "" }),
+      helpWithProblem: async () => ({ steps: [{ title: "Work", detail: "Subtract 5 from 12 to get 7. The total is 7." }], answer: "7" }),
+    };
+    expect((await helpFor(port, { text: "What is 15 divided by 3?", context: "" }))?.draft.steps[0]?.detail).toBe("Try this part yourself.");
+  });
+
   it("shows the minus sign as its own last step", () => {
     const draft = solveMath("-2^2");
     expect(draft?.answer).toBe("-4");
