@@ -45,7 +45,7 @@ public class WaypointModelModule: Module {
 
     AsyncFunction("makeQuiz") { (text: String, count: Int) async throws -> [[String: Any]] in
       try await self.run { () async throws -> [[String: Any]] in
-        let prompt = "Make up to \(count) quiz questions from this text. Each has four choices. Ask only about things the text states. Do not ask the student to calculate or solve anything.\n\nText:\n\(text)"
+        let prompt = "Make up to \(count) quiz questions from this text. Each has four choices. Ask only about things the text states.\n\nText:\n\(text)"
         do {
           let session = LanguageModelSession(instructions: studyInstructions)
           let response = try await session.respond(to: prompt, generating: QuizSet.self)
@@ -56,23 +56,6 @@ public class WaypointModelModule: Module {
           return try await self.respondAsJSON(
             prompt,
             keys: "question, evidence (exact words copied from the text), answer (short, taken from the evidence), wrongChoices (three strings), why")
-        }
-      }
-    }
-
-    AsyncFunction("planMath") { (problem: String) async throws -> [String: Any] in
-      try await self.run { () async throws -> [String: Any] in
-        let prompt = "Word problem:\n\(problem)"
-        do {
-          let session = LanguageModelSession(instructions: mathPlanInstructions)
-          let response = try await session.respond(to: prompt, generating: MathPlanDraft.self)
-          return ["expression": response.content.expression, "unit": response.content.unit]
-        } catch where modelErrorCode(error) == "declined" {
-          let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
-          let session = LanguageModelSession(model: model, instructions: mathPlanInstructions)
-          let reply = try await session.respond(
-            to: "\(prompt)\n\nReply in exactly two lines:\nEXPRESSION: the math expression\nUNIT: the unit, or none").content
-          return try self.parseMathPlan(reply)
         }
       }
     }
@@ -88,7 +71,7 @@ public class WaypointModelModule: Module {
           }
           return ["steps": steps, "answer": response.content.answer]
         } catch where modelErrorCode(error) == "declined" {
-          let p = prompt + "\n\nUse only the numbers the problem needs and ignore any others. Write two to six steps, then the answer, in exactly this form:\nSTEP: a short name for the step\nDO: what to do in this step and why, without giving the final answer\nANSWER: the final answer\nWrite nothing else."
+          let p = prompt + "\n\nWrite two to six steps, then the answer, in exactly this form:\nSTEP: a short name for the step\nDO: what to do in this step and why, without giving the final answer\nANSWER: the final answer\nWrite nothing else."
           return ["plainText": try await self.respondAsText(p)]
         }
       }
@@ -113,26 +96,6 @@ public class WaypointModelModule: Module {
       let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
     else { throw Exception(name: "Model", description: "The reply was not a list", code: "failed") }
     return list
-  }
-
-  // Reads the EXPRESSION and UNIT lines of a plain-text plan. "none" means no unit.
-  private func parseMathPlan(_ reply: String) throws -> [String: Any] {
-    var expression = ""
-    var unit = ""
-    for raw in reply.components(separatedBy: .newlines) {
-      let line = raw.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: .whitespaces)
-      let upper = line.uppercased()
-      if upper.hasPrefix("EXPRESSION:") {
-        expression = String(line.dropFirst("EXPRESSION:".count)).trimmingCharacters(in: .whitespaces)
-      } else if upper.hasPrefix("UNIT:") {
-        let value = String(line.dropFirst("UNIT:".count)).trimmingCharacters(in: .whitespaces)
-        unit = value.lowercased() == "none" ? "" : value
-      }
-    }
-    if expression.isEmpty {
-      throw Exception(name: "Model", description: "No expression", code: "failed")
-    }
-    return ["expression": expression, "unit": unit]
   }
 
   private func claim() -> Bool {
