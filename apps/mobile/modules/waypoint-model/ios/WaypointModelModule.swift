@@ -60,6 +60,23 @@ public class WaypointModelModule: Module {
       }
     }
 
+    AsyncFunction("planMath") { (problem: String) async throws -> [String: Any] in
+      try await self.run { () async throws -> [String: Any] in
+        let prompt = "Word problem:\n\(problem)"
+        do {
+          let session = LanguageModelSession(instructions: mathPlanInstructions)
+          let response = try await session.respond(to: prompt, generating: MathPlanDraft.self)
+          return ["expression": response.content.expression, "unit": response.content.unit]
+        } catch where modelErrorCode(error) == "declined" {
+          let model = SystemLanguageModel(guardrails: .permissiveContentTransformations)
+          let session = LanguageModelSession(model: model, instructions: mathPlanInstructions)
+          let reply = try await session.respond(
+            to: "\(prompt)\n\nReply in exactly two lines:\nEXPRESSION: the math expression\nUNIT: the unit, or none").content
+          return try self.parseMathPlan(reply)
+        }
+      }
+    }
+
     AsyncFunction("helpWithProblem") { (problem: String, context: String) async throws -> [String: Any] in
       try await self.run { () async throws -> [String: Any] in
         let prompt = "Help me solve this problem step by step.\n\nProblem:\n\(problem)\n\nThe page it is on:\n\(context)"
@@ -96,6 +113,26 @@ public class WaypointModelModule: Module {
       let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
     else { throw Exception(name: "Model", description: "The reply was not a list", code: "failed") }
     return list
+  }
+
+  // Reads the EXPRESSION and UNIT lines of a plain-text plan. "none" means no unit.
+  private func parseMathPlan(_ reply: String) throws -> [String: Any] {
+    var expression = ""
+    var unit = ""
+    for raw in reply.components(separatedBy: .newlines) {
+      let line = raw.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: .whitespaces)
+      let upper = line.uppercased()
+      if upper.hasPrefix("EXPRESSION:") {
+        expression = String(line.dropFirst("EXPRESSION:".count)).trimmingCharacters(in: .whitespaces)
+      } else if upper.hasPrefix("UNIT:") {
+        let value = String(line.dropFirst("UNIT:".count)).trimmingCharacters(in: .whitespaces)
+        unit = value.lowercased() == "none" ? "" : value
+      }
+    }
+    if expression.isEmpty {
+      throw Exception(name: "Model", description: "No expression", code: "failed")
+    }
+    return ["expression": expression, "unit": unit]
   }
 
   private func claim() -> Bool {

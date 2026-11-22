@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { cleanHelp } from "../../core/study/drafts.ts";
 import { problemOf, showAnswer, showNextStep, startHelp, typedProblemOf, type HelpState } from "../../core/study/help.ts";
+import { helpFor, solveMath } from "../../core/study/math.ts";
 import { getDb } from "../../platform/db.ts";
-import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
+import { getAvailability, helpWithProblem, planMath } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
@@ -24,21 +24,25 @@ export default function HelpStepsScreen() {
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "declined" | "ready">("working");
   const [help, setHelp] = useState<HelpState | null>(null);
+  const [answerChecked, setAnswerChecked] = useState(true);
 
   useEffect(() => {
-    if (availability !== "available" || problem === null) return;
+    if (problem === null) return;
+    // Without the on-device model, only a problem the code can solve is worked out here.
+    if (availability !== "available" && solveMath(problem.text) === null) return;
     const target = problem;
     let active = true;
     setOutcome("working");
     async function run() {
       try {
-        const draft = cleanHelp(await helpWithProblem(target.text, target.context));
+        const result = await helpFor({ planMath, helpWithProblem }, target);
         if (!active) return;
-        if (draft === null) {
+        if (result === null) {
           setOutcome("failed");
           return;
         }
-        setHelp(startHelp(draft));
+        setHelp(startHelp(result.draft));
+        setAnswerChecked(result.answerChecked);
         setOutcome("ready");
       } catch (error) {
         if (active) setOutcome(isDeclined(error) ? "declined" : "failed");
@@ -50,20 +54,20 @@ export default function HelpStepsScreen() {
     };
   }, [attempt, availability, problem]);
 
-  if (availability !== "available") {
-    return (
-      <Screen>
-        <CloseButton />
-        <ModelUnavailable availability={availability} sessionId={sessionId} />
-      </Screen>
-    );
-  }
-
   if (problem === null) {
     return (
       <Screen>
         <CloseButton />
         <Body>Couldn't work this one out on this iPhone.</Body>
+      </Screen>
+    );
+  }
+
+  if (availability !== "available" && solveMath(problem.text) === null) {
+    return (
+      <Screen>
+        <CloseButton />
+        <ModelUnavailable availability={availability} sessionId={sessionId} />
       </Screen>
     );
   }
@@ -78,7 +82,7 @@ export default function HelpStepsScreen() {
       {outcome === "working" ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
-          <Body>Working it out on this iPhone…</Body>
+          <Body>Working it out…</Body>
         </View>
       ) : null}
       {outcome === "failed" ? (
@@ -99,16 +103,25 @@ export default function HelpStepsScreen() {
             </View>
           ))}
           {help.shown < help.steps.length ? <PrimaryButton label="Next step" onPress={() => setHelp(showNextStep(help))} /> : null}
-          {help.shown === help.steps.length && !help.answerShown ? (
+          {answerChecked && help.shown === help.steps.length && !help.answerShown ? (
             <PrimaryButton label="Show the answer" onPress={() => setHelp(showAnswer(help))} />
           ) : null}
-          {help.answerShown ? (
+          {answerChecked && help.answerShown ? (
             <View style={[styles.answer, { backgroundColor: colors.localSoft }]}>
               <Text style={[styles.answerText, { color: colors.localInk }]}>{help.answer}</Text>
             </View>
           ) : null}
           <Caption style={styles.caption}>Try each step yourself before you look at the next one.</Caption>
-          {help.answerShown ? (
+          {!answerChecked && help.shown === help.steps.length ? (
+            <>
+              <Body>
+                {"NotePath couldn't check this answer, so it isn't showing one. Work it out from the steps, then check it with a grown-up."}
+              </Body>
+              <PrimaryButton label="Done" onPress={() => router.back()} />
+              <SecondaryButton label="Help with another problem" onPress={() => backToPick(sessionId)} />
+            </>
+          ) : null}
+          {answerChecked && help.answerShown ? (
             <>
               <PrimaryButton label="Done" onPress={() => router.back()} />
               <SecondaryButton label="Help with another problem" onPress={() => backToPick(sessionId)} />

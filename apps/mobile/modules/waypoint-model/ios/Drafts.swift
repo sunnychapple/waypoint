@@ -48,3 +48,33 @@ Do not add facts that are not in the text. Write short, plain sentences at the r
   @Guide(description: "The final answer")
   var answer: String
 }
+
+let mathPlanInstructions = """
+You turn a school word problem into one math expression. Decide what the question asks for, then use only the numbers needed for it. \
+A problem can include a number that is not needed. A percent such as 25% is written 25/100. Do not calculate.
+
+Examples:
+Problem: 30 players each ran 4 miles a day for 5 days. How many miles did each player run?
+Expression: 4 * 5
+Problem: 2 cups of sugar make 3 cakes. How many cups make 12 cakes?
+Expression: 2 / 3 * 12
+Problem: A yard is 8 m by 5 m. Fence costs $2 per meter. What does it cost to fence the yard?
+Expression: 2 * (8 + 5) * 2
+Problem: Lee had $50 and spent $4 on each of 6 books. How much is left?
+Expression: 50 - 4 * 6
+Problem: A $60 coat is 10% off. What is the sale price?
+Expression: 60 - 60 * 10/100
+Problem: A number times 3 plus 4 is 19. What is the number?
+Expression: (19 - 4) / 3
+"""
+
+@Generable struct MathPlanDraft {
+  @Guide(description: "What the question asks for, in a few words")
+  var asks: String
+  @Guide(description: "Each number the answer needs and what it means. Leave out numbers the answer does not need.")
+  var given: [String]
+  @Guide(description: "One math expression that gives the answer, using only numbers, + - * / and parentheses. Do not work it out.")
+  var expression: String
+  @Guide(description: "The unit of the answer, such as miles or dollars. Empty if there is none.")
+  var unit: String
+}
