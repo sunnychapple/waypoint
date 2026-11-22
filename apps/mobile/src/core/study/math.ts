@@ -67,11 +67,19 @@ const NUMBER_WORDS: Record<string, number> = {
   dozen: 12,
 };
 const NUMBER_WORD_LIST = Object.keys(NUMBER_WORDS).join("|");
-const LIST_MARKER = /^(?:\(?[a-z0-9]{1,2}[.)]\s+|problem\s*\d+\s*[:.]\s*|#\s*\d+\s*)/i;
+const LIST_MARKER = /^(?:\([a-z]\)\s+|(?:[a-z]|\d{1,2})[.)]\s+|problem\s*\d+\s*[:.]\s*|#\s*\d+\s*)/i;
 const INSTRUCTION =
   /^(?:solve\s+for\s+([a-z])\b|find\s+the\s+value\s+of\s+([a-z])\b|find\s+([a-z])\b|solve\b|evaluate\b|simplify\b|calculate\b|compute\b|find\b|what\s+is\b|what's\b)\s*:?\s*/i;
 const PERCENT_OF = /(\d+(?:\.\d+)?)\s*%\s+of\s+(\d+(?:\.\d+)?|\([^()]*\))/gi;
-const SCRIPTURE = /(?:\b[123]\s+)?\b[A-Z][a-z]+\.?\s+\d+(?::\d+(?:-\d+)?)?/g;
+const BIBLE_BOOKS =
+  "genesis|gen|exodus|exod|ex|leviticus|lev|numbers|num|deuteronomy|deut|joshua|josh|judges|judg|ruth|samuel|sam|kings|kgs|ki|chronicles|chron|chr|ezra|nehemiah|neh|esther|esth|job|psalms?|pss?|psa|proverbs?|prov|ecclesiastes|eccl|song of solomon|song of songs|isaiah|isa|jeremiah|jer|lamentations|lam|ezekiel|ezek|daniel|dan|hosea|hos|joel|amos|obadiah|obad|jonah|jon|micah|mic|nahum|nah|habakkuk|hab|zephaniah|zeph|haggai|hag|zechariah|zech|malachi|mal|matthew|matt|mat|mt|mark|mk|luke|lk|john|jn|acts|romans|rom|corinthians|cor|galatians|gal|ephesians|eph|philippians|phil|colossians|col|thessalonians|thess|timothy|tim|titus|tit|philemon|philem|hebrews|heb|james|jas|peter|pet|jude|revelation|rev";
+// A book and chapter counts as a reference only with a verse, or when the chapter ends the phrase, so "Mark 5 papers" stays math.
+const SCRIPTURE = new RegExp(
+  `(?:\\b[123]\\s*)?\\b(?:${BIBLE_BOOKS})\\.?\\s+\\d+(?::\\d+(?:[-–]\\d+)?|(?=\\s*(?:$|[.,;:)?!]|(?:says?|tells?|teaches)\\b)))`,
+  "gi",
+);
+// Numbers that label a place in a text and are not part of a problem.
+const TEXT_PLACE = /\b(?:verses?|chapters?|lesson|question|page|vv?|ch|pp?)\.?\s*\d+(?:[-–:]\d+)*/gi;
 const MATH_CUE =
   /\b(how many|how much|how far|how long|how old|how tall|how fast|total|sum|difference|product|quotient|average|mean|percent|area|perimeter|what is the number|sale price|cost|left|times)\b|%/i;
 
@@ -121,6 +129,7 @@ function div(a: Frac, b: Frac): Frac {
 }
 
 function pow(a: Frac, k: number): Frac {
+  if (a.n === 0 && k === 0) fail();
   let result = ONE;
   for (let i = 0; i < k; i++) result = mul(result, a);
   return result;
@@ -151,6 +160,7 @@ function decimalFrac(text: string): Frac {
 
 // The exact decimal when the fraction has one (denominator 2^a * 5^b), else null.
 function decimalText(a: Frac): string | null {
+  if (a.d === 1) return String(a.n);
   let d = a.d;
   let twos = 0;
   let fives = 0;
@@ -267,7 +277,9 @@ function tokenize(text: string): { toks: Tok[]; decimal: boolean } {
 // Grammar, lowest precedence first: + -, then * / and implicit multiplication, then unary minus,
 // then right-associative ^ with a whole exponent, then % after a number, then numbers, letters, parens and √.
 function parseText(text: string): { node: Node; decimal: boolean } {
-  const { toks, decimal } = tokenize(normalize(text));
+  // A fraction right after ÷ is one number: 1/2 ÷ 1/4 divides by a quarter.
+  const grouped = text.replace(/÷\s*((?:\d+\s+)?\d+\s*\/\s*\d+)(?![\d^])/g, "÷ ($1)");
+  const { toks, decimal } = tokenize(normalize(grouped));
   let pos = 0;
   const at = (): Tok | undefined => toks[pos];
   const isOp = (op: string): boolean => {
@@ -325,6 +337,9 @@ function parseText(text: string): { node: Node; decimal: boolean } {
     while (isOp("%")) {
       pos++;
       x = { t: "pct", x };
+      // "10 % 3" is a remainder, which this does not work out.
+      const after = at();
+      if (after !== undefined && startsPrimary(after)) fail();
     }
     return x;
   }
@@ -428,7 +443,7 @@ function show(n: Node, right = false): string {
     case "bin":
       return `${show(n.l)} ${SYM[n.op]} ${show(n.r, true)}`;
     case "pow":
-      return `${show(n.b)}^${show(n.e)}`;
+      return `${n.b.t === "num" && (n.b.v.n < 0 || n.b.v.d !== 1) ? `(${show(n.b)})` : show(n.b)}^${show(n.e)}`;
     case "sqrt":
       return `√${show(n.x)}`;
     case "pct":
@@ -511,17 +526,21 @@ function describe(p: Pick, value: Frac): Step {
 function reduce(start: Node): { value: Frac; steps: Step[] } {
   const steps: Step[] = [];
   let tree = fold(start);
+  let last: Frac | null = null;
   while (tree.t !== "num") {
     const picks: Pick[] = [];
     collectReady(tree, [], 0, false, picks);
     const pick = picks.reduce<Pick | null>((best, p) => (best === null || rankLess(p, best) ? p : best), null) ?? fail();
     const value = apply(pick.node);
+    last = value;
     const step = describe(pick, value);
     tree = fold(replaceAt(tree, pick.path, { t: "num", v: value }));
     const suffix = tree.t === "num" ? "" : ` Now it is ${show(tree)}.`;
     steps.push({ title: step.title, detail: step.detail + suffix });
   }
   if (tree.t !== "num") fail();
+  // A minus sign in front of the whole thing is the last step: -2^2 is 4, then −4.
+  if (last !== null && !eq(last, tree.v)) steps.push({ title: "Make it negative", detail: `The minus sign in front makes it ${shown(tree.v)}.` });
   return { value: tree.v, steps };
 }
 
@@ -632,6 +651,8 @@ function simplifies(side: string, name: string): boolean {
   return [...counts.values()].some((count) => count > 1);
 }
 
+const over = (a: Frac): string => (a.d === 1 ? plain(a) : `(${plain(a)})`);
+
 function quadratic(P: Poly, name: string, decimal: boolean): HelpDraft {
   const a = co(P, 2);
   const b = co(P, 1);
@@ -646,13 +667,13 @@ function quadratic(P: Poly, name: string, decimal: boolean): HelpDraft {
   const twoA = mul(frac(2), a);
   const negB = neg(b);
   if (disc.n === 0) {
-    steps.push({ title: "Find the answers", detail: `${name} = (${plain(negB)} ± 0) / ${plain(twoA)}` });
+    steps.push({ title: "Find the answers", detail: `${name} = (${plain(negB)} ± 0) / ${over(twoA)}` });
     return { steps, answer: `${name} = ${answerText(div(negB, twoA), decimal)}` };
   }
   const root = sqrtFrac(disc);
   const r1 = div(sub(negB, root), twoA);
   const r2 = div(add(negB, root), twoA);
-  steps.push({ title: "Find the answers", detail: `${name} = (${plain(negB)} ± ${plain(root)}) / ${plain(twoA)}` });
+  steps.push({ title: "Find the answers", detail: `${name} = (${plain(negB)} ± ${plain(root)}) / ${over(twoA)}` });
   const ascending = sub(r2, r1).n >= 0;
   const small = ascending ? r1 : r2;
   const big = ascending ? r2 : r1;
@@ -716,7 +737,8 @@ function solveUnsafe(problem: string): HelpDraft | null {
   const instruction = INSTRUCTION.exec(text);
   const letter = (instruction?.[1] ?? instruction?.[2] ?? instruction?.[3])?.toLowerCase();
   if (instruction !== null) text = text.slice(instruction[0].length);
-  text = trimTail(text).replace(PERCENT_OF, (_all: string, a: string, b: string) => `(${a}/100)*(${b})`).replace(/sqrt/gi, "√");
+  // "3 x 4" uses x as a times sign.
+  text = trimTail(text).replace(/(\d)\s+[xX]\s+(?=[\d(])/g, "$1 * ").replace(PERCENT_OF, (_all: string, a: string, b: string) => `(${a}/100)*(${b})`).replace(/sqrt/gi, "√");
   // Any word left over (two or more letters together) means it is not math. A single letter is a variable.
   if (/[a-z]{2,}/i.test(text) || !/\d/.test(text)) return null;
   const sides = text.split("=");
@@ -724,6 +746,7 @@ function solveUnsafe(problem: string): HelpDraft | null {
 
   if (sides.length === 1) {
     if (letter !== undefined || /[a-z]/i.test(text)) return null;
+    if (isDateOrRange(text)) return null;
     const { node, decimal } = parseText(text);
     const { value, steps } = reduce(node);
     if (steps.length === 0) return null;
@@ -738,6 +761,14 @@ function solveUnsafe(problem: string): HelpDraft | null {
   if (names.length !== 1 || name === undefined) return null;
   if (letter !== undefined && letter !== name) return null;
   return solveEquation(polyOf(l.node, name), polyOf(r.node, name), name, left, right, l.decimal || r.decimal);
+}
+
+// A date, a phone number, or a range such as 3-5, none of which is a sum to work out. 12-5 with no spaces is still subtraction.
+function isDateOrRange(text: string): boolean {
+  const t = text.trim();
+  if (/^\d{1,4}([/-])\d{1,4}\1\d{1,4}$/.test(t)) return true;
+  const range = /^(\d+)-(\d+)$/.exec(t);
+  return range !== null && Number(range[1]) < Number(range[2]);
 }
 
 // Removes trailing ?, ., spaces, and a trailing "=", "= ?" or "= ___".
@@ -766,7 +797,7 @@ function stripMarker(problem: string): string {
 }
 
 function stripScripture(text: string): string {
-  return text.replace(SCRIPTURE, " ");
+  return text.replace(SCRIPTURE, " ").replace(TEXT_PLACE, " ");
 }
 
 // True when a problem asks a math question with at least one number.
@@ -776,8 +807,9 @@ export function needsMathPlan(problem: string): boolean {
   return hasNumber && MATH_CUE.test(rest);
 }
 
+// Any problem with a digit outside a scripture reference or a page label could need math, so its answer must be checked.
 export function looksLikeMath(problem: string): boolean {
-  return needsMathPlan(problem) || /\d\s*[=+×÷^*/]|[=+×÷^*/]\s*\d/.test(problem) || /\b\d+[a-z]\b/i.test(problem);
+  return needsMathPlan(problem) || /\d/.test(stripScripture(problem));
 }
 
 function escapeRe(s: string): string {
@@ -786,7 +818,7 @@ function escapeRe(s: string): string {
 
 function unitAppears(text: string, unit: string): boolean {
   const u = unit.trim().toLowerCase();
-  if (u === "" || u === "none") return false;
+  if (u.length < 2 || u === "none") return false;
   const lower = text.toLowerCase();
   return [u, u.replace(/s$/, ""), `${u}s`].some((form) => new RegExp(`\\b${escapeRe(form)}\\b`).test(lower));
 }
@@ -821,7 +853,8 @@ function checkedUnsafe(problem: string, plans: MathPlan[]): HelpDraft | null {
   const head = solved[0];
   if (head === undefined || solved.some((s) => !eq(s.value, head.value))) return null;
 
-  const unit = unitAppears(text, head.plan.unit) ? ` ${head.plan.unit.trim()}` : "";
+  const sameUnit = solved.every((s) => s.plan.unit.trim().toLowerCase() === head.plan.unit.trim().toLowerCase());
+  const unit = sameUnit && unitAppears(text, head.plan.unit) ? ` ${head.plan.unit.trim()}` : "";
   return {
     steps: [{ title: "Write the math", detail: show(head.node) }, ...limitSteps(head.steps)],
     answer: `${answerText(head.value, decimal)}${unit}`,
@@ -873,5 +906,12 @@ export async function helpFor(port: MathPort, problem: { text: string; context: 
 
   const draft = cleanHelp(await port.helpWithProblem(problem.text, problem.context));
   if (draft === null) return null;
-  return { draft, answerChecked: !looksLikeMath(problem.text) };
+  if (!looksLikeMath(problem.text)) return { draft, answerChecked: true };
+  return { draft: { ...draft, steps: draft.steps.map((step) => ({ ...step, detail: withoutResults(step.detail) })) }, answerChecked: false };
+}
+
+// An unchecked step keeps its method but loses any sentence that states a worked-out result.
+function withoutResults(detail: string): string {
+  const kept = detail.split(/(?<=[.!?])\s+/).filter((sentence) => !/\d\s*=|=\s*\d/.test(sentence));
+  return kept.length > 0 ? kept.join(" ") : "Try this part yourself.";
 }

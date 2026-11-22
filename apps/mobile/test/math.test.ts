@@ -178,3 +178,67 @@ describe("helpFor", () => {
     await expect(helpFor(fake, { text: wordProblem, context })).rejects.toBe(error);
   });
 });
+
+describe("math review cases", () => {
+  it.each([
+    ["1/2 ÷ 1/4", "2"],
+    ["2 ÷ 1/2 + 1", "5"],
+    ["3/4 ÷ 3/4 * 2", "2"],
+    ["5 1/2 ÷ 1/2 + 1", "12"],
+    ["x ÷ 1/2 = 4", "x = 2"],
+    ["3 x 4", "12"],
+    ["3. 2x + 1 = 7", "x = 3"],
+    ["(2) 3 + 4", "10"],
+    ["12-5", "7"],
+    ["1.5x = 3", "x = 2"],
+  ])("solves %s", (problem, answer) => {
+    expect(solveMath(problem)?.answer).toBe(answer);
+  });
+
+  it.each(["11/22/2026", "1/2/2026", "12-25", "12-25-2026", "555-123-4567", "555-1234", "3-5", "pp. 3-5", "v. 3-5", "Ch. 3-5", "No. 5 + 3", "10 % 3", "0^0", "3 x 4 = 12"])(
+    "does not solve %s",
+    (problem) => {
+      expect(solveMath(problem)).toBeNull();
+    },
+  );
+
+  it("shows the minus sign as its own last step", () => {
+    const draft = solveMath("-2^2");
+    expect(draft?.answer).toBe("-4");
+    expect(draft?.steps.at(-1)?.title).toBe("Make it negative");
+  });
+
+  it("puts parentheses around a fraction or negative base", () => {
+    expect(solveMath("(1/2)^2 + 1")?.steps.map((s) => s.detail).join(" ")).not.toContain("1/2^2 + 1");
+    expect(solveMath("(-3)^2 + (-2)^2")?.steps[0]?.detail).toContain("(−2)^2");
+  });
+
+  it("keeps a sentence's number that only looks like a scripture reference", () => {
+    const problem = "Buy 3 shirts at $15 each and 2 hats at $8 each. How much in total?";
+    const plan = (expression: string) => ({ expression, unit: "" });
+    expect(checkedPlan(problem, [plan("15*2+8*2"), plan("15*2+8*2"), plan("15*2+8*2")])).toBeNull();
+    expect(checkedPlan(problem, [plan("3*15+2*8"), plan("3*15+2*8"), plan("3*15+2*8")])?.answer).toBe("61");
+  });
+
+  it("does not treat a person's name and a number as scripture", () => {
+    expect(looksLikeMath("Mark 5 papers and then 3 more.")).toBe(true);
+    expect(looksLikeMath("What does John 3:16 say?")).toBe(false);
+    expect(looksLikeMath("What does verse 3 say?")).toBe(false);
+  });
+
+  it("hides a model's unchecked answer and worked-out results for math without a cue", async () => {
+    const port: MathPort = {
+      planMath: async () => ({ expression: "1", unit: "" }),
+      helpWithProblem: async () => ({ steps: [{ title: "Divide", detail: "Divide the numbers. 15 ÷ 3 = 7." }], answer: "7" }),
+    };
+    const help = await helpFor(port, { text: "What is 15 divided by 3?", context: "" });
+    expect(help?.answerChecked).toBe(false);
+    expect(help?.draft.steps[0]?.detail).toBe("Divide the numbers.");
+  });
+
+  it("needs the same unit from all three plans", () => {
+    const problem = "A train travels 60 miles per hour for 3 hours. How far does it go?";
+    const draft = checkedPlan(problem, [{ expression: "60*3", unit: "miles" }, { expression: "60*3", unit: "hours" }, { expression: "60*3", unit: "miles" }]);
+    expect(draft?.answer).toBe("180");
+  });
+});
