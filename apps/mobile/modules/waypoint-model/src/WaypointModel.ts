@@ -8,7 +8,6 @@ type NativeModel = {
   makeCards(text: string, max: number): Promise<unknown>;
   makeQuiz(text: string, count: number): Promise<unknown>;
   helpWithProblem(problem: string, context: string): Promise<unknown>;
-  planMath(problem: string): Promise<unknown>;
 };
 
 const native = requireNativeModule<NativeModel>("WaypointModel");
@@ -18,4 +17,3 @@ export const getContextSize = (): number => native.getContextSize();
 export const makeCards = (text: string, max: number): Promise<unknown> => native.makeCards(text, max);
 export const makeQuiz = (text: string, count: number): Promise<unknown> => native.makeQuiz(text, count);
 export const helpWithProblem = (problem: string, context: string): Promise<unknown> => native.helpWithProblem(problem, context);
-export const planMath = (problem: string): Promise<unknown> => native.planMath(problem);
