@@ -1,5 +1,6 @@
 import { shortDay } from "../format.ts";
 import type { SqlDb } from "../db/sql.ts";
+import { getSetting, setSetting } from "../db/settings.ts";
 import { titleFromText } from "./pages.ts";
 import { createSession, getSession, renameSession, type SessionRow } from "./sessions.ts";
 import { partsNeedingTranscription } from "./transcript.ts";
@@ -7,6 +8,9 @@ import { partsNeedingTranscription } from "./transcript.ts";
 export const DEFAULT_RECORDING_TITLE = "New recording";
 
 type Deps = { now: () => number; newId: () => string };
+
+// The session this iPhone last started recording. The settings table stays on the device.
+const RECORDING_HERE_KEY = "recording_here";
 
 // Starts a recording in the chosen space. Words are written live when the speech pack is installed;
 // otherwise the session waits for its audio files to be transcribed.
@@ -16,6 +20,7 @@ export function startRecordingSession(db: SqlDb, deps: Deps, spaceId: string, sp
   db.transaction(() => {
     db.run("UPDATE sessions SET transcript = ? WHERE id = ?", [transcript, row.id]);
     db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [deps.now(), spaceId]);
+    setSetting(db, RECORDING_HERE_KEY, row.id);
   });
   return { ...row, transcript };
 }
@@ -102,15 +107,26 @@ export function isLiveSession(status: { sessionId: string; state: string }, id: 
   return status.sessionId === id && status.state !== "idle";
 }
 
+// Whether an unfinished session was recorded on this iPhone. A session outside any shared space always was. One in a
+// shared space may be another member's: it is ours if this iPhone started it or holds one of its audio files.
+function recordedHere(db: SqlDb, id: string, startedHere: string | null): boolean {
+  if (id === startedHere) return true;
+  const shared = db.get("SELECT 1 AS n FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?", [id]);
+  if (shared === null) return true;
+  return db.get("SELECT 1 AS n FROM captures WHERE session_id = ? AND kind = 'audio' AND file != ''", [id]) !== null;
+}
+
 // After a restart: sessions still marked recording or paused, except the one native is still recording,
 // become interrupted and wait for transcription. Their length is what the saved audio parts add up to, and they
 // end where the last saved part ends. Returns their ids.
 export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }): string[] {
   const nativeActive = nativeStatus.state !== "idle";
+  const startedHere = getSetting(db, RECORDING_HERE_KEY);
   const ids = db
     .all<{ id: string }>("SELECT id FROM sessions WHERE state IN ('recording', 'paused')")
     .map((row) => row.id)
-    .filter((id) => !(nativeActive && id === nativeStatus.sessionId));
+    .filter((id) => !(nativeActive && id === nativeStatus.sessionId))
+    .filter((id) => recordedHere(db, id, startedHere));
   db.transaction(() => {
     for (const id of ids) {
       db.run(

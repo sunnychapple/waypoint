@@ -36,6 +36,11 @@ function insertSession(id: string, state: string, transcript: string, startedAt 
   );
 }
 
+function shareSpace(spaceId: string): void {
+  db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('grp_shared', 'shared', 'editor', 1, 0)");
+  db.run("INSERT INTO space_groups (space_id, group_id) VALUES (?, 'grp_shared')", [spaceId]);
+}
+
 describe("recording", () => {
   it("startRecordingSession creates a recording in the space with live or waiting transcript and touches the space", () => {
     const live = startRecordingSession(db, deps(500), homeId, true);
@@ -165,6 +170,28 @@ describe("recording", () => {
     savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 20_000, file: "c0.m4a" });
     recoverSessions(db, { sessionId: "", state: "idle" });
     expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
+
+  it("leaves another member's recording in a shared space alone when this phone holds none of it", () => {
+    shareSpace(homeId);
+    insertSession("theirs", "recording", "live");
+    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual([]);
+    expect(getSession(db, "theirs")?.state).toBe("recording");
+  });
+
+  it("recovers a recording in a shared space that this phone started", () => {
+    shareSpace(homeId);
+    const mine = startRecordingSession(db, deps(), homeId, true);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual([mine.id]);
+    expect(getSession(db, mine.id)?.state).toBe("interrupted");
+  });
+
+  it("recovers another member's recording in a shared space that has an audio file on this phone", () => {
+    shareSpace(homeId);
+    insertSession("theirs", "recording", "live");
+    savePart(db, deps(), "theirs", { index: 0, startMs: 0, durationMs: 20_000, file: "theirs-0.m4a" });
+    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual(["theirs"]);
+    expect(getSession(db, "theirs")?.state).toBe("interrupted");
   });
 });
 
