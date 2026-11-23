@@ -58,7 +58,7 @@ final class AudioRecorder {
     return micPermission()
   }
 
-  func start(sessionId: String) throws {
+  func start(sessionId: String, elapsedMs: Int64 = 0, firstIndex: Int = 0, priorRecordedMs: Int64 = 0) throws {
     try control.sync {
       guard self.sessionId == nil else { throw RecorderError.busy }
       guard AVAudioApplication.shared.recordPermission == .granted else { throw RecorderError.micDenied }
@@ -69,7 +69,8 @@ final class AudioRecorder {
       self.sessionId = sessionId
       io.sync {
         self.ioSessionId = sessionId
-        self.timeline = RecordingTimeline(sessionStart: Self.now(), maxPartMs: Self.maxPartMs)
+        self.timeline = RecordingTimeline(
+          sessionStart: Self.now() - elapsedMs, maxPartMs: Self.maxPartMs, firstIndex: firstIndex, priorRecordedMs: priorRecordedMs)
       }
       addObservers()
       do { try startRun() } catch { finish(); throw error }

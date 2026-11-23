@@ -19,7 +19,10 @@ public class WaypointAudioModule: Module {
 
     AsyncFunction("getMicPermission") { () -> String in AudioRecorder.micPermission() }
     AsyncFunction("requestMicPermission") { () async -> String in await AudioRecorder.requestMicPermission() }
-    AsyncFunction("start") { (sessionId: String) throws in try self.recorder.start(sessionId: sessionId) }
+    AsyncFunction("start") { (sessionId: String, elapsedMs: Double, firstIndex: Int, priorRecordedMs: Double) throws in
+      try self.recorder.start(
+        sessionId: sessionId, elapsedMs: Int64(elapsedMs), firstIndex: firstIndex, priorRecordedMs: Int64(priorRecordedMs))
+    }
     AsyncFunction("pause") { () throws in try self.recorder.pause(reason: "user") }
     AsyncFunction("resume") { () throws in try self.recorder.resume() }
     AsyncFunction("stop") { () async throws -> Double in

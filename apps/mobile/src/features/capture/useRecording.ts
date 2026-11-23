@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { randomUUID } from "expo-crypto";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   downloadSpeechPack,
   getMicPermission,
@@ -28,16 +28,20 @@ import { getSetting } from "../../core/db/settings.ts";
 import {
   addFlag,
   addPhoto,
+  continueRecordingSession,
+  DEFAULT_RECORDING_TITLE,
   finishRecording,
   nameRecording,
   savePart,
   saveSegment,
   setPaused,
   startRecordingSession,
+  undoContinue,
+  type ContinuedRecording,
 } from "../../core/capture/recording.ts";
 import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.ts";
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
-import { getSavingTo } from "../../core/db/spaces.ts";
+import { getSavingTo, getSpace } from "../../core/db/spaces.ts";
 import { writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles } from "../../platform/files.ts";
 import { askForPush } from "../../platform/push.ts";
@@ -53,6 +57,8 @@ export type RecordingModel = {
   phase: "checking" | "denied" | "recording";
   sessionId: string | null;
   spaceName: string;
+  title: string;
+  continuing: boolean;
   recorder: RecorderState;
   pauseReason: PauseReason;
   clockMs: number;
@@ -73,6 +79,8 @@ type Photo = { id: string; t: number; file: string };
 
 // The live recording screen. Native events go to SQLite as they happen, and the screen state is kept here.
 export function useRecording(): RecordingModel {
+  const { continue: continueId } = useLocalSearchParams<{ continue?: string }>();
+  const [title, setTitle] = useState(DEFAULT_RECORDING_TITLE);
   const [phase, setPhase] = useState<RecordingModel["phase"]>("checking");
   const [spaceName, setSpaceName] = useState("");
   const [recorder, setRecorder] = useState<RecorderState>("idle");
@@ -90,6 +98,7 @@ export function useRecording(): RecordingModel {
   const [stopping, setStopping] = useState(false);
 
   const sessionRef = useRef<SessionRow | null>(null);
+  const continuedRef = useRef<ContinuedRecording | null>(null);
   const brokeRef = useRef(false);
   const stoppingRef = useRef(false);
 
@@ -165,14 +174,34 @@ export function useRecording(): RecordingModel {
         const speech = await getSpeechStatus();
         if (cancelled) return;
         const created = writeDb((db) => {
-          const space = getSavingTo(db);
-          return { space, session: startRecordingSession(db, deps, space.id, speech.pack === "installed") };
+          if (continueId === undefined) {
+            const space = getSavingTo(db);
+            return { spaceName: space.name, session: startRecordingSession(db, deps, space.id, speech.pack === "installed"), continued: null };
+          }
+          const continued = continueRecordingSession(db, deps, continueId, speech.pack === "installed");
+          if (continued === null) return null;
+          return { spaceName: getSpace(db, continued.session.spaceId)?.name ?? "", session: continued.session, continued };
         });
+        if (created === null) {
+          Alert.alert("Couldn't continue this recording.", undefined, [{ text: "OK", onPress: () => router.back() }]);
+          return;
+        }
         sessionRef.current = created.session;
-        setSpaceName(created.space.name);
+        continuedRef.current = created.continued;
+        if (created.continued !== null) {
+          const { prior, from } = created.continued;
+          setTitle(created.session.title);
+          setLive({ finals: prior.finals, volatile: null });
+          setParts(prior.parts);
+          setResumes(prior.resumes);
+          setFlags(prior.flags);
+          setPhotos(prior.photos);
+          setAnchor({ ms: from.priorRecordedMs, at: Date.now() });
+        }
+        setSpaceName(created.spaceName);
         setPack(speech.pack);
         setPhase("recording");
-        await startRecording(created.session.id);
+        await startRecording(created.session.id, created.continued?.from);
         if (sessionRef.current?.id !== created.session.id) {
           // Discarded while the recorder was starting: the session is already gone, so only the microphone is left.
           stopRecording()
@@ -186,7 +215,7 @@ export function useRecording(): RecordingModel {
           stopRecording().catch(() => undefined);
           return;
         }
-        setAnchor({ ms: 0, at: Date.now() });
+        setAnchor({ ms: created.continued?.from.priorRecordedMs ?? 0, at: Date.now() });
         setRecorder("recording");
         // The pause alert needs this. iOS shows its prompt only once, and the recording runs on behind it.
         askForPush().catch(() => undefined);
@@ -201,8 +230,14 @@ export function useRecording(): RecordingModel {
         const failed = sessionRef.current;
         if (failed === null) return; // discarded meanwhile: nothing to report
         sessionRef.current = null;
-        writeDb((db) => deleteSessionRow(db, failed.id));
-        deleteSessionFiles(failed.id);
+        const continued = continuedRef.current;
+        if (continued !== null) {
+          // A session that already held a recording keeps it.
+          writeDb((db) => undoContinue(db, failed.id, continued.restore));
+        } else {
+          writeDb((db) => deleteSessionRow(db, failed.id));
+          deleteSessionFiles(failed.id);
+        }
         Alert.alert("Couldn't start the recording.", messageOf(error), [{ text: "OK", onPress: () => router.back() }]);
       }
     })();
@@ -268,7 +303,9 @@ export function useRecording(): RecordingModel {
         finishRecording(db, current.id, Date.now(), recordedMs);
         nameRecording(db, current.id);
       });
-      router.replace(`/session/${current.id}`);
+      // A continued recording was opened from its session, so going back lands there.
+      if (continuedRef.current !== null) router.back();
+      else router.replace(`/session/${current.id}`);
       if (writeDb((db) => getSetting(db, SECOND_ALWAYS_KEY)) === "1") router.push(`/second-transcript?sessionId=${current.id}`);
     } catch (error) {
       stoppingRef.current = false;
@@ -281,6 +318,7 @@ export function useRecording(): RecordingModel {
   async function discard(): Promise<void> {
     const current = sessionRef.current;
     if (!current || stoppingRef.current) return;
+    if (continuedRef.current !== null) return; // discarding would delete what was already saved
     stoppingRef.current = true;
     setStopping(true);
     // A recorder that is not running has nothing to stop (the same reading as the unmount stop above).
@@ -308,6 +346,8 @@ export function useRecording(): RecordingModel {
     phase,
     sessionId: sessionRef.current?.id ?? null,
     spaceName,
+    title,
+    continuing: continueId !== undefined,
     recorder,
     pauseReason,
     clockMs,

@@ -44,6 +44,13 @@ export default function RecordScreen() {
       router.back();
       return;
     }
+    if (model.continuing) {
+      Alert.alert("End this recording?", "What you recorded stays in this session.", [
+        { text: "Keep recording", style: "cancel" },
+        { text: "Stop and save", onPress: model.stop },
+      ]);
+      return;
+    }
     Alert.alert("End this recording?", "Discarding deletes its audio, photos and words.", [
       { text: "Keep recording", style: "cancel" },
       { text: "Discard", style: "destructive", onPress: model.discard },
@@ -127,7 +134,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         <FolderPill sessionId={model.sessionId} fallback={model.spaceName} />
         <View style={styles.spacer} />
       </View>
-      <Title>New recording</Title>
+      <Title>{model.title}</Title>
 
       {model.banner ? <BannerView banner={model.banner} /> : null}
       {showPause ? (

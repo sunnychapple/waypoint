@@ -39,6 +39,33 @@ import Testing
   #expect(t.cancelRun() == nil)
 }
 
+@Test func continuedTimelineNumbersPartsAfterTheSavedOnes() {
+  var t = RecordingTimeline(sessionStart: 0, maxPartMs: 300_000, firstIndex: 3)
+  #expect(t.startRun(now: 0) == RecordingPart(index: 3, startMs: 0, durationMs: 0))
+  let rolled = t.rollIfNeeded(now: 300_000)
+  #expect(rolled?.closed == RecordingPart(index: 3, startMs: 0, durationMs: 300_000))
+  #expect(rolled?.opened == RecordingPart(index: 4, startMs: 300_000, durationMs: 0))
+  _ = t.endRun(now: 310_000)
+  var u = RecordingTimeline(sessionStart: 0, firstIndex: 3)
+  _ = u.startRun(now: 0)
+  #expect(u.cancelRun() == RecordingPart(index: 3, startMs: 0, durationMs: 0))
+  #expect(u.startRun(now: 5_000) == RecordingPart(index: 3, startMs: 5_000, durationMs: 0))
+}
+
+@Test func continuedTimelineCountsTheTimeAlreadyRecorded() {
+  var t = RecordingTimeline(sessionStart: 0, priorRecordedMs: 60_000)
+  #expect(t.recordedMs(now: 0) == 60_000)
+  _ = t.startRun(now: 0)
+  #expect(t.recordedMs(now: 10_000) == 70_000)
+}
+
+@Test func continuedRunStartsAtItsPlaceOnTheSessionClock() {
+  let now: Int64 = 9_000_000
+  var t = RecordingTimeline(sessionStart: now - 500_000)
+  #expect(t.startRun(now: now) == RecordingPart(index: 0, startMs: 500_000, durationMs: 0))
+  #expect(t.runStartMs == 500_000)
+}
+
 @Test func levelMeterMapsDecibelsToZeroToOne() {
   #expect(LevelMeter.normalized(rms: 0) == 0)
   #expect(LevelMeter.normalized(rms: 1) == 1)

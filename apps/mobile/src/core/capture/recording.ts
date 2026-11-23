@@ -2,8 +2,9 @@ import { shortDay } from "../format.ts";
 import type { SqlDb } from "../db/sql.ts";
 import { deleteSetting, getSetting, setSetting } from "../db/settings.ts";
 import { titleFromText } from "./pages.ts";
+import { listSegments } from "./segments.ts";
 import { createSession, getSession, RECORDING_HERE_PREFIX, renameSession, type SessionRow } from "./sessions.ts";
-import { partsNeedingTranscription } from "./transcript.ts";
+import { partsNeedingTranscription, type Piece } from "./transcript.ts";
 
 export const DEFAULT_RECORDING_TITLE = "New recording";
 
@@ -23,6 +24,76 @@ export function startRecordingSession(db: SqlDb, deps: Deps, spaceId: string, sp
     setSetting(db, `${RECORDING_HERE_PREFIX}${row.id}`, "1");
   });
   return { ...row, transcript };
+}
+
+type ContinueFrom = { elapsedMs: number; firstIndex: number; priorRecordedMs: number };
+
+export type PriorTimeline = {
+  finals: Piece[];
+  parts: { sessionId: string; index: number; startMs: number; durationMs: number; file: string }[];
+  resumes: number[];
+  flags: number[];
+  photos: { id: string; t: number; file: string }[];
+};
+
+export type ContinuedRecording = {
+  session: SessionRow;
+  from: ContinueFrom;
+  prior: PriorTimeline;
+  restore: { state: SessionRow["state"]; transcript: string; endedAt: number | null };
+};
+
+// What a saved session already holds, for the live screen to draw above the new words.
+function priorTimeline(db: SqlDb, sessionId: string): PriorTimeline {
+  const parts = db
+    .all<{ position: number; t: number; duration_ms: number | null; file: string }>(
+      "SELECT position, t, duration_ms, file FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY position, id",
+      [sessionId],
+    )
+    .map((row) => ({ sessionId, index: row.position, startMs: row.t, durationMs: row.duration_ms ?? 0, file: row.file }));
+  return {
+    finals: listSegments(db, sessionId).map((segment) => ({ ...segment, isFinal: true })),
+    parts,
+    // The same reading as the saved session's timeline: each part after the first starts at a resume.
+    resumes: parts.slice(1).filter((_, i) => (parts[i]?.durationMs ?? 0) > 0).map((part) => part.startMs),
+    flags: db.all<{ t: number }>("SELECT t FROM flags WHERE session_id = ? ORDER BY t", [sessionId]).map((row) => row.t),
+    photos: db.all<{ id: string; t: number; file: string }>(
+      "SELECT id, t, file FROM captures WHERE session_id = ? AND kind = 'photo' ORDER BY t, id",
+      [sessionId],
+    ),
+  };
+}
+
+// Reopens a saved recording. Null when it is not a finished recording. New words are written live when the speech pack
+// is installed; otherwise the new audio waits to be transcribed. `ended_at` holds the time it was reopened, so another
+// phone can tell the recording is active (see mayRecover).
+export function continueRecordingSession(db: SqlDb, deps: Deps, sessionId: string, speechReady: boolean): ContinuedRecording | null {
+  const session = getSession(db, sessionId);
+  if (session === null || session.kind !== "recording" || (session.state !== "saved" && session.state !== "interrupted")) return null;
+  const prior = priorTimeline(db, sessionId);
+  const lastEnd = prior.parts.reduce((end, part) => Math.max(end, part.startMs + part.durationMs), 0);
+  const firstIndex = prior.parts.reduce((next, part) => Math.max(next, part.index + 1), 0);
+  const now = deps.now();
+  const transcript =
+    session.transcript === "done" ? (speechReady ? "live" : "waiting") : session.transcript === "failed" ? "waiting" : session.transcript;
+  db.transaction(() => {
+    db.run("UPDATE sessions SET state = 'recording', transcript = ?, ended_at = ?, indexed_at = NULL WHERE id = ?", [transcript, now, sessionId]);
+    db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [now, session.spaceId]);
+    setSetting(db, `${RECORDING_HERE_PREFIX}${sessionId}`, "1");
+  });
+  return {
+    session: { ...session, state: "recording", transcript },
+    // At least a second after the last part, so a changed iPhone clock cannot make new audio overlap the old.
+    from: { elapsedMs: Math.max(now - session.startedAt, lastEnd + 1000), firstIndex, priorRecordedMs: session.recordedMs },
+    prior,
+    restore: { state: session.state, transcript: session.transcript, endedAt: session.endedAt },
+  };
+}
+
+// The recorder could not start: the session goes back to how it was.
+export function undoContinue(db: SqlDb, sessionId: string, restore: ContinuedRecording["restore"]): void {
+  db.run("UPDATE sessions SET state = ?, transcript = ?, ended_at = ? WHERE id = ?", [restore.state, restore.transcript, restore.endedAt, sessionId]);
+  deleteSetting(db, `${RECORDING_HERE_PREFIX}${sessionId}`);
 }
 
 // The title of a recording nobody named: its first words, or when there are none, the day and time it started.
@@ -110,11 +181,18 @@ export function isLiveSession(status: { sessionId: string; state: string }, id: 
 
 // Whether this iPhone may close an unfinished session. A session outside any shared space was recorded here. One in a
 // shared space may still be recording on another member's phone, so it is closed only if this iPhone started it, holds
-// audio it recorded itself (synced audio is under `synced/`), or the session has been unfinished for a day.
+// audio it recorded itself (synced audio is under `synced/`), or the session has shown no activity for a day.
 function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now: number): boolean {
   if (getSetting(db, `${RECORDING_HERE_PREFIX}${session.id}`) !== null) return true;
   const shared = db.get("SELECT 1 AS n FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?", [session.id]);
-  if (shared === null || now - session.started_at >= ABANDONED_AFTER_MS) return true;
+  if (shared === null) return true;
+  const activity = db.get<{ at: number }>(
+    `SELECT max(s.started_at, COALESCE(s.ended_at, 0), s.started_at + COALESCE(
+       (SELECT MAX(c.t + COALESCE(c.duration_ms, 0)) FROM captures c WHERE c.session_id = s.id AND c.kind = 'audio'), 0)) AS at
+     FROM sessions s WHERE s.id = ?`,
+    [session.id],
+  );
+  if (now - (activity?.at ?? session.started_at) >= ABANDONED_AFTER_MS) return true;
   return db.get("SELECT 1 AS n FROM captures WHERE session_id = ? AND kind = 'audio' AND file LIKE 'sessions/%/audio-%'", [session.id]) !== null;
 }
 
@@ -135,7 +213,7 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
         `UPDATE sessions SET state = 'interrupted',
            transcript = CASE WHEN transcript = 'done' THEN 'done' ELSE 'waiting' END,
            recorded_ms = (SELECT COALESCE(SUM(duration_ms), 0) FROM captures WHERE session_id = sessions.id AND kind = 'audio'),
-           ended_at = COALESCE(ended_at, started_at + (
+           ended_at = max(COALESCE(ended_at, 0), started_at + (
              SELECT COALESCE(MAX(t + COALESCE(duration_ms, 0)), 0) FROM captures WHERE session_id = sessions.id AND kind = 'audio'))
          WHERE id = ?`,
         [id],

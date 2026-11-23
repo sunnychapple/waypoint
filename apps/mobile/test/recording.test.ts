@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   addFlag,
   addPhoto,
+  continueRecordingSession,
   finishRecording,
   isLiveSession,
   pendingTranscriptions,
@@ -10,6 +11,7 @@ import {
   savePart,
   setPaused,
   startRecordingSession,
+  undoContinue,
 } from "../src/core/capture/recording.ts";
 import { deleteSessionRow, getSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
@@ -228,6 +230,106 @@ describe("recording", () => {
     const discarded = startRecordingSession(db, deps(), homeId, true);
     deleteSessionRow(db, discarded.id);
     expect(count()).toBe(0);
+  });
+});
+
+describe("continueRecordingSession", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  // A finished session: one audio part at 0 and a second at 100 s, saved at 120 s.
+  function savedSession(speechReady = true): string {
+    const session = startRecordingSession(db, deps(1000), homeId, speechReady);
+    savePart(db, deps(), session.id, { index: 0, startMs: 0, durationMs: 20_000, file: "a0.m4a" });
+    savePart(db, deps(), session.id, { index: 2, startMs: 100_000, durationMs: 30_000, file: "a2.m4a" });
+    finishRecording(db, session.id, 120_000, 50_000);
+    return session.id;
+  }
+
+  it("returns the next part number, the recorded length and the elapsed time, and sets the row to recording", () => {
+    const id = savedSession();
+    const continued = continueRecordingSession(db, deps(500_000), id, true);
+    expect(continued?.from).toEqual({ elapsedMs: 499_000, firstIndex: 3, priorRecordedMs: 50_000 });
+    expect(getSession(db, id)).toMatchObject({ state: "recording", endedAt: 500_000 });
+  });
+
+  it("starts at least a second after the last saved part when the clock says otherwise", () => {
+    const id = savedSession();
+    const continued = continueRecordingSession(db, deps(1500), id, true);
+    expect(continued?.from.elapsedMs).toBe(131_000);
+  });
+
+  it("maps the transcript: done becomes live with speech and waiting without, failed and waiting stay waiting", () => {
+    const done = savedSession(true);
+    expect(continueRecordingSession(db, deps(500_000), done, true)?.session.transcript).toBe("live");
+    const doneNoSpeech = savedSession(true);
+    expect(continueRecordingSession(db, deps(500_000), doneNoSpeech, false)?.session.transcript).toBe("waiting");
+    const failed = savedSession(true);
+    db.run("UPDATE sessions SET transcript = 'failed' WHERE id = ?", [failed]);
+    expect(continueRecordingSession(db, deps(500_000), failed, true)?.session.transcript).toBe("waiting");
+    const waiting = savedSession(false);
+    expect(continueRecordingSession(db, deps(500_000), waiting, true)?.session.transcript).toBe("waiting");
+  });
+
+  it("returns null for a missing session, a pages session and a session still recording", () => {
+    expect(continueRecordingSession(db, deps(), "nope", true)).toBeNull();
+    db.run("INSERT INTO sessions (id, space_id, kind, title, state, transcript, started_at) VALUES ('pg', ?, 'pages', 't', 'saved', 'waiting', 1000)", [
+      homeId,
+    ]);
+    expect(continueRecordingSession(db, deps(), "pg", true)).toBeNull();
+    const active = startRecordingSession(db, deps(), homeId, true);
+    expect(continueRecordingSession(db, deps(), active.id, true)).toBeNull();
+  });
+
+  it("returns what the session already holds: words, parts, resumes, flags and photos", () => {
+    const id = startRecordingSession(db, deps(1000), homeId, true).id;
+    saveSegment(db, id, { tStart: 0, tEnd: 5000, text: "hello" });
+    savePart(db, deps(), id, { index: 0, startMs: 0, durationMs: 60_000, file: "a0.m4a" });
+    savePart(db, deps(), id, { index: 1, startMs: 90_000, durationMs: 30_000, file: "a1.m4a" });
+    addFlag(db, deps(), id, 42_000);
+    const photoId = addPhoto(db, deps(), id, 50_000, "sessions/s/photo.jpg");
+    finishRecording(db, id, 120_000, 90_000);
+    const continued = continueRecordingSession(db, deps(500_000), id, true);
+    expect(continued?.prior).toEqual({
+      finals: [{ tStart: 0, tEnd: 5000, text: "hello", isFinal: true }],
+      parts: [
+        { sessionId: id, index: 0, startMs: 0, durationMs: 60_000, file: "a0.m4a" },
+        { sessionId: id, index: 1, startMs: 90_000, durationMs: 30_000, file: "a1.m4a" },
+      ],
+      resumes: [90_000],
+      flags: [42_000],
+      photos: [{ id: photoId, t: 50_000, file: "sessions/s/photo.jpg" }],
+    });
+  });
+
+  it("undoContinue restores state, transcript and ended_at and clears this phone's marker", () => {
+    const id = savedSession();
+    const continued = continueRecordingSession(db, deps(500_000), id, true);
+    expect(continued).not.toBeNull();
+    undoContinue(db, id, continued!.restore);
+    expect(getSession(db, id)).toMatchObject({ state: "saved", transcript: "done", endedAt: 120_000 });
+    expect(db.get("SELECT key FROM settings WHERE key = ?", [`recording_here:${id}`])).toBeNull();
+  });
+
+  it("a continued session that crashes keeps its earlier length and is recovered", () => {
+    const id = savedSession();
+    continueRecordingSession(db, deps(200_000), id, true);
+    savePart(db, deps(), id, { index: 3, startMs: 100_000, durationMs: 20_000, file: "a3.m4a" });
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 300_000)).toEqual([id]);
+    expect(getSession(db, id)).toMatchObject({ state: "interrupted", recordedMs: 70_000 });
+    expect(getSession(db, id)?.endedAt).toBeGreaterThanOrEqual(1000 + 120_000);
+  });
+
+  it("in a shared space, a session reopened an hour ago on another phone is left alone until its last activity is a day old", () => {
+    shareSpace(homeId);
+    const now = 3 * DAY;
+    insertSession("reopened", "recording", "live", now - 2 * DAY);
+    db.run("UPDATE sessions SET ended_at = ? WHERE id = ?", [now - HOUR, "reopened"]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, now)).toEqual([]);
+    insertSession("idle", "recording", "live", now - 3 * DAY);
+    db.run("UPDATE sessions SET ended_at = ? WHERE id = ?", [now - 2 * DAY, "idle"]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, now)).toEqual(["idle"]);
+    expect(getSession(db, "reopened")?.state).toBe("recording");
   });
 });
 

@@ -110,6 +110,14 @@ export default function SessionScreen() {
     writeDb((db) => renameSession(db, id, next));
   }
 
+  function continueRecording() {
+    if (getRecorderStatus().state !== "idle") {
+      Alert.alert("Already recording", "Stop the other recording first.");
+      return;
+    }
+    router.push(`/recording?continue=${encodeURIComponent(id)}`);
+  }
+
   function openMenu() {
     if (isLiveSession(getRecorderStatus(), id)) {
       Alert.alert("Still recording", "Stop the recording first. Then you can move, share or delete it.");
@@ -199,6 +207,9 @@ export default function SessionScreen() {
         ) : null}
 
         {playable ? <RecordingPlayer parts={playParts} seek={seek} onSeekDone={() => setSeek(null)} /> : null}
+        {session.kind === "recording" && (session.state === "saved" || session.state === "interrupted") && role !== "viewer" ? (
+          <SecondaryButton label="Continue recording" icon="mic.fill" onPress={continueRecording} />
+        ) : null}
 
         <View style={styles.actions}>
           <View style={styles.studyHead}>
