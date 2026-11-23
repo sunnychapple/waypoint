@@ -11,7 +11,7 @@ import {
   setPaused,
   startRecordingSession,
 } from "../src/core/capture/recording.ts";
-import { getSession } from "../src/core/capture/sessions.ts";
+import { deleteSessionRow, getSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
@@ -174,24 +174,60 @@ describe("recording", () => {
 
   it("leaves another member's recording in a shared space alone when this phone holds none of it", () => {
     shareSpace(homeId);
-    insertSession("theirs", "recording", "live");
-    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual([]);
+    insertSession("theirs", "recording", "live", 1000);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 2000)).toEqual([]);
     expect(getSession(db, "theirs")?.state).toBe("recording");
+  });
+
+  it("leaves it alone when this phone has only downloaded its synced audio", () => {
+    shareSpace(homeId);
+    insertSession("theirs", "recording", "live", 1000);
+    savePart(db, deps(), "theirs", { index: 0, startMs: 0, durationMs: 20_000, file: "sessions/theirs/synced/cap.m4a" });
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 2000)).toEqual([]);
   });
 
   it("recovers a recording in a shared space that this phone started", () => {
     shareSpace(homeId);
     const mine = startRecordingSession(db, deps(), homeId, true);
-    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual([mine.id]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 2000)).toEqual([mine.id]);
     expect(getSession(db, mine.id)?.state).toBe("interrupted");
   });
 
-  it("recovers another member's recording in a shared space that has an audio file on this phone", () => {
+  it("still recovers a crashed recording after this phone has started another one", () => {
     shareSpace(homeId);
-    insertSession("theirs", "recording", "live");
-    savePart(db, deps(), "theirs", { index: 0, startMs: 0, durationMs: 20_000, file: "theirs-0.m4a" });
-    expect(recoverSessions(db, { sessionId: "", state: "idle" })).toEqual(["theirs"]);
-    expect(getSession(db, "theirs")?.state).toBe("interrupted");
+    const crashed = startRecordingSession(db, deps(), homeId, true);
+    const next = startRecordingSession(db, deps(), homeId, true);
+    finishRecording(db, next.id, 3000, 1000);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 4000)).toEqual([crashed.id]);
+  });
+
+  it("recovers a recording in a shared space with audio this phone recorded", () => {
+    shareSpace(homeId);
+    insertSession("old", "recording", "live", 1000);
+    savePart(db, deps(), "old", { index: 0, startMs: 0, durationMs: 20_000, file: "sessions/old/audio-0.m4a" });
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 2000)).toEqual(["old"]);
+    expect(getSession(db, "old")?.state).toBe("interrupted");
+  });
+
+  it("closes another phone's recording once it has been unfinished for a day", () => {
+    shareSpace(homeId);
+    insertSession("gone", "recording", "live", 1000);
+    const day = 24 * 60 * 60 * 1000;
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 1000 + day - 1)).toEqual([]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 1000 + day)).toEqual(["gone"]);
+  });
+
+  it("clears this phone's marker when a recording finishes, is recovered or is deleted", () => {
+    const count = (): number => db.get<{ n: number }>("SELECT count(*) AS n FROM settings WHERE key LIKE 'recording_here:%'")?.n ?? 0;
+    const finished = startRecordingSession(db, deps(), homeId, true);
+    finishRecording(db, finished.id, 3000, 1000);
+    expect(count()).toBe(0);
+    startRecordingSession(db, deps(), homeId, true);
+    recoverSessions(db, { sessionId: "", state: "idle" }, 2000);
+    expect(count()).toBe(0);
+    const discarded = startRecordingSession(db, deps(), homeId, true);
+    deleteSessionRow(db, discarded.id);
+    expect(count()).toBe(0);
   });
 });
 
