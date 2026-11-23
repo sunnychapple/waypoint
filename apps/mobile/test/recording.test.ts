@@ -203,12 +203,21 @@ describe("recording", () => {
     expect(recoverSessions(db, { sessionId: "", state: "idle" }, 4000)).toEqual([crashed.id]);
   });
 
-  it("recovers a recording in a shared space with audio this phone recorded", () => {
+  it("leaves a shared recording alone when this phone made its earlier audio but another phone may be continuing it", () => {
     shareSpace(homeId);
     insertSession("old", "recording", "live", 1000);
     savePart(db, deps(), "old", { index: 0, startMs: 0, durationMs: 20_000, file: "sessions/old/audio-0.m4a" });
-    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 2000)).toEqual(["old"]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 30_000)).toEqual([]);
+    expect(recoverSessions(db, { sessionId: "", state: "idle" }, 21_000 + 24 * 60 * 60 * 1000)).toEqual(["old"]);
     expect(getSession(db, "old")?.state).toBe("interrupted");
+  });
+
+  it("orders parts by time when two phones gave them the same number", () => {
+    const session = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, session.id, 9000, 0);
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file, duration_ms) VALUES ('z', ?, 'audio', 100000, 1, 'first.m4a', 20000)", [session.id]);
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file, duration_ms) VALUES ('a', ?, 'audio', 200000, 1, 'second.m4a', 20000)", [session.id]);
+    expect(pendingTranscriptions(db)[0]?.parts.map((part) => part.file)).toEqual(["first.m4a", "second.m4a"]);
   });
 
   it("closes another phone's recording once it has been unfinished for a day", () => {

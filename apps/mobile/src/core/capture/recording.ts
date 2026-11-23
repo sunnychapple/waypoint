@@ -47,7 +47,7 @@ export type ContinuedRecording = {
 function priorTimeline(db: SqlDb, sessionId: string): PriorTimeline {
   const parts = db
     .all<{ position: number; t: number; duration_ms: number | null; file: string }>(
-      "SELECT position, t, duration_ms, file FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY position, id",
+      "SELECT position, t, duration_ms, file FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY t, position, id",
       [sessionId],
     )
     .map((row) => ({ sessionId, index: row.position, startMs: row.t, durationMs: row.duration_ms ?? 0, file: row.file }));
@@ -180,8 +180,8 @@ export function isLiveSession(status: { sessionId: string; state: string }, id: 
 }
 
 // Whether this iPhone may close an unfinished session. A session outside any shared space was recorded here. One in a
-// shared space may still be recording on another member's phone, so it is closed only if this iPhone started it, holds
-// audio it recorded itself (synced audio is under `synced/`), or the session has shown no activity for a day.
+// shared space may still be recording on another member's phone (even one this iPhone recorded earlier, since any member
+// can continue it), so it is closed only if this iPhone is the one recording it or it has shown no activity for a day.
 function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now: number): boolean {
   if (getSetting(db, `${RECORDING_HERE_PREFIX}${session.id}`) !== null) return true;
   const shared = db.get("SELECT 1 AS n FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?", [session.id]);
@@ -192,8 +192,7 @@ function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now:
      FROM sessions s WHERE s.id = ?`,
     [session.id],
   );
-  if (now - (activity?.at ?? session.started_at) >= ABANDONED_AFTER_MS) return true;
-  return db.get("SELECT 1 AS n FROM captures WHERE session_id = ? AND kind = 'audio' AND file LIKE 'sessions/%/audio-%'", [session.id]) !== null;
+  return now - (activity?.at ?? session.started_at) >= ABANDONED_AFTER_MS;
 }
 
 // After a restart: sessions still marked recording or paused, except the one native is still recording and those
@@ -233,7 +232,7 @@ export function pendingTranscriptions(
   return sessions.map((session) => {
     const pairs = db
       .all<{ file: string; t: number; duration_ms: number | null }>(
-        "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY position, id",
+        "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY t, position, id",
         [session.id],
       )
       .map((row) => ({ file: row.file, span: { startMs: row.t, durationMs: row.duration_ms ?? 0 } }));

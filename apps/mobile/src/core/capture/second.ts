@@ -7,7 +7,7 @@ export type UploadPart = { n: number; file: string; startMs: number; durationMs:
 export function uploadParts(db: SqlDb, sessionId: string): UploadPart[] {
   return db
     .all<{ file: string; t: number; duration_ms: number | null }>(
-      "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY position, id",
+      "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY t, position, id",
       [sessionId],
     )
     .map((row, n) => ({ n, file: row.file, startMs: row.t, durationMs: row.duration_ms ?? 0 }));

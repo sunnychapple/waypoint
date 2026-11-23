@@ -318,3 +318,11 @@ Tests to add in `test/recording.test.ts`:
           <SecondaryButton label="Continue recording" icon="mic.fill" onPress={continueRecording} />
         ) : null}
 ```
+
+---
+
+## Changes from review
+
+Marks use the recorder's timeline when the iPhone's clock has moved. Leaving the screen while a continued recording is starting puts the session back as it was. Audio parts sort by time, so two phones continuing at once cannot scramble them. New words synced from another phone go back through search. A shared session is closed only by the phone recording it, or after a day with no activity. A continued session is not sent for a second transcript automatically.
+
+Known limits: transcript times count from the session's first start, so a continuation days later shows large times. Two phones continuing the same session at once can leave the shorter total length.

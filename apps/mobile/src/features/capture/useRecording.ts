@@ -99,6 +99,8 @@ export function useRecording(): RecordingModel {
 
   const sessionRef = useRef<SessionRow | null>(null);
   const continuedRef = useRef<ContinuedRecording | null>(null);
+  // Added to Date.now() - startedAt so marks use the recorder's timeline, which can differ if the iPhone's clock moved.
+  const clockOffsetRef = useRef(0);
   const brokeRef = useRef(false);
   const stoppingRef = useRef(false);
 
@@ -110,7 +112,7 @@ export function useRecording(): RecordingModel {
         if (!mine(e.sessionId)) return;
         // A resume: the gap row can be drawn now (session time, the same clock flags use).
         const started = sessionRef.current?.startedAt;
-        if (e.state === "recording" && started !== undefined) setResumes((previous) => [...previous, Date.now() - started]);
+        if (e.state === "recording" && started !== undefined) setResumes((previous) => [...previous, Date.now() - started + clockOffsetRef.current]);
         setRecorder(e.state);
         setPauseReason(e.reason);
         setAnchor({ ms: e.recordedMs, at: Date.now() });
@@ -190,6 +192,7 @@ export function useRecording(): RecordingModel {
         continuedRef.current = created.continued;
         if (created.continued !== null) {
           const { prior, from } = created.continued;
+          clockOffsetRef.current = from.elapsedMs - (Date.now() - created.session.startedAt);
           setTitle(created.session.title);
           setLive({ finals: prior.finals, volatile: null });
           setParts(prior.parts);
@@ -210,9 +213,16 @@ export function useRecording(): RecordingModel {
           return;
         }
         if (cancelled) {
-          // The screen went away while the recorder was starting, so the unmount stop came too early. Stop it now;
-          // the session stays unfinished and the next launch's recoverSessions marks it interrupted.
-          stopRecording().catch(() => undefined);
+          // The screen went away while the recorder was starting, so the unmount stop came too early. Stop it now.
+          // A new session stays unfinished and the next launch's recoverSessions marks it interrupted. A continued one
+          // goes back to how it was, so it is not left looking like it is still recording.
+          const reopened = continuedRef.current;
+          const sessionId = created.session.id;
+          stopRecording()
+            .catch(() => undefined)
+            .finally(() => {
+              if (reopened !== null) writeDb((db) => undoContinue(db, sessionId, reopened.restore));
+            });
           return;
         }
         setAnchor({ ms: created.continued?.from.priorRecordedMs ?? 0, at: Date.now() });
@@ -266,7 +276,7 @@ export function useRecording(): RecordingModel {
   function flag(): void {
     const current = sessionRef.current;
     if (!current) return;
-    const t = Date.now() - current.startedAt;
+    const t = Date.now() - current.startedAt + clockOffsetRef.current;
     writeDb((db) => addFlag(db, deps, current.id, t));
     setFlags((previous) => [...previous, t]);
     setToast({ t });
@@ -281,7 +291,7 @@ export function useRecording(): RecordingModel {
     }
     try {
       for (const page of await scanPages(current.id)) {
-        const t = Date.now() - current.startedAt;
+        const t = Date.now() - current.startedAt + clockOffsetRef.current;
         const id = writeDb((db) => addPhoto(db, deps, current.id, t, page.file));
         setPhotos((previous) => [...previous, { id, t, file: page.file }]);
       }
@@ -306,7 +316,8 @@ export function useRecording(): RecordingModel {
       // A continued recording was opened from its session, so going back lands there.
       if (continuedRef.current !== null) router.back();
       else router.replace(`/session/${current.id}`);
-      if (writeDb((db) => getSetting(db, SECOND_ALWAYS_KEY)) === "1") router.push(`/second-transcript?sessionId=${current.id}`);
+      // A continued session is not sent again automatically: that would quote and charge for all of it.
+      if (continuedRef.current === null && writeDb((db) => getSetting(db, SECOND_ALWAYS_KEY)) === "1") router.push(`/second-transcript?sessionId=${current.id}`);
     } catch (error) {
       stoppingRef.current = false;
       setStopping(false);
