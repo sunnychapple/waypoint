@@ -22,7 +22,7 @@ export function buildTimeline(
 ): TimelineItem[] {
   const items: TimelineItem[] = finals.map((piece) => ({ kind: "line", key: `line-${piece.tStart}`, at: piece.tStart, end: piece.tEnd, text: piece.text }));
   for (const resumedAt of resumes) {
-    const before = parts.filter((part) => part.startMs + part.durationMs <= resumedAt + GAP_MIN_MS).at(-1);
+    const before = parts.filter((part) => part.startMs < resumedAt - GAP_MIN_MS && part.startMs + part.durationMs <= resumedAt + GAP_MIN_MS).at(-1);
     if (before === undefined) continue;
     const gapStart = before.startMs + before.durationMs;
     const gapMs = resumedAt - gapStart;

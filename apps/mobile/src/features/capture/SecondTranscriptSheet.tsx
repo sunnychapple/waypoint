@@ -8,7 +8,7 @@ import { countLabel } from "../../core/format.ts";
 import { bytesLabel } from "../../core/settings/format.ts";
 import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
-import { MAX_SECOND_MINUTES, secondPlan, startSecondTranscript } from "../../platform/second.ts";
+import { secondPlan, startSecondTranscript, tooLongForSecond } from "../../platform/second.ts";
 import { Body, CancelButton, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -26,7 +26,7 @@ export default function SecondTranscriptSheet() {
   const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [plan] = useState(() => secondPlan(sessionId));
-  const tooLong = plan !== null && plan.minutes > MAX_SECOND_MINUTES;
+  const tooLong = plan !== null && tooLongForSecond(plan);
   const offered = plan !== null && plan.complete && !tooLong;
   const quote = useQuote(offered ? { task: "retranscribe", minutes: plan.minutes } : null);
   const signOut = useSignOut();

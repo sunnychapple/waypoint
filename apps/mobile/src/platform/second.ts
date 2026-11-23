@@ -1,5 +1,5 @@
 import { File, Paths } from "expo-file-system";
-import { MAX_AUDIO_CHUNK_BYTES, RetranscribeResultSchema } from "@waypoint/contracts";
+import { MAX_AUDIO_CHUNK_BYTES, MAX_AUDIO_CHUNKS, RetranscribeResultSchema } from "@waypoint/contracts";
 import { ApiCallError } from "@waypoint/api-client";
 import type { CloudFailure } from "../core/cloud/failure.ts";
 import { audioMinutes, saveCloudTranscript, uploadParts } from "../core/capture/second.ts";
@@ -11,6 +11,11 @@ import { BEFORE_FOLLOW, RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 
 // The most the server takes (QuoteRequestSchema: minutes ≤ 600; MAX_AUDIO_CHUNKS: 200 parts).
 export const MAX_SECOND_MINUTES = 600;
+
+// Too long for the server, by length or by number of parts (each pause starts a new part).
+export function tooLongForSecond(plan: { minutes: number; parts: number }): boolean {
+  return plan.minutes > MAX_SECOND_MINUTES || plan.parts > MAX_AUDIO_CHUNKS;
+}
 
 // complete: every part is on this iPhone and within the size the server takes. Otherwise nothing may be sent.
 export type SecondPlan = { minutes: number; parts: number; bytes: number; complete: boolean } | null;
@@ -33,7 +38,7 @@ export function secondPlan(sessionId: string): SecondPlan {
 // key: made when the sheet opened; the same key on "Try again" after Out of credits.
 export async function startSecondTranscript(sessionId: string, key: string): Promise<{ ok: true; jobId: string } | { ok: false; failure: CloudFailure }> {
   const plan = secondPlan(sessionId);
-  if (plan === null || !plan.complete || plan.minutes > MAX_SECOND_MINUTES) return { ok: false, failure: { kind: "failed" } };
+  if (plan === null || !plan.complete || tooLongForSecond(plan)) return { ok: false, failure: { kind: "failed" } };
   return startJob({
     request: { type: "retranscribe", minutes: plan.minutes },
     key,

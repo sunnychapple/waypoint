@@ -174,3 +174,9 @@ In the `TimelineRow` memo comparator, check identity first, so an unchanged row 
 ```tsx
             {second.incomplete && !second.truncated ? <Caption>Some parts of this recording aren't in the better transcript.</Caption> : null}
 ```
+
+---
+
+## Changes from review
+
+A recording with more parts than the server takes is offered as too long, instead of failing on upload. A gap survives a very short part after the resume. Level events stay off if the screen closes in the background.

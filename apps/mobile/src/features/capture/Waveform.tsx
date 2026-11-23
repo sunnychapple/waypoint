@@ -30,7 +30,7 @@ export function Waveform() {
     return () => {
       appState.remove();
       levelEvents?.remove();
-      setRecorderLevelsEnabled(true);
+      setRecorderLevelsEnabled(AppState.currentState === "active");
     };
   }, []);
 
