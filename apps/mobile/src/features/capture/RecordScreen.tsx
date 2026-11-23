@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -18,7 +18,9 @@ import { formatClock, formatOffset } from "../../core/format.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
+import { isAtEnd } from "../../core/capture/follow.ts";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
+import { Waveform } from "./Waveform.tsx";
 import { useRecording, type Banner, type TimelineItem } from "./useRecording.ts";
 
 const PAUSE_REASONS: Record<string, string> = {
@@ -88,12 +90,25 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const colors = useColors();
   const scroll = useRef<ScrollViewInstance>(null);
   const following = useRef(true);
+  const touching = useRef(false); // the person's finger or fling is moving the list; the screen's own scrolling never sets this
+  const position = useRef({ contentHeight: 0, offsetY: 0, viewHeight: 0 });
+  const [showJump, setShowJump] = useState(false);
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
 
-  function onScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+  function setFollowing(next: boolean): void {
+    following.current = next;
+    setShowJump(!next);
+  }
+
+  function remember(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    following.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 40;
+    position.current = { contentHeight: contentSize.height, offsetY: contentOffset.y, viewHeight: layoutMeasurement.height };
+  }
+
+  function readPosition(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    remember(event);
+    setFollowing(isAtEnd(position.current));
   }
 
   return (
@@ -145,10 +160,38 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         ref={scroll}
         style={styles.flex}
         contentContainerStyle={styles.lines}
-        onScroll={onScroll}
+        onScroll={(event) => {
+          remember(event);
+          if (touching.current) setFollowing(isAtEnd(position.current));
+        }}
         scrollEventThrottle={100}
+        onTouchEnd={() => {
+          // A tap that stops a fling can end it with no scroll event, which would leave `touching` set.
+          if (!touching.current) return;
+          touching.current = false;
+          setFollowing(isAtEnd(position.current));
+        }}
+        onLayout={() => {
+          // The pause card appearing shrinks the list, and that is not a content change.
+          if (following.current) scroll.current?.scrollToEnd({ animated: false });
+        }}
+        onScrollBeginDrag={() => {
+          touching.current = true;
+        }}
+        onScrollEndDrag={(event) => {
+          touching.current = false;
+          readPosition(event);
+        }}
+        onMomentumScrollBegin={() => {
+          touching.current = true;
+        }}
+        onMomentumScrollEnd={(event) => {
+          if (!touching.current) return; // the end of the screen's own animated scroll
+          touching.current = false;
+          readPosition(event);
+        }}
         onContentSizeChange={() => {
-          if (following.current) scroll.current?.scrollToEnd({ animated: true });
+          if (following.current && !touching.current) scroll.current?.scrollToEnd({ animated: true });
         }}
       >
         {model.timeline.map((item) => (
@@ -162,6 +205,21 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         ) : null}
       </ScrollView>
 
+      {showJump ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Jump to live"
+          onPress={() => {
+            setFollowing(true);
+            scroll.current?.scrollToEnd({ animated: true });
+          }}
+          style={[styles.jump, { backgroundColor: colors.ink }]}
+        >
+          <SymbolView name="arrow.down" tintColor={colors.bg} size={14} />
+          <Text style={[styles.toastText, { color: colors.bg }]}>Jump to live</Text>
+        </Pressable>
+      ) : null}
+
       {model.toast ? (
         <View style={[styles.toast, { backgroundColor: colors.ink }]}>
           <SymbolView name="flag.fill" tintColor={colors.flag} size={14} />
@@ -172,7 +230,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   );
 }
 
-function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: string | null }) {
+const TimelineRow = memo(function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: string | null }) {
   const colors = useColors();
   switch (item.kind) {
     case "line":
@@ -193,7 +251,7 @@ function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: strin
     case "photo":
       return <TimeMarkRow item={item} />;
   }
-}
+}, (a, b) => a.sessionId === b.sessionId && a.item.key === b.item.key);
 
 function BannerView({ banner }: { banner: Banner }) {
   const colors = useColors();
@@ -254,20 +312,7 @@ function Dock({ model }: { model: Model }) {
         </Pressable>
       </View>
 
-      <View style={styles.waveform}>
-        {model.levels.map((level, i) => (
-          <View
-            key={i}
-            style={[
-              styles.bar,
-              {
-                height: Math.max(3, level * 40),
-                backgroundColor: i >= model.levels.length - 8 ? colors.rec : colors.ink4,
-              },
-            ]}
-          />
-        ))}
-      </View>
+      <Waveform />
 
       <View style={styles.actions}>
         <ActionButton label="Snap page" icon="camera.fill" onPress={model.photo} />
@@ -331,8 +376,7 @@ const styles = StyleSheet.create({
   stop: { flexDirection: "row", alignItems: "center", gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22 },
   buttonText: { fontSize: 16, fontWeight: "600" },
   wideButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 14 },
-  waveform: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3, height: 44 },
-  bar: { width: 3, borderRadius: 2 },
+  jump: { position: "absolute", bottom: 8, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6, height: 44, paddingHorizontal: 16, borderRadius: 22 },
   actions: { flexDirection: "row", justifyContent: "space-around", alignItems: "flex-end" },
   action: { alignItems: "center", gap: 6, width: 80 },
   actionCircle: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },

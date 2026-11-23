@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router } from "expo-router";
@@ -6,7 +6,6 @@ import {
   downloadSpeechPack,
   getMicPermission,
   getSpeechStatus,
-  onRecorderLevel,
   onRecorderPart,
   onRecorderState,
   onSpeechError,
@@ -44,7 +43,6 @@ import { deleteSessionFiles } from "../../platform/files.ts";
 import { askForPush } from "../../platform/push.ts";
 
 const deps = { now: Date.now, newId: randomUUID };
-const LEVELS_KEPT = 48;
 const TOAST_MS = 2000;
 
 export type { TimelineItem };
@@ -58,7 +56,6 @@ export type RecordingModel = {
   recorder: RecorderState;
   pauseReason: PauseReason;
   clockMs: number;
-  levels: number[];
   timeline: TimelineItem[];
   volatile: Piece | null;
   banner: Banner;
@@ -82,7 +79,6 @@ export function useRecording(): RecordingModel {
   const [pauseReason, setPauseReason] = useState<PauseReason>("none");
   const [anchor, setAnchor] = useState({ ms: 0, at: 0 });
   const [now, setNow] = useState(() => Date.now());
-  const [levels, setLevels] = useState<number[]>([]);
   const [live, setLive] = useState<LiveTranscript>(EMPTY_LIVE);
   const [parts, setParts] = useState<PartEvent[]>([]);
   const [resumes, setResumes] = useState<number[]>([]);
@@ -116,7 +112,6 @@ export function useRecording(): RecordingModel {
         writeDb((db) => savePart(db, deps, e.sessionId, e));
         setParts((previous) => [...previous, e]);
       }),
-      onRecorderLevel((e) => setLevels((previous) => [...previous.slice(-(LEVELS_KEPT - 1)), e.level])),
       onTranscript((e) => {
         if (!mine(e.sessionId)) return;
         setLive((previous) => addPiece(previous, e));
@@ -303,7 +298,7 @@ export function useRecording(): RecordingModel {
   }
 
   const clockMs = anchor.ms + (recorder === "recording" ? Math.max(0, now - anchor.at) : 0);
-  const bars = Array.from({ length: LEVELS_KEPT }, (_, i) => levels[levels.length - LEVELS_KEPT + i] ?? 0);
+  const timeline = useMemo(() => buildTimeline(live.finals, parts, resumes, flags, photos), [live.finals, parts, resumes, flags, photos]);
 
   let banner: Banner = null;
   if (pack === "unsupported") banner = { kind: "unsupported" };
@@ -316,8 +311,7 @@ export function useRecording(): RecordingModel {
     recorder,
     pauseReason,
     clockMs,
-    levels: bars,
-    timeline: buildTimeline(live.finals, parts, resumes, flags, photos),
+    timeline,
     volatile: live.volatile,
     banner,
     toast,
