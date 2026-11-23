@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { SymbolView } from "expo-symbols";
+import { splitCardText } from "../../core/study/cards.ts";
 import { Caption } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -95,6 +96,8 @@ export function FlipCard({ kindLabel, front, back, flipped, onPress }: Props) {
 
   const rotateY = rotation.interpolate({ inputRange: [-90, 0, 90], outputRange: ["-90deg", "0deg", "90deg"] });
 
+  const frontText = splitCardText(front);
+  const backText = splitCardText(back);
   return (
     <Animated.View style={{ opacity, transform: [{ perspective: 800 }, { rotateY }] }}>
       <Pressable
@@ -107,13 +110,15 @@ export function FlipCard({ kindLabel, front, back, flipped, onPress }: Props) {
         {face === "front" ? (
           <View style={styles.content}>
             <Caption>{kindLabel}</Caption>
-            <Text style={[styles.front, { color: colors.ink }]}>{front}</Text>
+            <Text style={[styles.front, frontText.rest !== null ? styles.frontWithChoices : null, { color: colors.ink }]}>{frontText.main}</Text>
+            {frontText.rest !== null ? <Text style={[styles.support, { color: colors.ink }]}>{frontText.rest}</Text> : null}
           </View>
         ) : (
           <View style={styles.content}>
             <Caption>ANSWER</Caption>
             <Text style={[styles.question, { color: colors.ink2 }]}>{front}</Text>
-            <Text style={[styles.answer, { color: colors.ink }]}>{back}</Text>
+            <Text style={[styles.answer, { color: colors.ink }]}>{backText.main}</Text>
+            {backText.rest !== null ? <Text style={[styles.question, { color: colors.ink2 }]}>{backText.rest}</Text> : null}
           </View>
         )}
         <View style={styles.hint}>
@@ -129,6 +134,8 @@ const styles = StyleSheet.create({
   card: { minHeight: 300, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, padding: 24, justifyContent: "space-between", gap: 20 },
   content: { flex: 1, alignItems: "center", justifyContent: "center", gap: 20 },
   front: { fontFamily: "Georgia", fontSize: 30, fontWeight: "700", textAlign: "center", lineHeight: 38 },
+  frontWithChoices: { fontSize: 22, lineHeight: 29 },
+  support: { fontSize: 17, lineHeight: 25, alignSelf: "stretch" },
   question: { fontSize: 16, textAlign: "center", lineHeight: 22 },
   answer: { fontFamily: "Georgia", fontSize: 24, fontWeight: "700", textAlign: "center", lineHeight: 32 },
   hint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },

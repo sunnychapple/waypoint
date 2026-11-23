@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
+import { getSession } from "../../core/capture/sessions.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { getMade } from "../../core/made/made.ts";
 import { grade, practiceCards, score, type Grade, type PracticeQuestion } from "../../core/made/practice.ts";
 import { saveCards } from "../../core/study/cards.ts";
@@ -97,7 +99,7 @@ export default function PracticeScreen() {
       <BackButton onPress={leave} />
       <Title>{item.body.title}</Title>
       <Caption>{`Question ${position + 1} of ${total}`}</Caption>
-      {position === 0 && answer === null ? <AddToCards sessionId={item.sessionId} questions={questions} /> : null}
+      <AddToCards sessionId={item.sessionId} questions={questions} />
       <Body style={styles.prompt}>{question.prompt}</Body>
 
       {question.kind === "multiple_choice" ? (
@@ -163,12 +165,23 @@ export default function PracticeScreen() {
 // Saves the set as flashcards in its session. Saving twice adds nothing, because a session never repeats a card's front.
 function AddToCards({ sessionId, questions }: { sessionId: string | null; questions: PracticeQuestion[] }) {
   const [added, setAdded] = useState<number | null>(null);
-  if (sessionId === null) return null;
+  // A viewer of a shared space cannot change its notes (the server refuses their changes).
+  const viewer = useQuery((db) => {
+    const session = sessionId === null ? null : getSession(db, sessionId);
+    return session !== null && spaceGroups(db).get(session.spaceId)?.role === "viewer";
+  }, sessionId ?? "");
+  if (sessionId === null || viewer) return null;
   if (added !== null) return <Caption>{added === 0 ? "These are already in your flashcards." : `Added ${added} to your flashcards.`}</Caption>;
   return (
     <SecondaryButton
       label="Add to flashcards"
-      onPress={() => setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, practiceCards(questions), "quiz_miss")).length)}
+      onPress={() => {
+        try {
+          setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, practiceCards(questions), "quiz_miss")).length);
+        } catch {
+          Alert.alert("Couldn't add these to your flashcards.");
+        }
+      }}
     />
   );
 }

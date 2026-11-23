@@ -6,7 +6,7 @@ import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { getMade, madeForSession, saveMade } from "../src/core/made/made.ts";
 import { answerKey, grade, practiceCards, score } from "../src/core/made/practice.ts";
-import { saveCards, sessionCards } from "../src/core/study/cards.ts";
+import { saveCards, sessionCards, splitCardText } from "../src/core/study/cards.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 const PRACTICE = {
@@ -86,9 +86,19 @@ describe("practice grading", () => {
 describe("practice as flashcards", () => {
   const set = PracticeSetResultSchema.parse(PRACTICE);
   const deps = (n: { value: number }) => ({ now: () => 1000, newId: () => `card_${++n.value}` });
-  it("a multiple choice question: prompt on the front, the right choice then the explanation on the back", () => {
+  it("a multiple choice question keeps its choices on the front, with the right one and why on the back", () => {
     const [card] = practiceCards([set.questions[0]!]);
-    expect(card).toEqual({ kind: "question", front: "Powerhouse?", back: "Mitochondria\n\nIt makes ATP.", captureId: null, t: null });
+    expect(card).toEqual({
+      kind: "question",
+      front: "Powerhouse?\n\nA. Nucleus\nB. Mitochondria",
+      back: "B. Mitochondria\n\nIt makes ATP.",
+      captureId: null,
+      t: null,
+    });
+  });
+  it("splits a card's main line from its supporting text at the first blank line", () => {
+    expect(splitCardText("Main\n\nA. one\n\nB. two")).toEqual({ main: "Main", rest: "A. one\n\nB. two" });
+    expect(splitCardText("Only a line")).toEqual({ main: "Only a line", rest: null });
   });
   it("a short answer question becomes a card the same way", () => {
     const [card] = practiceCards([set.questions[1]!]);

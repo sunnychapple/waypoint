@@ -100,3 +100,9 @@ Someone out of credits today sees only Try again. Add `import { router } from "e
             <SecondaryButton label="Get credits" onPress={() => router.push(`/plans?need=${failure.shortfall}`)} />
           ) : null}
 ```
+
+---
+
+## Changes from review
+
+Multiple choice cards keep their lettered choices on the front. The flip card shows a card's main line large and its choices or explanation smaller. Viewers of a shared space do not get Add to flashcards, and the button stays available on every question. The "Questions look wrong?" button is hidden while retrying missed questions.

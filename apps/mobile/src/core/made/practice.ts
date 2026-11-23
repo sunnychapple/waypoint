@@ -35,7 +35,12 @@ export function score(grades: Grade[]): { right: number; total: number } {
 // A practice set as flashcards: the question on the front, the right answer and why on the back.
 export function practiceCards(questions: PracticeQuestion[]): NewCard[] {
   return questions.map((question) => {
-    const answer = question.kind === "multiple_choice" ? (question.choices[question.answer] ?? "") : question.answer;
-    return { kind: "question", front: question.prompt, back: `${answer}\n\n${question.explanation}`, captureId: null, t: null };
+    if (question.kind === "short_answer") {
+      return { kind: "question", front: question.prompt, back: `${question.answer}\n\n${question.explanation}`, captureId: null, t: null };
+    }
+    // The choices stay on the front, because a question like "Which of these…" means nothing without them.
+    const lettered = question.choices.map((choice, index) => `${String.fromCharCode(65 + index)}. ${choice}`);
+    const front = `${question.prompt}\n\n${lettered.join("\n")}`;
+    return { kind: "question", front, back: `${lettered[question.answer] ?? ""}\n\n${question.explanation}`, captureId: null, t: null };
   });
 }

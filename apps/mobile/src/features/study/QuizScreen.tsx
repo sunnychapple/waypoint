@@ -161,7 +161,9 @@ export default function QuizScreen() {
         {quiz.missed.length > 0 ? (
           <SecondaryButton label="See the flashcards" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
         ) : null}
-        <SecondaryButton label="Questions look wrong? Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+        {!retrying ? (
+          <SecondaryButton label="Questions look wrong? Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+        ) : null}
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>
     );
