@@ -134,7 +134,11 @@ export function moveSessionToSpace(db: SqlDb, id: string, spaceId: string, now: 
   if (from !== spaceId) markMoved(db, id, oldGroup);
 }
 
+// A device setting marks each recording this iPhone started until it is finished. Settings never sync.
+export const RECORDING_HERE_PREFIX = "recording_here:";
+
 // Removes the row; captures, flags, cards and segments go with it. The caller removes the files.
 export function deleteSessionRow(db: SqlDb, id: string): void {
   db.run("DELETE FROM sessions WHERE id = ?", [id]);
+  db.run("DELETE FROM settings WHERE key = ?", [`${RECORDING_HERE_PREFIX}${id}`]);
 }

@@ -1,12 +1,16 @@
 import { shortDay } from "../format.ts";
 import type { SqlDb } from "../db/sql.ts";
+import { deleteSetting, getSetting, setSetting } from "../db/settings.ts";
 import { titleFromText } from "./pages.ts";
-import { createSession, getSession, renameSession, type SessionRow } from "./sessions.ts";
+import { createSession, getSession, RECORDING_HERE_PREFIX, renameSession, type SessionRow } from "./sessions.ts";
 import { partsNeedingTranscription } from "./transcript.ts";
 
 export const DEFAULT_RECORDING_TITLE = "New recording";
 
 type Deps = { now: () => number; newId: () => string };
+
+// A recording from another phone that is still unfinished after this long is treated as abandoned.
+const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
 
 // Starts a recording in the chosen space. Words are written live when the speech pack is installed;
 // otherwise the session waits for its audio files to be transcribed.
@@ -16,6 +20,7 @@ export function startRecordingSession(db: SqlDb, deps: Deps, spaceId: string, sp
   db.transaction(() => {
     db.run("UPDATE sessions SET transcript = ? WHERE id = ?", [transcript, row.id]);
     db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [deps.now(), spaceId]);
+    setSetting(db, `${RECORDING_HERE_PREFIX}${row.id}`, "1");
   });
   return { ...row, transcript };
 }
@@ -94,6 +99,7 @@ export function finishRecording(db: SqlDb, sessionId: string, endedAt: number, r
      WHERE id = ?`,
     [endedAt, recordedMs, sessionId],
   );
+  deleteSetting(db, `${RECORDING_HERE_PREFIX}${sessionId}`);
 }
 
 // True when this iPhone's recorder is working on the session. Keyed on the recorder, not the row's state, so a
@@ -102,17 +108,29 @@ export function isLiveSession(status: { sessionId: string; state: string }, id: 
   return status.sessionId === id && status.state !== "idle";
 }
 
-// After a restart: sessions still marked recording or paused, except the one native is still recording,
-// become interrupted and wait for transcription. Their length is what the saved audio parts add up to, and they
-// end where the last saved part ends. Returns their ids.
-export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }): string[] {
+// Whether this iPhone may close an unfinished session. A session outside any shared space was recorded here. One in a
+// shared space may still be recording on another member's phone, so it is closed only if this iPhone started it, holds
+// audio it recorded itself (synced audio is under `synced/`), or the session has been unfinished for a day.
+function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now: number): boolean {
+  if (getSetting(db, `${RECORDING_HERE_PREFIX}${session.id}`) !== null) return true;
+  const shared = db.get("SELECT 1 AS n FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = ?", [session.id]);
+  if (shared === null || now - session.started_at >= ABANDONED_AFTER_MS) return true;
+  return db.get("SELECT 1 AS n FROM captures WHERE session_id = ? AND kind = 'audio' AND file LIKE 'sessions/%/audio-%'", [session.id]) !== null;
+}
+
+// After a restart: sessions still marked recording or paused, except the one native is still recording and those
+// another phone may still be recording, become interrupted and wait for transcription. Their length is what the saved
+// audio parts add up to, and they end where the last saved part ends. Returns their ids.
+export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }, now = Date.now()): string[] {
   const nativeActive = nativeStatus.state !== "idle";
   const ids = db
-    .all<{ id: string }>("SELECT id FROM sessions WHERE state IN ('recording', 'paused')")
-    .map((row) => row.id)
-    .filter((id) => !(nativeActive && id === nativeStatus.sessionId));
+    .all<{ id: string; started_at: number }>("SELECT id, started_at FROM sessions WHERE state IN ('recording', 'paused')")
+    .filter((session) => !(nativeActive && session.id === nativeStatus.sessionId))
+    .filter((session) => mayRecover(db, session, now))
+    .map((session) => session.id);
   db.transaction(() => {
     for (const id of ids) {
+      deleteSetting(db, `${RECORDING_HERE_PREFIX}${id}`);
       db.run(
         `UPDATE sessions SET state = 'interrupted',
            transcript = CASE WHEN transcript = 'done' THEN 'done' ELSE 'waiting' END,
