@@ -15,6 +15,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { formatClock, formatOffset } from "../../core/format.ts";
+import { getSession } from "../../core/capture/sessions.ts";
+import { getSpace } from "../../core/db/spaces.ts";
+import { useQuery } from "../../platform/db.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -115,10 +118,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     <View style={styles.transcriptArea}>
       <View style={styles.topRow}>
         <CircleButton label="Close" icon="chevron.down" onPress={onClose} />
-        <View style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}>
-          <SymbolView name="folder.fill" tintColor={colors.ink3} size={14} />
-          <Text style={[styles.pillText, { color: colors.ink }]}>{model.spaceName}</Text>
-        </View>
+        <FolderPill sessionId={model.sessionId} fallback={model.spaceName} />
         <View style={styles.spacer} />
       </View>
       <Title>New recording</Title>
@@ -227,6 +227,28 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         </View>
       ) : null}
     </View>
+  );
+}
+
+// Where this recording is being saved. Tapping it moves the recording; the microphone keeps running under the sheet.
+function FolderPill({ sessionId, fallback }: { sessionId: string | null; fallback: string }) {
+  const colors = useColors();
+  const name = useQuery((db) => {
+    const session = sessionId === null ? null : getSession(db, sessionId);
+    return session === null ? fallback : (getSpace(db, session.spaceId)?.name ?? fallback);
+  }, `${sessionId ?? ""}|${fallback}`);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Saving to ${name}. Change folder`}
+      disabled={sessionId === null}
+      onPress={() => router.push(`/space-picker?sessionId=${encodeURIComponent(sessionId ?? "")}`)}
+      style={[styles.pill, { backgroundColor: colors.surface, borderColor: colors.line }]}
+    >
+      <SymbolView name="folder.fill" tintColor={colors.ink3} size={14} />
+      <Text style={[styles.pillText, { color: colors.ink }]}>{name}</Text>
+      <SymbolView name="chevron.down" tintColor={colors.ink3} size={12} />
+    </Pressable>
   );
 }
 

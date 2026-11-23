@@ -2,9 +2,11 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { sessionsLabel, usedLabel } from "../../core/capture/labels.ts";
+import { isLiveSession } from "../../core/capture/recording.ts";
 import { getSession, moveSessionToSpace } from "../../core/capture/sessions.ts";
 import { getSavingTo, listSpaces, setSavingTo } from "../../core/db/spaces.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
+import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { useQuery, writeDb } from "../../platform/db.ts";
 import { CancelButton, Caption, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -48,6 +50,7 @@ export default function SpacePickerScreen() {
     <Screen>
       <CancelButton />
       <Title>Where should this go?</Title>
+      {sessionId && isLiveSession(getRecorderStatus(), sessionId) ? <Caption>Recording continues while you choose.</Caption> : null}
       {spaces.map((space) => {
         const parts = space.isDefault
           ? ["Everything not in a space yet"]
