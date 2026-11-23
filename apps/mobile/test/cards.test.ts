@@ -7,6 +7,7 @@ import type { SqlDb } from "../src/core/db/sql.ts";
 import {
   cardSourceHref,
   countDue,
+  deleteCard,
   dueCards,
   nextDueAt,
   previewIntervals,
@@ -121,6 +122,14 @@ describe("cards", () => {
     saveCards(db, deps(), sessionId, [card("A"), card("B")], "device_model");
     expect(sessionCardCount(db, sessionId)).toBe(2);
     expect(sessionCardCount(db, "no-such-session")).toBe(0);
+  });
+
+  it("deleteCard removes one card, and an unknown id changes nothing", () => {
+    saveCards(db, deps(), sessionId, [card("A"), card("B")], "device_model");
+    deleteCard(db, "card-1");
+    expect(sessionCards(db, sessionId, 10).map((c) => c.id)).toEqual(["card-2"]);
+    deleteCard(db, "no-such-card");
+    expect(sessionCards(db, sessionId, 10).map((c) => c.id)).toEqual(["card-2"]);
   });
 
   it("sessionCards lists every card of one session, due or not, oldest due first", () => {

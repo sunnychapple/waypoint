@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { listPages } from "../../core/capture/pages.ts";
 import { getSession } from "../../core/capture/sessions.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
-import { cardSourceHref, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
+import { cardSourceHref, deleteCard, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
 import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -125,6 +126,28 @@ export default function ReviewScreen() {
     setFlipped(!flipped);
   }
 
+  // A card the model got wrong can be taken out. The next card takes its place.
+  function removeCard() {
+    Alert.alert("Remove this card?", "It won't come back in your reviews.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          writeDb((db) => deleteCard(db, cardId));
+          setDeck(deck.filter((item) => item.id !== cardId));
+          setMissed(missed.filter((item) => item.id !== cardId));
+          setFlipped(false);
+          setRevealed(false);
+        },
+      },
+    ]);
+  }
+
+  // A viewer of a shared space cannot change its notes.
+  const session = getSession(getDb(), card.sessionId);
+  const canRemove = session === null || spaceGroups(getDb()).get(session.spaceId)?.role !== "viewer";
+
   return (
     <Screen>
       <View style={styles.top}>
@@ -165,6 +188,11 @@ export default function ReviewScreen() {
       ) : (
         <PrimaryButton label="Show answer" onPress={flip} />
       )}
+      {canRemove ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Remove this card" onPress={removeCard} style={styles.remove}>
+          <Text style={[styles.removeText, { color: colors.ink3 }]}>Remove this card</Text>
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
@@ -237,4 +265,6 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 16, fontWeight: "700" },
   ratingInterval: { fontSize: 13 },
   centered: { textAlign: "center" },
+  remove: { minHeight: 44, alignItems: "center", justifyContent: "center" },
+  removeText: { fontSize: 15, fontWeight: "600" },
 });

@@ -104,6 +104,11 @@ export function saveCards(db: SqlDb, deps: Deps, sessionId: string, cards: NewCa
   return rows;
 }
 
+// Removes one card for good, for example one the on-device model got wrong. A synced space gets the delete too.
+export function deleteCard(db: SqlDb, id: string): void {
+  db.run("DELETE FROM cards WHERE id = ?", [id]);
+}
+
 // Cards due at `now`, oldest due first. With a sessionId, only that session's cards.
 export function dueCards(db: SqlDb, now: number, options: { sessionId?: string; limit: number }): CardRow[] {
   const params: SqlValue[] = options.sessionId === undefined ? [now] : [now, options.sessionId];

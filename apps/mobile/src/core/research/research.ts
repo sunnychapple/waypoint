@@ -41,16 +41,25 @@ export function researchForSession(db: SqlDb, sessionId: string): ResearchItem[]
     .map(fromRow);
 }
 
-// The session's own words, for "Include my notes": the transcript made on this iPhone, then page text, cut at a word
-// boundary to the research cap (8,000 characters). Shown in full before it is sent.
-export function notesForResearch(db: SqlDb, sessionId: string, max: number = JOB_TEXT_MAX_CHARS.research): string {
+function allNotes(db: SqlDb, sessionId: string): string {
   const transcript = db
     .all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start", [sessionId])
     .map((r) => r.text);
   const pages = db
     .all<{ found_text: string | null }>("SELECT found_text FROM captures WHERE session_id = ? AND kind IN ('page', 'photo') ORDER BY position, t", [sessionId])
     .map((r) => r.found_text ?? "");
-  const text = [...transcript, ...pages].join(" ").replace(/\s+/g, " ").trim();
+  return [...transcript, ...pages].join(" ").replace(/\s+/g, " ").trim();
+}
+
+// True when a session has more text than `max`, so a cloud task sends only the first part.
+export function notesAreCut(db: SqlDb, sessionId: string, max: number): boolean {
+  return allNotes(db, sessionId).length > max;
+}
+
+// The session's own words, for "Include my notes": the transcript made on this iPhone, then page text, cut at a word
+// boundary to the research cap (8,000 characters). Shown in full before it is sent.
+export function notesForResearch(db: SqlDb, sessionId: string, max: number = JOB_TEXT_MAX_CHARS.research): string {
+  const text = allNotes(db, sessionId);
   if (text.length <= max) return text;
   const cut = text.slice(0, max);
   const space = cut.lastIndexOf(" ");

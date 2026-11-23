@@ -14,7 +14,7 @@ export function ModelUnavailable({ availability, sessionId }: { availability: Un
       {cloudPractice ? (
         <>
           <Body>{CLOUD_PRACTICE_LINE}</Body>
-          <PrimaryButton label="Make a Practice set" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+          <PrimaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
         </>
       ) : null}
     </>

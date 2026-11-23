@@ -12,7 +12,7 @@ import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
-import { madeText, startMade } from "../../platform/made.ts";
+import { madeText, madeTextIsCut, startMade } from "../../platform/made.ts";
 import { usePendingText } from "../../platform/pending.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
@@ -63,6 +63,7 @@ export default function NewMadeScreen() {
   const price = quote.quote?.credits ?? null;
   const text = sessionId !== null ? madeText(sessionId, kind) : "";
   const hasText = text !== "";
+  const isCut = sessionId !== null && hasText && madeTextIsCut(sessionId, kind);
 
   async function start(): Promise<void> {
     if (sessionId === null || !hasText || !available || price === null || starting) return;
@@ -106,6 +107,7 @@ export default function NewMadeScreen() {
       ) : null}
 
       {skipped !== null ? <Caption>{skippedCopy(skipped)}</Caption> : null}
+      {isCut ? <Caption>This session is long. Only the first part is sent, so the end of the recording and any pages may be left out.</Caption> : null}
 
       {hasText ? (
         <>

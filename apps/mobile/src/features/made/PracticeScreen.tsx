@@ -24,6 +24,7 @@ export default function PracticeScreen() {
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [typed, setTyped] = useState("");
   const [needsAnswer, setNeedsAnswer] = useState(false);
+  const [added, setAdded] = useState<number | null>(null);
 
   if (item === null || item.kind !== "practice") {
     return (
@@ -52,7 +53,7 @@ export default function PracticeScreen() {
             setTyped("");
           }}
         />
-        <AddToCards sessionId={item.sessionId} questions={questions} />
+        <AddToCards sessionId={item.sessionId} questions={questions} added={added} onAdded={setAdded} />
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>
     );
@@ -99,7 +100,7 @@ export default function PracticeScreen() {
       <BackButton onPress={leave} />
       <Title>{item.body.title}</Title>
       <Caption>{`Question ${position + 1} of ${total}`}</Caption>
-      <AddToCards sessionId={item.sessionId} questions={questions} />
+      <AddToCards sessionId={item.sessionId} questions={questions} added={added} onAdded={setAdded} />
       <Body style={styles.prompt}>{question.prompt}</Body>
 
       {question.kind === "multiple_choice" ? (
@@ -163,21 +164,37 @@ export default function PracticeScreen() {
 }
 
 // Saves the set as flashcards in its session. Saving twice adds nothing, because a session never repeats a card's front.
-function AddToCards({ sessionId, questions }: { sessionId: string | null; questions: PracticeQuestion[] }) {
-  const [added, setAdded] = useState<number | null>(null);
+function AddToCards({
+  sessionId,
+  questions,
+  added,
+  onAdded,
+}: {
+  sessionId: string | null;
+  questions: PracticeQuestion[];
+  added: number | null;
+  onAdded: (count: number) => void;
+}) {
   // A viewer of a shared space cannot change its notes (the server refuses their changes).
   const viewer = useQuery((db) => {
     const session = sessionId === null ? null : getSession(db, sessionId);
     return session !== null && spaceGroups(db).get(session.spaceId)?.role === "viewer";
   }, sessionId ?? "");
   if (sessionId === null || viewer) return null;
-  if (added !== null) return <Caption>{added === 0 ? "These are already in your flashcards." : `Added ${added} to your flashcards.`}</Caption>;
+  if (added !== null) {
+    return (
+      <>
+        <Caption>{added === 0 ? "These are already in your flashcards." : `Added ${added} to your flashcards.`}</Caption>
+        <SecondaryButton label="Practise these" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
+      </>
+    );
+  }
   return (
     <SecondaryButton
       label="Add to flashcards"
       onPress={() => {
         try {
-          setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, practiceCards(questions), "quiz_miss")).length);
+          onAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, practiceCards(questions), "quiz_miss")).length);
         } catch {
           Alert.alert("Couldn't add these to your flashcards.");
         }
