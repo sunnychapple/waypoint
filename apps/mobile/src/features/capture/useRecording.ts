@@ -213,16 +213,16 @@ export function useRecording(): RecordingModel {
           return;
         }
         if (cancelled) {
-          // The screen went away while the recorder was starting, so the unmount stop came too early. Stop it now.
-          // A new session stays unfinished and the next launch's recoverSessions marks it interrupted. A continued one
-          // goes back to how it was, so it is not left looking like it is still recording.
+          // The screen went away while the recorder was starting. If the unmount stop came too early, this stop is the
+          // one that succeeds: a new session stays unfinished and the next launch's recoverSessions marks it interrupted,
+          // and a continued one goes back to how it was. If this stop fails, the unmount stop already saved the session.
           const reopened = continuedRef.current;
           const sessionId = created.session.id;
           stopRecording()
-            .catch(() => undefined)
-            .finally(() => {
+            .then(() => {
               if (reopened !== null) writeDb((db) => undoContinue(db, sessionId, reopened.restore));
-            });
+            })
+            .catch(() => undefined);
           return;
         }
         setAnchor({ ms: created.continued?.from.priorRecordedMs ?? 0, at: Date.now() });
