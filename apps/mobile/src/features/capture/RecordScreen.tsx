@@ -22,9 +22,9 @@ import { TimeMarkRow } from "./TimelineMarks.tsx";
 import { useRecording, type Banner, type TimelineItem } from "./useRecording.ts";
 
 const PAUSE_REASONS: Record<string, string> = {
-  interruption: "Paused for a call or another app.",
-  route_change: "The microphone changed.",
-  media_reset: "Audio restarted.",
+  interruption: "Another app took the microphone. We'll try to resume when it finishes.",
+  route_change: "The microphone changed. We'll try to resume.",
+  media_reset: "Audio restarted. We'll try to resume.",
   write_failed: "Your iPhone couldn't save the recording. Free up some space, then resume.",
 };
 
@@ -112,7 +112,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
       {showPause ? (
         <View style={[styles.card, { backgroundColor: colors.flagSoft, borderColor: colors.flag }]}>
           <View style={styles.cardHead}>
-            <SymbolView name="phone.fill" tintColor={colors.flag} size={20} />
+            <SymbolView name="mic.slash.fill" tintColor={colors.flag} size={20} />
             <View style={styles.flex}>
               <Text style={[styles.cardTitle, { color: colors.flagInk }]}>Recording paused at {formatClock(model.clockMs)}</Text>
               <Text style={[styles.cardBody, { color: colors.flagInk }]}>{PAUSE_REASONS[model.pauseReason] ?? ""}</Text>

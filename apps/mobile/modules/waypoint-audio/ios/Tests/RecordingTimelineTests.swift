@@ -22,6 +22,23 @@ import Testing
   #expect(t.runStartMs == 0)
 }
 
+@Test func cancelRunDropsThePartAndReusesItsIndex() {
+  var t = RecordingTimeline(sessionStart: 0)
+  _ = t.startRun(now: 0)
+  _ = t.endRun(now: 60_000)
+  let recorded = t.recordedMs(now: 60_000)
+  #expect(t.startRun(now: 90_000) == RecordingPart(index: 1, startMs: 90_000, durationMs: 0))
+  #expect(t.cancelRun() == RecordingPart(index: 1, startMs: 90_000, durationMs: 0))
+  #expect(t.isRunning == false)
+  #expect(t.recordedMs(now: 95_000) == recorded)
+  #expect(t.startRun(now: 95_000) == RecordingPart(index: 1, startMs: 95_000, durationMs: 0))
+}
+
+@Test func cancelRunWithNothingRunningReturnsNil() {
+  var t = RecordingTimeline(sessionStart: 0)
+  #expect(t.cancelRun() == nil)
+}
+
 @Test func levelMeterMapsDecibelsToZeroToOne() {
   #expect(LevelMeter.normalized(rms: 0) == 0)
   #expect(LevelMeter.normalized(rms: 1) == 1)

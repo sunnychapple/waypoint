@@ -44,6 +44,15 @@ struct RecordingTimeline {
     return part
   }
 
+  /// Drops the run that just started and could not record. Its part is forgotten, so the next run reuses its index.
+  /// Returns the dropped part, or nil if nothing was running.
+  mutating func cancelRun() -> RecordingPart? {
+    let part = current
+    current = nil
+    runStartMs = nil
+    return part
+  }
+
   /// Call on every audio buffer. If the current part is full, closes it and opens the next one in the
   /// same run; returns (closed, opened). Otherwise returns nil.
   mutating func rollIfNeeded(now: Int64) -> (closed: RecordingPart, opened: RecordingPart)? {

@@ -9,9 +9,14 @@ import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { followJob } from "./jobs.ts";
 import { syncNow } from "./sync.ts";
 
-// Alerts show as banners while the app is open, too.
+// Alerts show as banners while the app is open, too, except the recording pause alert: the recording screen shows it.
+const RECORDING_PAUSED_ALERT = "waypoint.recording-paused"; // AudioRecorder.alertId
+
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+  handleNotification: async (notification) => {
+    const show = notification.request.identifier !== RECORDING_PAUSED_ALERT;
+    return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+  },
 });
 
 // What was last sent this launch, per person and token. Not in the notes database: the server keeps one row per token,

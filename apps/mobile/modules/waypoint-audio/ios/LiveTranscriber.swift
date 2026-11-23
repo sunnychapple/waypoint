@@ -80,12 +80,14 @@ final class LiveTranscriber: AudioBufferSink {
   }
 
   func runEnded() {
-    let (analyzer, continuation, results) = lock.withLock { (self.analyzer, self.continuation, self.results) }
+    let (analyzer, continuation, results, previous) = lock.withLock { (self.analyzer, self.continuation, self.results, self.finishing) }
     continuation?.finish()
-    // Done once the analyzer has finished the input and the results loop has sent the last final words.
+    // Done once the analyzer has finished the input and the results loop has sent the last final words. It also waits
+    // for the run before it, because a quick automatic restart can end two runs close together.
     let finishing = Task {
       if let analyzer { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
       await results?.value
+      await previous?.value
     }
     lock.withLock {
       self.analyzer = nil
