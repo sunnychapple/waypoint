@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -15,13 +15,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { formatClock, formatOffset } from "../../core/format.ts";
+import { groupTimeline, type TimelineRow as Row } from "../../core/capture/timeline.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { useQuery } from "../../platform/db.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
-import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { isAtEnd } from "../../core/capture/follow.ts";
+import { ParagraphRow } from "./ParagraphRow.tsx";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 import { Waveform } from "./Waveform.tsx";
 import { useRecording, type Banner, type TimelineItem } from "./useRecording.ts";
@@ -98,6 +99,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const [showJump, setShowJump] = useState(false);
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
+  const rows = useMemo(() => groupTimeline(model.timeline), [model.timeline]);
 
   function setFollowing(next: boolean): void {
     following.current = next;
@@ -194,13 +196,13 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
           if (following.current && !touching.current) scroll.current?.scrollToEnd({ animated: true });
         }}
       >
-        {model.timeline.map((item) => (
+        {rows.map((item) => (
           <TimelineRow key={item.key} item={item} sessionId={model.sessionId} />
         ))}
         {model.volatile ? (
-          <View style={styles.line}>
-            <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(model.volatile.tStart)}</Text>
-            <Text style={[styles.lineText, { color: colors.ink3 }]}>{model.volatile.text}</Text>
+          <View style={styles.volatile}>
+            <Text style={[styles.time, { color: colors.ink3, minWidth: 0 }]}>{formatOffset(model.volatile.tStart)}</Text>
+            <Text style={[{ fontSize: 17, lineHeight: 26 }, { color: colors.ink3 }]}>{model.volatile.text}</Text>
           </View>
         ) : null}
       </ScrollView>
@@ -252,28 +254,25 @@ function FolderPill({ sessionId, fallback }: { sessionId: string | null; fallbac
   );
 }
 
-const TimelineRow = memo(function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: string | null }) {
-  const colors = useColors();
-  switch (item.kind) {
-    case "line":
-      return (
-        <View style={styles.line}>
-          <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
-          <WordText
-            text={item.text}
-            style={[styles.lineText, { color: colors.ink }]}
-            onWord={(word) => {
-              if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(item.at), word } });
-            }}
-          />
-        </View>
-      );
-    case "gap":
-    case "flag":
-    case "photo":
-      return <TimeMarkRow item={item} interactive={item.kind === "photo"} />;
-  }
-}, (a, b) => a.sessionId === b.sessionId && a.item.key === b.item.key);
+const TimelineRow = memo(
+  function TimelineRow({ item, sessionId }: { item: Row; sessionId: string | null }) {
+    if (item.kind !== "paragraph") return <TimeMarkRow item={item} interactive={item.kind === "photo"} />;
+    return (
+      <ParagraphRow
+        at={item.at}
+        lines={item.lines}
+        onWord={(word, at) => {
+          if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(at), word } });
+        }}
+      />
+    );
+  },
+  // A paragraph changes only by gaining lines; a written line never changes.
+  (a, b) =>
+    a.sessionId === b.sessionId &&
+    a.item.key === b.item.key &&
+    (a.item.kind !== "paragraph" || b.item.kind !== "paragraph" || a.item.lines.length === b.item.lines.length),
+);
 
 function BannerView({ banner }: { banner: Banner }) {
   const colors = useColors();
@@ -384,10 +383,9 @@ const styles = StyleSheet.create({
   cardBody: { fontSize: 14, lineHeight: 20 },
   progressTrack: { height: 6, borderRadius: 3, overflow: "hidden" },
   progressFill: { height: 6 },
-  lines: { gap: 12, paddingBottom: 12 },
-  line: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  lines: { gap: 22, paddingBottom: 12 },
+  volatile: { gap: 6 },
   time: { fontSize: 13, fontVariant: ["tabular-nums"], minWidth: 44, paddingTop: 2 },
-  lineText: { flex: 1, fontSize: 17, lineHeight: 24 },
   toast: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
   toastText: { fontSize: 14, fontWeight: "600" },
   dock: { margin: 12, padding: 16, borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, gap: 14 },
