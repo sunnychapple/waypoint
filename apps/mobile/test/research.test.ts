@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { getResearch, keyForRequest, notesForResearch, researchForSession, researchRequest, saveResearch } from "../src/core/research/research.ts";
+import { getResearch, keyForRequest, notesAreCut, notesForResearch, researchForSession, researchRequest, saveResearch } from "../src/core/research/research.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 function setup() {
@@ -39,6 +39,13 @@ describe("research", () => {
     db.run("INSERT INTO captures (id, session_id, kind, t, position, file, found_text) VALUES ('c1', ?, 'page', 0, 0, 'p.jpg', 'gamma delta')", [session.id]);
     expect(notesForResearch(db, session.id)).toBe("alpha beta gamma delta");
     expect(notesForResearch(db, session.id, 13)).toBe("alpha beta");
+  });
+  it("notesAreCut is false at exactly the limit and true one character over", () => {
+    const { db, session } = setup();
+    saveSegment(db, session.id, { tStart: 0, tEnd: 1, text: "alpha beta" });
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file, found_text) VALUES ('c1', ?, 'page', 0, 0, 'p.jpg', 'gamma delta')", [session.id]);
+    expect(notesAreCut(db, session.id, 22)).toBe(false);
+    expect(notesAreCut(db, session.id, 21)).toBe(true);
   });
   it("researchRequest: notes are added only when there are some", () => {
     expect(researchRequest({ question: "Q?", depth: "quick", notes: null })).toEqual({ type: "research", depth: "quick", question: "Q?" });

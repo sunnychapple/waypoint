@@ -114,6 +114,7 @@ export default function QuizScreen() {
       <Screen>
         <CloseButton />
         <Title>{UNSUPPORTED_LANGUAGE_LINE}</Title>
+        <SecondaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
       </Screen>
     );
   }

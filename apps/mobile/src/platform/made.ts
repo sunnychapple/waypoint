@@ -1,7 +1,7 @@
 import { JOB_TEXT_MAX_CHARS } from "@waypoint/contracts";
 import type { CloudFailure } from "../core/cloud/failure.ts";
 import { saveMade, type MadeKind } from "../core/made/made.ts";
-import { notesForResearch } from "../core/research/research.ts";
+import { notesAreCut, notesForResearch } from "../core/research/research.ts";
 import { getDb } from "./db.ts";
 import { RESULT_ROUTES, RESULT_SAVERS } from "./jobResults.ts";
 import { startJob } from "./jobs.ts";
@@ -9,6 +9,10 @@ import { startJob } from "./jobs.ts";
 // The session's text for a made item, cut at the type's cap.
 export function madeText(sessionId: string, kind: MadeKind): string {
   return notesForResearch(getDb(), sessionId, JOB_TEXT_MAX_CHARS[kind]);
+}
+
+export function madeTextIsCut(sessionId: string, kind: MadeKind): boolean {
+  return notesAreCut(getDb(), sessionId, JOB_TEXT_MAX_CHARS[kind]);
 }
 
 export function startMade(kind: MadeKind, sessionId: string, key: string, prompt: string | null): Promise<{ ok: true; jobId: string } | { ok: false; failure: CloudFailure }> {

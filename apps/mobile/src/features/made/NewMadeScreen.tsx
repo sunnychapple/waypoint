@@ -12,7 +12,8 @@ import { pendingCopy, skippedCopy } from "../../core/study/pending.ts";
 import { useConfig } from "../../platform/config.ts";
 import { useSignOut } from "../../platform/auth.tsx";
 import { useQuote } from "../../platform/jobs.ts";
-import { madeText, startMade } from "../../platform/made.ts";
+import { useQuery } from "../../platform/db.ts";
+import { madeText, madeTextIsCut, startMade } from "../../platform/made.ts";
 import { usePendingText } from "../../platform/pending.ts";
 import { Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { QuoteBox } from "../../ui/QuoteBox.tsx";
@@ -61,7 +62,11 @@ export default function NewMadeScreen() {
   const quote = useQuote(available ? { task: kind } : null);
   const signOut = useSignOut();
   const price = quote.quote?.credits ?? null;
-  const text = sessionId !== null ? madeText(sessionId, kind) : "";
+  // Read once per change to the notes, not on every keystroke in the focus box.
+  const { text, isCut } = useQuery(
+    () => (sessionId === null ? { text: "", isCut: false } : { text: madeText(sessionId, kind), isCut: madeTextIsCut(sessionId, kind) }),
+    `${sessionId ?? ""}|${kind}`,
+  );
   const hasText = text !== "";
 
   async function start(): Promise<void> {
@@ -106,6 +111,7 @@ export default function NewMadeScreen() {
       ) : null}
 
       {skipped !== null ? <Caption>{skippedCopy(skipped)}</Caption> : null}
+      {isCut ? <Caption>This session is long. Only the first part is sent, so the end of the recording and any pages may be left out.</Caption> : null}
 
       {hasText ? (
         <>

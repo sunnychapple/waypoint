@@ -102,7 +102,12 @@ export default function MakeCardsScreen() {
           {skipped !== null ? <Body>{skippedCopy(skipped)}</Body> : null}
         </View>
       ) : null}
-      {outcome === "unsupported" ? <Title>{UNSUPPORTED_LANGUAGE_LINE}</Title> : null}
+      {outcome === "unsupported" ? (
+        <>
+          <Title>{UNSUPPORTED_LANGUAGE_LINE}</Title>
+          <SecondaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+        </>
+      ) : null}
       {outcome === "failed" ? (
         <>
           <Title>Couldn't make flashcards this time.</Title>

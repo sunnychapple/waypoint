@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { listPages } from "../../core/capture/pages.ts";
 import { getSession } from "../../core/capture/sessions.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
-import { cardSourceHref, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
+import { cardExists, cardSourceHref, deleteCard, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
 import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -64,6 +65,14 @@ export default function ReviewScreen() {
     setMissed([]);
   }
 
+  // Takes a card out of this review. The next card takes its place.
+  function dropCard(id: string) {
+    setDeck(deck.filter((item) => item.id !== id));
+    setMissed(missed.filter((item) => item.id !== id));
+    setFlipped(false);
+    setRevealed(false);
+  }
+
   if (showMade && sessionId !== undefined) {
     return (
       <Screen>
@@ -99,6 +108,12 @@ export default function ReviewScreen() {
     );
   }
 
+  // Deleted on another phone since this review started.
+  if (!cardExists(getDb(), card.id)) {
+    dropCard(card.id);
+    return null;
+  }
+
   const previews = previewIntervals(getDb(), card.id, Date.now());
   const source = sourceOf(card);
   const ratings = [
@@ -111,6 +126,10 @@ export default function ReviewScreen() {
   const current: CardRow = card;
   const cardId = card.id;
   function rate(rating: 1 | 2 | 3 | 4) {
+    if (!cardExists(getDb(), cardId)) {
+      dropCard(cardId);
+      return;
+    }
     writeDb((db) => reviewCard(db, cardId, rating, Date.now()));
     if (rating === 1) setMissed([...missed, current]);
     else setRight(right + 1);
@@ -124,6 +143,25 @@ export default function ReviewScreen() {
     if (!flipped) setRevealed(true);
     setFlipped(!flipped);
   }
+
+  // A card the model got wrong can be taken out.
+  function removeCard() {
+    Alert.alert("Remove this card?", "It won't come back in your reviews.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          writeDb((db) => deleteCard(db, cardId));
+          dropCard(cardId);
+        },
+      },
+    ]);
+  }
+
+  // A viewer of a shared space cannot change its notes.
+  const session = getSession(getDb(), card.sessionId);
+  const canRemove = session === null || spaceGroups(getDb()).get(session.spaceId)?.role !== "viewer";
 
   return (
     <Screen>
@@ -165,6 +203,11 @@ export default function ReviewScreen() {
       ) : (
         <PrimaryButton label="Show answer" onPress={flip} />
       )}
+      {canRemove ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Remove this card" onPress={removeCard} style={styles.remove}>
+          <Text style={[styles.removeText, { color: colors.ink3 }]}>Remove this card</Text>
+        </Pressable>
+      ) : null}
     </Screen>
   );
 }
@@ -237,4 +280,6 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 16, fontWeight: "700" },
   ratingInterval: { fontSize: 13 },
   centered: { textAlign: "center" },
+  remove: { minHeight: 44, alignItems: "center", justifyContent: "center" },
+  removeText: { fontSize: 15, fontWeight: "600" },
 });
