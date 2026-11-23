@@ -56,3 +56,14 @@ export function piecesToKeep<T extends SegmentSpan>(pieces: T[], existing: Segme
     return coveredMs(piece.tStart, piece.tEnd, existing) * 2 < length;
   });
 }
+
+// What to write for a re-transcribed part, in place of the segments that start inside it. The second pass splits
+// sentences differently, so merging the two would repeat or lose words at each edge. Pieces that mostly repeat a segment
+// spilling in from another part are left out. Null when the second pass covers no more of the part: keep what is there.
+export function replacementFor<T extends SegmentSpan>(part: PartSpan, pieces: T[], existing: SegmentSpan[]): T[] | null {
+  const end = part.startMs + part.durationMs;
+  const own = existing.filter((s) => s.tStart >= part.startMs && s.tStart < end);
+  const others = existing.filter((s) => s.tStart < part.startMs || s.tStart >= end);
+  const fresh = piecesToKeep(pieces, others);
+  return coveredMs(part.startMs, end, fresh) > coveredMs(part.startMs, end, own) ? fresh : null;
+}

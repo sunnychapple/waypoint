@@ -4,6 +4,7 @@ import {
   addPiece,
   partsNeedingTranscription,
   piecesToKeep,
+  replacementFor,
   type Piece,
 } from "../src/core/capture/transcript.ts";
 
@@ -108,5 +109,40 @@ describe("piecesToKeep", () => {
     expect(piecesToKeep([{ tStart: 5_000, tEnd: 5_000 }], existing)).toEqual([]);
     const outside = { tStart: 20_000, tEnd: 20_000 };
     expect(piecesToKeep([outside], existing)).toEqual([outside]);
+  });
+});
+
+describe("replacementFor", () => {
+  const part = { startMs: 60_000, durationMs: 60_000 };
+
+  it("replaces a short live segment that starts where a longer piece starts", () => {
+    const longer = { tStart: 60_000, tEnd: 80_000 };
+    expect(replacementFor(part, [longer], [{ tStart: 60_000, tEnd: 63_000 }])).toEqual([longer]);
+  });
+
+  it("replaces a part's segments when the pieces overlap them and cover more", () => {
+    const pieces = [
+      { tStart: 65_000, tEnd: 80_000 },
+      { tStart: 80_000, tEnd: 110_000 },
+    ];
+    expect(replacementFor(part, pieces, [{ tStart: 60_000, tEnd: 68_000 }])).toEqual(pieces);
+  });
+
+  it("keeps what is there when the second pass covers no more of the part", () => {
+    const existing = [{ tStart: 60_000, tEnd: 90_000 }];
+    expect(replacementFor(part, [{ tStart: 60_000, tEnd: 70_000 }], existing)).toBeNull();
+    expect(replacementFor(part, [{ tStart: 60_000, tEnd: 90_000 }], existing)).toBeNull();
+    expect(replacementFor(part, [], existing)).toBeNull();
+  });
+
+  it("leaves out a piece that mostly repeats a segment spilling in from the part before", () => {
+    const repeat = { tStart: 60_000, tEnd: 64_000 };
+    const fresh = { tStart: 64_000, tEnd: 100_000 };
+    expect(replacementFor(part, [repeat, fresh], [{ tStart: 55_000, tEnd: 64_000 }])).toEqual([fresh]);
+  });
+
+  it("does not count a segment of the next part as this part's own", () => {
+    const piece = { tStart: 60_000, tEnd: 100_000 };
+    expect(replacementFor(part, [piece], [{ tStart: 120_000, tEnd: 130_000 }])).toEqual([piece]);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { getRecorderStatus, getSpeechStatus, transcribeFile } from "../../modules/waypoint-audio/index.ts";
 import { pendingTranscriptions, recoverSessions, saveSegment } from "../core/capture/recording.ts";
-import { piecesToKeep } from "../core/capture/transcript.ts";
+import { replacementFor } from "../core/capture/transcript.ts";
 import { dbGeneration, getDb, writeDb, writeDbIf } from "./db.ts";
 
 const TICK_MS = 20_000;
@@ -55,9 +55,18 @@ async function transcribeSession(
     const pieces = await transcribeFile(part.file, part.startMs);
     writeDbIf(generation, (db) => {
       const existing = db
-        .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ?", [sessionId])
+        .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ? AND source = 'device'", [sessionId])
         .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
-      for (const piece of piecesToKeep(pieces, existing)) saveSegment(db, sessionId, piece);
+      const fresh = replacementFor(part, pieces, existing);
+      if (fresh === null) return;
+      db.transaction(() => {
+        db.run("DELETE FROM segments WHERE session_id = ? AND source = 'device' AND t_start >= ? AND t_start < ?", [
+          sessionId,
+          part.startMs,
+          part.startMs + part.durationMs,
+        ]);
+        for (const piece of fresh) saveSegment(db, sessionId, piece);
+      });
     });
   }
   writeDbIf(generation, (db) => db.run("UPDATE sessions SET transcript = 'done', indexed_at = NULL WHERE id = ?", [sessionId]));
