@@ -9,7 +9,7 @@ import { listPages } from "../../core/capture/pages.ts";
 import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capture/second.ts";
 import { isLiveSession } from "../../core/capture/recording.ts";
 import { listSegments } from "../../core/capture/segments.ts";
-import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
+import { buildTimeline, groupTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import type { Piece } from "../../core/capture/transcript.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import type { SqlDb } from "../../core/db/sql.ts";
@@ -18,7 +18,7 @@ import { spaceGroups } from "../../core/groups/groups.ts";
 import { researchForSession } from "../../core/research/research.ts";
 import { linksForSession } from "../../core/share/links.ts";
 import { madeForSession, type MadeItem } from "../../core/made/made.ts";
-import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
+import { countLabel, formatClock } from "../../core/format.ts";
 import { jobsForSession } from "../../core/jobs/jobs.ts";
 import { overviewsForSession, type Overview, type OverviewState } from "../../core/overviews/overviews.ts";
 import { useConfig } from "../../platform/config.ts";
@@ -31,6 +31,7 @@ import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { PageTextEditor } from "./PageTextEditor.tsx";
+import { ParagraphRow } from "./ParagraphRow.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 
@@ -264,30 +265,21 @@ export default function SessionScreen() {
             {second.truncated ? <Caption>Only the minutes you paid for were transcribed.</Caption> : null}
           </>
         ) : (
-          timeline.map((item) =>
-            item.kind === "line" ? (
-              <View
-                key={item.key}
-                onLayout={(event) => landOn(item.key, event.nativeEvent.layout.y)}
-                style={[styles.line, lit === item.key ? [styles.litLine, { backgroundColor: colors.accentSoft }] : null]}
-              >
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Play from ${formatOffset(item.at)}`}
-                  hitSlop={12}
-                  disabled={!playable || getRecorderStatus().state !== "idle"}
-                  onPress={() => setSeek({ ms: item.at })}
-                >
-                  <Text style={[styles.time, { color: playable ? colors.accent : colors.ink3 }]}>{formatOffset(item.at)}</Text>
-                </Pressable>
-                <WordText
-                  text={item.text}
-                  style={[styles.lineText, { color: colors.ink }]}
-                  onWord={(word) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(item.at), word } })}
-                />
-              </View>
+          groupTimeline(timeline).map((row) =>
+            row.kind === "paragraph" ? (
+              <ParagraphRow
+                key={row.key}
+                at={row.at}
+                lines={row.lines}
+                lit={row.lines.some((line) => line.key === lit)}
+                onLayout={(event) => {
+                  if (targetKey !== null && row.lines.some((line) => line.key === targetKey)) landOn(targetKey, event.nativeEvent.layout.y);
+                }}
+                onPlay={playable && getRecorderStatus().state === "idle" ? () => setSeek({ ms: row.at }) : undefined}
+                onWord={(word, at) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(at), word } })}
+              />
             ) : (
-              <TimeMarkRow key={item.key} item={item} interactive />
+              <TimeMarkRow key={row.key} item={row} interactive />
             ),
           )
         )}
@@ -542,8 +534,6 @@ const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 40, gap: 16 },
   studyHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   litLine: { borderRadius: 10, paddingHorizontal: 6, marginHorizontal: -6 },
-  line: { flexDirection: "row", gap: 12 },
-  time: { width: 48, fontSize: 13, fontVariant: ["tabular-nums"] },
   lineText: { flex: 1, fontSize: 17, lineHeight: 25 },
   changed: { fontWeight: "700" },
   switchRow: { flexDirection: "row", gap: 8 },

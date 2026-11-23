@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTimeline } from "../src/core/capture/timeline.ts";
+import { buildTimeline, groupTimeline, type TimelineItem } from "../src/core/capture/timeline.ts";
 
 const part = (index: number, startMs: number, durationMs: number) => ({ index, startMs, durationMs });
 
@@ -32,5 +32,44 @@ describe("buildTimeline", () => {
       [{ id: "x", t: 80_000, file: "p.jpg" }],
     );
     expect(items.map((i) => i.kind)).toEqual(["line", "flag", "gap", "line", "photo"]);
+  });
+});
+
+describe("groupTimeline", () => {
+  const line = (at: number, end: number, text = "words"): TimelineItem => ({ kind: "line", key: `line-${at}`, at, end, text });
+
+  it("joins lines whose gap is under 3 seconds", () => {
+    const rows = groupTimeline([line(0, 1000), line(3999, 4500)]);
+    expect(rows.map((row) => row.kind)).toEqual(["paragraph"]);
+  });
+
+  it("splits lines whose gap is exactly 3 seconds", () => {
+    const rows = groupTimeline([line(0, 1000), line(4000, 4500)]);
+    expect(rows.map((row) => row.kind)).toEqual(["paragraph", "paragraph"]);
+  });
+
+  it("splits a line that would make the paragraph longer than 30 seconds, and joins one ending at exactly 30 seconds", () => {
+    const joins = groupTimeline([line(0, 15_000), line(15_000, 30_000)]);
+    expect(joins).toHaveLength(1);
+    const splits = groupTimeline([line(0, 15_000), line(15_000, 30_000), line(30_000, 30_500)]);
+    expect(splits).toHaveLength(2);
+    expect(splits[1]).toMatchObject({ kind: "paragraph", at: 30_000 });
+  });
+
+  it("splits two close lines when a flag sits between them, and keeps the flag in place", () => {
+    const rows = groupTimeline([line(0, 1000), { kind: "flag", key: "flag-0", at: 1500 }, line(1600, 2000)]);
+    expect(rows.map((row) => row.kind)).toEqual(["paragraph", "flag", "paragraph"]);
+    expect(rows[1]).toEqual({ kind: "flag", key: "flag-0", at: 1500 });
+  });
+
+  it("gives the paragraph the key and time of its first line", () => {
+    const rows = groupTimeline([line(5000, 6000, "one"), line(6500, 7000, "two")]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "paragraph", key: "line-5000", at: 5000 });
+    expect(rows[0]?.kind === "paragraph" ? rows[0].lines.map((l) => l.text) : []).toEqual(["one", "two"]);
+  });
+
+  it("gives an empty list for no items", () => {
+    expect(groupTimeline([])).toEqual([]);
   });
 });
