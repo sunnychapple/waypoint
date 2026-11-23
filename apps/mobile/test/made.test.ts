@@ -5,7 +5,8 @@ import { deleteSessionRow } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { getMade, madeForSession, saveMade } from "../src/core/made/made.ts";
-import { answerKey, grade, score } from "../src/core/made/practice.ts";
+import { answerKey, grade, practiceCards, score } from "../src/core/made/practice.ts";
+import { saveCards, sessionCards } from "../src/core/study/cards.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 const PRACTICE = {
@@ -79,5 +80,26 @@ describe("practice grading", () => {
     expect(answerKey("The Mitochondria.")).toBe("mitochondria");
     expect(answerKey("well-known")).toBe("well known");
     expect(answerKey("Pi is 3.14.")).toBe("pi is 3.14");
+  });
+});
+
+describe("practice as flashcards", () => {
+  const set = PracticeSetResultSchema.parse(PRACTICE);
+  const deps = (n: { value: number }) => ({ now: () => 1000, newId: () => `card_${++n.value}` });
+  it("a multiple choice question: prompt on the front, the right choice then the explanation on the back", () => {
+    const [card] = practiceCards([set.questions[0]!]);
+    expect(card).toEqual({ kind: "question", front: "Powerhouse?", back: "Mitochondria\n\nIt makes ATP.", captureId: null, t: null });
+  });
+  it("a short answer question becomes a card the same way", () => {
+    const [card] = practiceCards([set.questions[1]!]);
+    expect(card).toEqual({ kind: "question", front: "Unit of life?", back: "The cell\n\nEverything is made of cells.", captureId: null, t: null });
+  });
+  it("saves the set as cards once: a second save adds none", () => {
+    const { db, session } = setup();
+    const counter = { value: 0 };
+    const cards = practiceCards(set.questions);
+    expect(saveCards(db, deps(counter), session.id, cards, "quiz_miss")).toHaveLength(3);
+    expect(saveCards(db, deps(counter), session.id, cards, "quiz_miss")).toHaveLength(0);
+    expect(sessionCards(db, session.id, 10)).toHaveLength(3);
   });
 });
