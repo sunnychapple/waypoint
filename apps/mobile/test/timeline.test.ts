@@ -24,8 +24,9 @@ describe("buildTimeline", () => {
   });
 
   it("keeps a gap drawn after the part following the resume has closed", () => {
-    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 40_000, 20_000)], [40_000], [], []);
-    expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
+    // The screen hears about the resume just after the new part started, so that part started "before" the resume.
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 40_000, 20_000)], [40_050], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40050", at: 10_000, gapMs: 30_050 }]);
   });
 
   it("draws no gap for an instant restart, and does not measure from an earlier part", () => {
