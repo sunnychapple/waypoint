@@ -335,6 +335,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
       if (r.t_start < from || r.t_start >= to) continue;
       db.run("INSERT OR IGNORE INTO segments (session_id, t_start, t_end, text, source) VALUES (?, ?, ?, ?, ?)", [sessionId, r.t_start, Math.max(r.t_start, r.t_end), r.text, change.source]);
     }
+    // New words from another phone (a continued recording) must reach this phone's search.
+    db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);
     return "applied";
   }
   if (change.table === "spaces" || change.table === "sessions") return "rejected";

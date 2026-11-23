@@ -16,6 +16,8 @@ export type TranscriptEvent = { sessionId: string; tStart: number; tEnd: number;
 export type TranscriptPiece = Omit<TranscriptEvent, "sessionId">;
 export type SpeechErrorEvent = { sessionId: string; message: string };
 export type SpeechPackEvent = { fraction: number };
+// Where a recorder picks up a saved session: time since the session started, the next part number, and what it already holds.
+export type ContinueFrom = { elapsedMs: number; firstIndex: number; priorRecordedMs: number };
 
 type Events = {
   onState(event: StateEvent): void;
@@ -29,7 +31,7 @@ type Events = {
 declare class WaypointAudioNative extends NativeModule<Events> {
   getMicPermission(): Promise<MicPermission>;
   requestMicPermission(): Promise<MicPermission>;
-  start(sessionId: string): Promise<void>;
+  start(sessionId: string, elapsedMs: number, firstIndex: number, priorRecordedMs: number): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   stop(): Promise<number>;
@@ -43,7 +45,8 @@ const native = requireNativeModule<WaypointAudioNative>("WaypointAudio");
 
 export const getMicPermission = (): Promise<MicPermission> => native.getMicPermission();
 export const requestMicPermission = (): Promise<MicPermission> => native.requestMicPermission();
-export const startRecording = (sessionId: string): Promise<void> => native.start(sessionId);
+export const startRecording = (sessionId: string, from: ContinueFrom = { elapsedMs: 0, firstIndex: 0, priorRecordedMs: 0 }): Promise<void> =>
+  native.start(sessionId, from.elapsedMs, from.firstIndex, from.priorRecordedMs);
 export const pauseRecording = (): Promise<void> => native.pause();
 export const resumeRecording = (): Promise<void> => native.resume();
 export const stopRecording = (): Promise<number> => native.stop();

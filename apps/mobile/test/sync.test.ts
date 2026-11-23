@@ -373,7 +373,10 @@ describe("applying changes", () => {
     const changes = send(a);
     const session = one(changes, "upsert", "sessions");
     expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET indexed_at = 5 WHERE id = ?", [s.id]);
     expect(applyChange(b.db, G, one(changes, "segments"), "dev_a")).toBe("applied");
+    // New words from another phone go back through this phone's search index.
+    expect(b.db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [s.id])?.indexed_at).toBeNull();
     expect(b.db.get("SELECT space_id, title FROM sessions WHERE id = ?", [s.id])).toEqual({ space_id: b.space.id, title: "New recording" });
     expect(b.db.get<{ text: string }>("SELECT text FROM segments WHERE session_id = ?", [s.id])?.text).toBe("cells");
     expect(count(b, "dirty")).toBe(0);

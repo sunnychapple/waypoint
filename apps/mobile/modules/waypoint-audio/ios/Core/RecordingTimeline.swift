@@ -13,21 +13,25 @@ struct RecordingPart: Equatable {
 struct RecordingTimeline {
   let sessionStart: Int64
   let maxPartMs: Int64
+  let firstIndex: Int          // the next free part number, when a saved session is continued
+  let priorRecordedMs: Int64   // what the session had recorded before this recorder started
   private(set) var finishedParts: [RecordingPart] = []
   private(set) var current: RecordingPart?
   private(set) var runStartMs: Int64?
   private var partStartedAt: Int64 = 0
 
-  init(sessionStart: Int64, maxPartMs: Int64 = 300_000) {
+  init(sessionStart: Int64, maxPartMs: Int64 = 300_000, firstIndex: Int = 0, priorRecordedMs: Int64 = 0) {
     self.sessionStart = sessionStart
     self.maxPartMs = maxPartMs
+    self.firstIndex = firstIndex
+    self.priorRecordedMs = priorRecordedMs
   }
 
   var isRunning: Bool { current != nil }
 
   /// Recorded time so far, without gaps.
   func recordedMs(now: Int64) -> Int64 {
-    finishedParts.reduce(0) { $0 + $1.durationMs } + (current == nil ? 0 : max(0, now - partStartedAt))
+    priorRecordedMs + finishedParts.reduce(0) { $0 + $1.durationMs } + (current == nil ? 0 : max(0, now - partStartedAt))
   }
 
   /// Starts a run (start or resume). Returns the new part, or nil if a run is already going.
@@ -62,7 +66,7 @@ struct RecordingTimeline {
   }
 
   private mutating func openPart(now: Int64) -> RecordingPart {
-    let index = finishedParts.count
+    let index = firstIndex + finishedParts.count
     let part = RecordingPart(index: index, startMs: max(0, now - sessionStart), durationMs: 0)
     current = part
     partStartedAt = now
