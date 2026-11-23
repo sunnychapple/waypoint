@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { Alert, StyleSheet, TextInput, View } from "react-native";
+import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
+import { getSession } from "../../core/capture/sessions.ts";
+import { spaceGroups } from "../../core/groups/groups.ts";
 import { getMade } from "../../core/made/made.ts";
-import { grade, score, type Grade } from "../../core/made/practice.ts";
-import { useQuery } from "../../platform/db.ts";
+import { grade, practiceCards, score, type Grade, type PracticeQuestion } from "../../core/made/practice.ts";
+import { saveCards } from "../../core/study/cards.ts";
+import { useQuery, writeDb } from "../../platform/db.ts";
 import { Body, BackButton, Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
@@ -48,6 +52,7 @@ export default function PracticeScreen() {
             setTyped("");
           }}
         />
+        <AddToCards sessionId={item.sessionId} questions={questions} />
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>
     );
@@ -94,6 +99,7 @@ export default function PracticeScreen() {
       <BackButton onPress={leave} />
       <Title>{item.body.title}</Title>
       <Caption>{`Question ${position + 1} of ${total}`}</Caption>
+      <AddToCards sessionId={item.sessionId} questions={questions} />
       <Body style={styles.prompt}>{question.prompt}</Body>
 
       {question.kind === "multiple_choice" ? (
@@ -153,6 +159,30 @@ export default function PracticeScreen() {
         <PrimaryButton label={last ? "See the score" : "Next"} onPress={() => finish(answer.verdict)} />
       ) : null}
     </Screen>
+  );
+}
+
+// Saves the set as flashcards in its session. Saving twice adds nothing, because a session never repeats a card's front.
+function AddToCards({ sessionId, questions }: { sessionId: string | null; questions: PracticeQuestion[] }) {
+  const [added, setAdded] = useState<number | null>(null);
+  // A viewer of a shared space cannot change its notes (the server refuses their changes).
+  const viewer = useQuery((db) => {
+    const session = sessionId === null ? null : getSession(db, sessionId);
+    return session !== null && spaceGroups(db).get(session.spaceId)?.role === "viewer";
+  }, sessionId ?? "");
+  if (sessionId === null || viewer) return null;
+  if (added !== null) return <Caption>{added === 0 ? "These are already in your flashcards." : `Added ${added} to your flashcards.`}</Caption>;
+  return (
+    <SecondaryButton
+      label="Add to flashcards"
+      onPress={() => {
+        try {
+          setAdded(writeDb((db) => saveCards(db, { now: Date.now, newId: randomUUID }, sessionId, practiceCards(questions), "quiz_miss")).length);
+        } catch {
+          Alert.alert("Couldn't add these to your flashcards.");
+        }
+      }}
+    />
   );
 }
 

@@ -66,6 +66,7 @@ export default function MakeCardsScreen() {
         <Title>{`You have ${existing} ${existing === 1 ? "card" : "cards"} from this`}</Title>
         <PrimaryButton label="Practise these" onPress={() => router.replace(`/study/review?sessionId=${sessionId}&all=1`)} />
         <SecondaryButton label="Make more" onPress={() => setMaking(true)} />
+        <SecondaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
       </Screen>
     );
   }
@@ -106,7 +107,7 @@ export default function MakeCardsScreen() {
         <>
           <Title>Couldn't make flashcards this time.</Title>
           <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
-          <SecondaryButton label="Make a Practice set" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+          <SecondaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
         </>
       ) : null}
       {outcome === "no_text" ? (

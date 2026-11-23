@@ -136,7 +136,7 @@ export default function QuizScreen() {
         <CloseButton />
         <Title>Couldn't make a quiz this time.</Title>
         <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
-        <SecondaryButton label="Make a Practice set" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
+        <SecondaryButton label="Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
       </Screen>
     );
   }
@@ -160,6 +160,9 @@ export default function QuizScreen() {
         ) : null}
         {quiz.missed.length > 0 ? (
           <SecondaryButton label="See the flashcards" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
+        ) : null}
+        {!retrying ? (
+          <SecondaryButton label="Questions look wrong? Make with the cloud" icon="cloud" onPress={() => router.push(`/made/new?sessionId=${sessionId}&kind=practice`)} />
         ) : null}
         <SecondaryButton label="Done" onPress={() => router.back()} />
       </Screen>

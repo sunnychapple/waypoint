@@ -76,6 +76,12 @@ function frontKey(front: string): string {
   return front.toLocaleLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// A card's main line and its supporting text (answer choices, an explanation), which a blank line separates.
+export function splitCardText(text: string): { main: string; rest: string | null } {
+  const at = text.indexOf("\n\n");
+  return at === -1 ? { main: text, rest: null } : { main: text.slice(0, at), rest: text.slice(at + 2) };
+}
+
 // Writes the cards for one session, each new and due now. A card whose front the session already has is skipped,
 // so making flashcards twice does not double the deck. Returns the saved rows.
 export function saveCards(db: SqlDb, deps: Deps, sessionId: string, cards: NewCard[], madeBy: "device_model" | "quiz_miss"): CardRow[] {

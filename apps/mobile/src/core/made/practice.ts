@@ -1,4 +1,5 @@
 import type { PracticeSetResult } from "@waypoint/contracts";
+import type { NewCard } from "../study/cards.ts";
 
 export type PracticeQuestion = PracticeSetResult["questions"][number];
 
@@ -29,4 +30,17 @@ export function grade(question: PracticeQuestion, given: string | number): Grade
 
 export function score(grades: Grade[]): { right: number; total: number } {
   return { right: grades.filter((g) => g === "right").length, total: grades.length };
+}
+
+// A practice set as flashcards: the question on the front, the right answer and why on the back.
+export function practiceCards(questions: PracticeQuestion[]): NewCard[] {
+  return questions.map((question) => {
+    if (question.kind === "short_answer") {
+      return { kind: "question", front: question.prompt, back: `${question.answer}\n\n${question.explanation}`, captureId: null, t: null };
+    }
+    // The choices stay on the front, because a question like "Which of these…" means nothing without them.
+    const lettered = question.choices.map((choice, index) => `${String.fromCharCode(65 + index)}. ${choice}`);
+    const front = `${question.prompt}\n\n${lettered.join("\n")}`;
+    return { kind: "question", front, back: `${lettered[question.answer] ?? ""}\n\n${question.explanation}`, captureId: null, t: null };
+  });
 }

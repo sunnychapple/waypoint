@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
 import { creditsLabel } from "../core/config/config.ts";
 import { failureCopy } from "../core/cloud/failure.ts";
 import { useSignOut } from "../platform/auth.tsx";
@@ -33,6 +34,9 @@ export function QuoteBox({ state, onShowSent, onRetry }: { state: QuoteState; on
           <Text style={[styles.title, { color: colors.ink }]}>{copy?.title}</Text>
           <Caption>{copy?.body}</Caption>
           {copy?.signIn === true ? <SecondaryButton label="Sign in again" onPress={() => void signOut()} /> : null}
+          {failure.kind === "out_of_credits" ? (
+            <SecondaryButton label="Get credits" onPress={() => router.push(`/plans?need=${failure.shortfall}`)} />
+          ) : null}
           {onRetry !== undefined && copy?.signIn !== true ? <SecondaryButton label="Try again" onPress={onRetry} /> : null}
         </>
       ) : null}
