@@ -31,6 +31,7 @@ public class WaypointAudioModule: Module {
       return recordedMs
     }
     Function("getStatus") { () -> [String: Any] in self.recorder.status() }
+    Function("setLevelsEnabled") { (on: Bool) in self.recorder.setLevelsEnabled(on) }
 
     AsyncFunction("getSpeechStatus") { () async -> [String: Any] in await self.speechStatus() }
     AsyncFunction("downloadSpeechPack") { () async throws -> [String: Any] in

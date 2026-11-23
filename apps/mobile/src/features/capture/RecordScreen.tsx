@@ -281,10 +281,11 @@ const TimelineRow = memo(
   // A paragraph changes only in which lines it holds; a written line never changes.
   (a, b) =>
     a.sessionId === b.sessionId &&
-    a.item.key === b.item.key &&
-    (a.item.kind !== "paragraph" ||
-      b.item.kind !== "paragraph" ||
-      a.item.lines.map((line) => line.key).join() === b.item.lines.map((line) => line.key).join()),
+    (a.item === b.item ||
+      (a.item.key === b.item.key &&
+        (a.item.kind !== "paragraph" ||
+          b.item.kind !== "paragraph" ||
+          a.item.lines.map((line) => line.key).join() === b.item.lines.map((line) => line.key).join()))),
 );
 
 function BannerView({ banner }: { banner: Banner }) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -125,6 +125,8 @@ export function useRecording(): RecordingModel {
       }),
       onTranscript((e) => {
         if (!mine(e.sessionId)) return;
+        // Words still being heard are only for the screen. Finished words are always saved.
+        if (!e.isFinal && AppState.currentState !== "active") return;
         setLive((previous) => addPiece(previous, e));
         if (e.isFinal) writeDb((db) => saveSegment(db, e.sessionId, e));
       }),
@@ -259,7 +261,9 @@ export function useRecording(): RecordingModel {
   // Keeps the clock moving while recording.
   useEffect(() => {
     if (recorder !== "recording") return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") setNow(Date.now());
+    }, 1000);
     return () => clearInterval(timer);
   }, [recorder]);
 

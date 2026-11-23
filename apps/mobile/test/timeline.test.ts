@@ -23,6 +23,28 @@ describe("buildTimeline", () => {
     ]);
   });
 
+  it("keeps a gap drawn after the part following the resume has closed", () => {
+    // The screen hears about the resume just after the new part started, so that part started "before" the resume.
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 40_000, 20_000)], [40_050], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40050", at: 10_000, gapMs: 30_050 }]);
+  });
+
+  it("keeps a gap when the part after the resume is very short", () => {
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 40_000, 800)], [40_000], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
+  });
+
+  it("measures a quick second resume from the short part before it", () => {
+    const parts = [part(0, 0, 10_000), part(1, 40_000, 500), part(2, 41_000, 5_000)];
+    const items = buildTimeline([], parts, [40_000, 41_000], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
+  });
+
+  it("draws no gap for an instant restart, and does not measure from an earlier part", () => {
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 30_000, 10_005)], [40_000], [], []);
+    expect(items).toEqual([]);
+  });
+
   it("puts lines, gaps, flags and photos in time order", () => {
     const items = buildTimeline(
       [{ tStart: 70_000, tEnd: 71_000, text: "after", isFinal: true }, { tStart: 1000, tEnd: 2000, text: "before", isFinal: true }],
