@@ -37,6 +37,7 @@ final class AudioRecorder {
   private var file: AVAudioFile?          // io
   private var lastLevelAt: Int64 = 0      // io
   private var writeFailed = false         // io: set on the first failed write of a run, so it pauses once
+  private var runId = 0                   // io: the current run, so a late buffer from an earlier run is dropped
 
   static func now() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
 
@@ -85,7 +86,8 @@ final class AudioRecorder {
 
   func resume() throws {
     try control.sync {
-      guard sessionId != nil, paused else { throw RecorderError.notPaused }
+      guard sessionId != nil else { throw RecorderError.notPaused }
+      guard paused else { return }   // an automatic resume got there first
       retry?.cancel()
       retry = nil
       try restart()
@@ -120,15 +122,16 @@ final class AudioRecorder {
     let format = input.outputFormat(forBus: 0)
     // During a call iOS can report no input at all, and installing a tap on that format crashes the app.
     guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.micBusy }
-    try io.sync {
+    let run: Int = try io.sync {
       guard var t = timeline, let part = t.startRun(now: Self.now()) else { throw RecorderError.busy }
       file = try Self.openFile(sessionId: id, index: part.index, format: format)
       timeline = t   // only after the file opened, so a failed start leaves the timeline as it was
       writeFailed = false
-      sink?.runStarted(sessionId: id, runStartMs: t.runStartMs ?? 0, format: format)
+      runId += 1
+      return runId
     }
     input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-      self?.handle(buffer)
+      self?.handle(buffer, run: run)
     }
     engine.prepare()
     do {
@@ -138,6 +141,8 @@ final class AudioRecorder {
       abandonRun()
       throw error
     }
+    // Only now: a start that failed must not reach the transcriber, which would end the previous run's wait for words.
+    io.sync { sink?.runStarted(sessionId: id, runStartMs: timeline?.runStartMs ?? 0, format: format) }
     paused = false
     emitState("recording", reason: "none", recordedMs: nil)
   }
@@ -152,7 +157,6 @@ final class AudioRecorder {
       if let dropped {
         try? FileManager.default.removeItem(at: Self.documents.appendingPathComponent(Self.partPath(sessionId: id, index: dropped.index)))
       }
-      sink?.runEnded()
     }
   }
 
@@ -258,10 +262,12 @@ final class AudioRecorder {
   private func endRun() {
     io.sync {
       guard var t = timeline, let id = ioSessionId else { return }
-      let closed = t.endRun(now: Self.now())
+      // A part whose file never opened (a roll on a full disk) has no audio to report.
+      let hasFile = file != nil
+      let closed = hasFile ? t.endRun(now: Self.now()) : t.cancelRun()
       timeline = t
       file = nil   // AVAudioFile finishes and closes the file when it is released
-      if let closed { emitPart(closed, sessionId: id) }
+      if hasFile, let closed { emitPart(closed, sessionId: id) }
       sink?.runEnded()
     }
   }
@@ -280,9 +286,10 @@ final class AudioRecorder {
 
   // MARK: io queue (called from the tap)
 
-  private func handle(_ buffer: AVAudioPCMBuffer) {
+  private func handle(_ buffer: AVAudioPCMBuffer, run: Int) {
     io.sync {
-      guard var t = timeline, let id = ioSessionId, !writeFailed else { return }
+      // A late buffer from a run that has ended is dropped: it has no file, and must not read as a failed write.
+      guard var t = timeline, t.isRunning, run == runId, let id = ioSessionId, !writeFailed else { return }
       let now = Self.now()
       if let rolled = t.rollIfNeeded(now: now) {
         timeline = t
@@ -298,7 +305,7 @@ final class AudioRecorder {
         // does not show a live recording that is not being saved. The pause runs on the control queue.
         writeFailed = true
         control.async { [weak self] in
-          guard let self, self.sessionId == id, !self.paused else { return }
+          guard let self, self.sessionId == id, !self.paused, self.io.sync(execute: { self.runId }) == run else { return }
           self.pauseInControl(reason: "write_failed")
           self.scheduleAlert()
         }

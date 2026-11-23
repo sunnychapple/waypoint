@@ -399,3 +399,11 @@ Keep the existing tests, except any that asserts a part with a small overlapping
 - A 60-second part covered by segments with gaps under 10 seconds is not returned.
 - A part shorter than `minMs` is not returned.
 - `piecesToKeep`: a piece inside a hole is kept; a piece fully covered is dropped; a piece covered exactly half is dropped; a piece covered under half is kept; overlapping existing segments are counted once; a zero-length piece inside a segment is dropped and outside one is kept.
+
+---
+
+## Changes from review
+
+**U1.** The transcriber starts only after the engine has started, and each ended run waits for the one before it. Late buffers from an ended run are dropped. A part whose file never opened is not reported. Tapping Resume after an automatic resume is not an error, and a failed resume after a full disk says so.
+
+**U2.** A re-transcribed part replaces the on-device segments that start inside it (`replacementFor`), when it covers more of the part than they do. Merging repeated or lost words at the edges. Only on-device segments count as coverage.

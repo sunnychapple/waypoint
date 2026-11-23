@@ -324,7 +324,10 @@ export function useRecording(): RecordingModel {
     stopping,
     pause: () => attempt(pauseRecording()),
     resume: () => {
-      resumeRecording().catch(() => Alert.alert("The microphone is still in use.", "Try again when the other app is finished."));
+      resumeRecording().catch(() => {
+        if (pauseReason === "write_failed") Alert.alert("Your iPhone still can't save the recording.", "Free up some space, then resume.");
+        else Alert.alert("The microphone is still in use.", "Try again when the other app is finished.");
+      });
     },
     flag,
     photo: () => void photo(),
