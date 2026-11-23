@@ -48,12 +48,12 @@ describe("groupTimeline", () => {
     expect(rows.map((row) => row.kind)).toEqual(["paragraph", "paragraph"]);
   });
 
-  it("splits a line that would make the paragraph longer than 45 seconds, and joins one ending at exactly 45 seconds", () => {
-    const joins = groupTimeline([line(0, 20_000), line(20_000, 45_000)]);
+  it("splits a line that would make the paragraph longer than 30 seconds, and joins one ending at exactly 30 seconds", () => {
+    const joins = groupTimeline([line(0, 15_000), line(15_000, 30_000)]);
     expect(joins).toHaveLength(1);
-    const splits = groupTimeline([line(0, 20_000), line(20_000, 45_000), line(45_000, 45_500)]);
+    const splits = groupTimeline([line(0, 15_000), line(15_000, 30_000), line(30_000, 30_500)]);
     expect(splits).toHaveLength(2);
-    expect(splits[1]).toMatchObject({ kind: "paragraph", at: 45_000 });
+    expect(splits[1]).toMatchObject({ kind: "paragraph", at: 30_000 });
   });
 
   it("splits two close lines when a flag sits between them, and keeps the flag in place", () => {

@@ -33,7 +33,7 @@ export function ParagraphRow({
       ) : (
         time
       )}
-      <Text style={[styles.text, { color: colors.ink }]}>
+      <Text accessibilityHint="Tap a word to explain it" style={[styles.text, { color: colors.ink }]}>
         {lines.map((line, index) => (
           <Fragment key={line.key}>
             {index > 0 ? " " : null}

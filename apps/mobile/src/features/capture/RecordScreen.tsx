@@ -15,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { formatClock, formatOffset } from "../../core/format.ts";
-import { groupTimeline, type TimelineRow as Row } from "../../core/capture/timeline.ts";
+import { groupTimeline, PARAGRAPH_PAUSE_MS, type TimelineRow as Row } from "../../core/capture/timeline.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { useQuery } from "../../platform/db.ts";
@@ -100,6 +100,10 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
   const rows = useMemo(() => groupTimeline(model.timeline), [model.timeline]);
+  // Words still being heard that will join the last paragraph show under it with no time of their own.
+  const lastRow = rows.at(-1);
+  const lastLine = lastRow?.kind === "paragraph" ? lastRow.lines.at(-1) : undefined;
+  const continuesParagraph = model.volatile !== null && lastLine !== undefined && model.volatile.tStart - lastLine.end < PARAGRAPH_PAUSE_MS;
 
   function setFollowing(next: boolean): void {
     following.current = next;
@@ -200,8 +204,8 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
           <TimelineRow key={item.key} item={item} sessionId={model.sessionId} />
         ))}
         {model.volatile ? (
-          <View style={styles.volatile}>
-            <Text style={[styles.time, { color: colors.ink3, minWidth: 0 }]}>{formatOffset(model.volatile.tStart)}</Text>
+          <View style={[styles.volatile, continuesParagraph ? styles.volatileJoined : null]}>
+            {continuesParagraph ? null : <Text style={[styles.time, { color: colors.ink3, minWidth: 0 }]}>{formatOffset(model.volatile.tStart)}</Text>}
             <Text style={[{ fontSize: 17, lineHeight: 26 }, { color: colors.ink3 }]}>{model.volatile.text}</Text>
           </View>
         ) : null}
@@ -267,11 +271,13 @@ const TimelineRow = memo(
       />
     );
   },
-  // A paragraph changes only by gaining lines; a written line never changes.
+  // A paragraph changes only in which lines it holds; a written line never changes.
   (a, b) =>
     a.sessionId === b.sessionId &&
     a.item.key === b.item.key &&
-    (a.item.kind !== "paragraph" || b.item.kind !== "paragraph" || a.item.lines.length === b.item.lines.length),
+    (a.item.kind !== "paragraph" ||
+      b.item.kind !== "paragraph" ||
+      a.item.lines.map((line) => line.key).join() === b.item.lines.map((line) => line.key).join()),
 );
 
 function BannerView({ banner }: { banner: Banner }) {
@@ -385,6 +391,7 @@ const styles = StyleSheet.create({
   progressFill: { height: 6 },
   lines: { gap: 22, paddingBottom: 12 },
   volatile: { gap: 6 },
+  volatileJoined: { marginTop: -16 },
   time: { fontSize: 13, fontVariant: ["tabular-nums"], minWidth: 44, paddingTop: 2 },
   toast: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "center", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16 },
   toastText: { fontSize: 14, fontWeight: "600" },

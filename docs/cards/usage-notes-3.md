@@ -22,9 +22,9 @@ export type TimelineLine = Extract<TimelineItem, { kind: "line" }>;
 export type TimelineRow = { kind: "paragraph"; key: string; at: number; lines: TimelineLine[] } | Exclude<TimelineItem, { kind: "line" }>;
 
 const PARAGRAPH_PAUSE_MS = 3000;
-const PARAGRAPH_MAX_MS = 45_000;
+const PARAGRAPH_MAX_MS = 30_000;
 
-// Lines said close together become one paragraph, shown with one time. A pause of 3 seconds, 45 seconds of speech, or a
+// Lines said close together become one paragraph, shown with one time. A pause of 3 seconds, 30 seconds of speech, or a
 // gap, flag or photo starts a new one. Every line keeps its own time, so a tapped word still knows when it was said.
 export function groupTimeline(items: TimelineItem[]): TimelineRow[] {
   const rows: TimelineRow[] = [];
@@ -45,7 +45,7 @@ export function groupTimeline(items: TimelineItem[]): TimelineRow[] {
 }
 ```
 
-3. Tests for `groupTimeline`: lines 2,999 ms apart join; lines 3,000 ms apart split; a line that would make the paragraph longer than 45 seconds splits, and one ending at exactly 45 seconds joins; a flag between two close lines splits them and stays in place; the paragraph's key and time are its first line's; an empty list gives an empty list.
+3. Tests for `groupTimeline`: lines 2,999 ms apart join; lines 3,000 ms apart split; a line that would make the paragraph longer than 30 seconds splits, and one ending at exactly 30 seconds joins; a flag between two close lines splits them and stays in place; the paragraph's key and time are its first line's; an empty list gives an empty list.
 
 ### ParagraphRow.tsx
 
