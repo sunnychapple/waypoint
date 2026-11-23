@@ -20,6 +20,7 @@ export function Waveform() {
       } else if (state !== "active" && levelEvents !== null) {
         levelEvents.remove();
         levelEvents = null;
+        setLevels([]);
       }
     };
     follow(AppState.currentState);

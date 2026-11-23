@@ -91,6 +91,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const scroll = useRef<ScrollViewInstance>(null);
   const following = useRef(true);
   const touching = useRef(false); // the person's finger or fling is moving the list; the screen's own scrolling never sets this
+  const position = useRef({ contentHeight: 0, offsetY: 0, viewHeight: 0 });
   const [showJump, setShowJump] = useState(false);
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
@@ -100,9 +101,14 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     setShowJump(!next);
   }
 
-  function readPosition(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+  function remember(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    setFollowing(isAtEnd({ contentHeight: contentSize.height, offsetY: contentOffset.y, viewHeight: layoutMeasurement.height }));
+    position.current = { contentHeight: contentSize.height, offsetY: contentOffset.y, viewHeight: layoutMeasurement.height };
+  }
+
+  function readPosition(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    remember(event);
+    setFollowing(isAtEnd(position.current));
   }
 
   return (
@@ -155,9 +161,20 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         style={styles.flex}
         contentContainerStyle={styles.lines}
         onScroll={(event) => {
-          if (touching.current) readPosition(event);
+          remember(event);
+          if (touching.current) setFollowing(isAtEnd(position.current));
         }}
         scrollEventThrottle={100}
+        onTouchEnd={() => {
+          // A tap that stops a fling can end it with no scroll event, which would leave `touching` set.
+          if (!touching.current) return;
+          touching.current = false;
+          setFollowing(isAtEnd(position.current));
+        }}
+        onLayout={() => {
+          // The pause card appearing shrinks the list, and that is not a content change.
+          if (following.current) scroll.current?.scrollToEnd({ animated: false });
+        }}
         onScrollBeginDrag={() => {
           touching.current = true;
         }}
