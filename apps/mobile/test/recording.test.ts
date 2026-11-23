@@ -136,6 +136,14 @@ describe("recording", () => {
     ]);
   });
 
+  it("pendingTranscriptions does not count cloud words as on-device words", () => {
+    const waiting = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, waiting.id, 9000, 0);
+    savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "p0.m4a" });
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES (?, 0, 20000, 'cloud words', 'cloud')", [waiting.id]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
+
   it("recoverSessions sets the length and end time from the saved audio parts", () => {
     insertSession("crashed", "recording", "live", 5000);
     savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 300_000, file: "a0.m4a" });

@@ -127,7 +127,7 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
   return ids;
 }
 
-// Waiting sessions that are saved or interrupted, each with the audio parts that have no segments yet.
+// Waiting sessions that are saved or interrupted, each with the audio parts that have a hole in their on-device words.
 export function pendingTranscriptions(
   db: SqlDb,
 ): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[] }[] {
@@ -142,7 +142,7 @@ export function pendingTranscriptions(
       )
       .map((row) => ({ file: row.file, span: { startMs: row.t, durationMs: row.duration_ms ?? 0 } }));
     const segments = db
-      .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ?", [session.id])
+      .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ? AND source = 'device'", [session.id])
       .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
     const needed = new Set(partsNeedingTranscription(pairs.map((p) => p.span), segments));
     return {

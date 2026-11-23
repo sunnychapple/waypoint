@@ -3,6 +3,8 @@ import {
   EMPTY_LIVE,
   addPiece,
   partsNeedingTranscription,
+  piecesToKeep,
+  replacementFor,
   type Piece,
 } from "../src/core/capture/transcript.ts";
 
@@ -35,7 +37,7 @@ describe("transcript", () => {
       { startMs: 60_000, durationMs: 60_000 },
       { startMs: 120_000, durationMs: 5_000 },
     ];
-    const segments = [{ tStart: 10_000, tEnd: 20_000 }];
+    const segments = [{ tStart: 0, tEnd: 60_000 }];
     expect(partsNeedingTranscription(parts, segments)).toEqual([{ startMs: 60_000, durationMs: 60_000 }]);
     // A segment that only touches the end edge of a part does not overlap it.
     expect(partsNeedingTranscription([{ startMs: 0, durationMs: 60_000 }], [{ tStart: 60_000, tEnd: 70_000 }])).toEqual([
@@ -51,5 +53,96 @@ describe("transcript", () => {
   it("a part of exactly 10 seconds still needs transcription; one of 9,999 ms does not", () => {
     expect(partsNeedingTranscription([{ startMs: 0, durationMs: 10_000 }], [])).toEqual([{ startMs: 0, durationMs: 10_000 }]);
     expect(partsNeedingTranscription([{ startMs: 0, durationMs: 9_999 }], [])).toEqual([]);
+  });
+
+  it("a 300-second part with one segment over its first 60 seconds is returned (the hole case)", () => {
+    const part = { startMs: 0, durationMs: 300_000 };
+    expect(partsNeedingTranscription([part], [{ tStart: 0, tEnd: 60_000 }])).toEqual([part]);
+  });
+
+  it("a 60-second part covered by segments with gaps under 10 seconds is not returned", () => {
+    const part = { startMs: 0, durationMs: 60_000 };
+    const segments = [
+      { tStart: 0, tEnd: 20_000 },
+      { tStart: 25_000, tEnd: 45_000 },
+      { tStart: 50_000, tEnd: 60_000 },
+    ];
+    expect(partsNeedingTranscription([part], segments)).toEqual([]);
+  });
+
+  it("a part shorter than minMs is not returned", () => {
+    expect(partsNeedingTranscription([{ startMs: 0, durationMs: 5_000 }], [])).toEqual([]);
+  });
+});
+
+describe("piecesToKeep", () => {
+  it("a piece inside a hole is kept", () => {
+    const piece = { tStart: 0, tEnd: 10_000 };
+    expect(piecesToKeep([piece], [])).toEqual([piece]);
+  });
+
+  it("a piece fully covered is dropped", () => {
+    expect(piecesToKeep([{ tStart: 0, tEnd: 10_000 }], [{ tStart: 0, tEnd: 10_000 }])).toEqual([]);
+  });
+
+  it("a piece covered exactly half is dropped", () => {
+    expect(piecesToKeep([{ tStart: 0, tEnd: 10_000 }], [{ tStart: 0, tEnd: 5_000 }])).toEqual([]);
+  });
+
+  it("a piece covered under half is kept", () => {
+    const piece = { tStart: 0, tEnd: 10_000 };
+    expect(piecesToKeep([piece], [{ tStart: 0, tEnd: 4_000 }])).toEqual([piece]);
+  });
+
+  it("overlapping existing segments are counted once", () => {
+    // Their union covers 4,000 ms, which is under half of 10,000 ms. Counted twice it would be 6,000 ms and dropped.
+    const piece = { tStart: 0, tEnd: 10_000 };
+    const existing = [
+      { tStart: 0, tEnd: 3_000 },
+      { tStart: 1_000, tEnd: 4_000 },
+    ];
+    expect(piecesToKeep([piece], existing)).toEqual([piece]);
+  });
+
+  it("a zero-length piece inside a segment is dropped and outside one is kept", () => {
+    const existing = [{ tStart: 0, tEnd: 10_000 }];
+    expect(piecesToKeep([{ tStart: 5_000, tEnd: 5_000 }], existing)).toEqual([]);
+    const outside = { tStart: 20_000, tEnd: 20_000 };
+    expect(piecesToKeep([outside], existing)).toEqual([outside]);
+  });
+});
+
+describe("replacementFor", () => {
+  const part = { startMs: 60_000, durationMs: 60_000 };
+
+  it("replaces a short live segment that starts where a longer piece starts", () => {
+    const longer = { tStart: 60_000, tEnd: 80_000 };
+    expect(replacementFor(part, [longer], [{ tStart: 60_000, tEnd: 63_000 }])).toEqual([longer]);
+  });
+
+  it("replaces a part's segments when the pieces overlap them and cover more", () => {
+    const pieces = [
+      { tStart: 65_000, tEnd: 80_000 },
+      { tStart: 80_000, tEnd: 110_000 },
+    ];
+    expect(replacementFor(part, pieces, [{ tStart: 60_000, tEnd: 68_000 }])).toEqual(pieces);
+  });
+
+  it("keeps what is there when the second pass covers no more of the part", () => {
+    const existing = [{ tStart: 60_000, tEnd: 90_000 }];
+    expect(replacementFor(part, [{ tStart: 60_000, tEnd: 70_000 }], existing)).toBeNull();
+    expect(replacementFor(part, [{ tStart: 60_000, tEnd: 90_000 }], existing)).toBeNull();
+    expect(replacementFor(part, [], existing)).toBeNull();
+  });
+
+  it("leaves out a piece that mostly repeats a segment spilling in from the part before", () => {
+    const repeat = { tStart: 60_000, tEnd: 64_000 };
+    const fresh = { tStart: 64_000, tEnd: 100_000 };
+    expect(replacementFor(part, [repeat, fresh], [{ tStart: 55_000, tEnd: 64_000 }])).toEqual([fresh]);
+  });
+
+  it("does not count a segment of the next part as this part's own", () => {
+    const piece = { tStart: 60_000, tEnd: 100_000 };
+    expect(replacementFor(part, [piece], [{ tStart: 120_000, tEnd: 130_000 }])).toEqual([piece]);
   });
 });
