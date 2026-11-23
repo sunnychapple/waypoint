@@ -185,7 +185,7 @@ function AddToCards({
     return (
       <>
         <Caption>{added === 0 ? "These are already in your flashcards." : `Added ${added} to your flashcards.`}</Caption>
-        <SecondaryButton label="Practise these" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
+        <SecondaryButton label="Practise this session's cards" onPress={() => router.push(`/study/review?sessionId=${sessionId}&all=1`)} />
       </>
     );
   }

@@ -7,7 +7,7 @@ import { getSession } from "../../core/capture/sessions.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { formatOffset } from "../../core/format.ts";
-import { cardSourceHref, deleteCard, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
+import { cardExists, cardSourceHref, deleteCard, dueCards, nextDueAt, previewIntervals, reviewCard, sessionCards, type CardRow } from "../../core/study/cards.ts";
 import { intervalLabel, RATING_SPOKEN } from "../../core/study/labels.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
@@ -65,6 +65,14 @@ export default function ReviewScreen() {
     setMissed([]);
   }
 
+  // Takes a card out of this review. The next card takes its place.
+  function dropCard(id: string) {
+    setDeck(deck.filter((item) => item.id !== id));
+    setMissed(missed.filter((item) => item.id !== id));
+    setFlipped(false);
+    setRevealed(false);
+  }
+
   if (showMade && sessionId !== undefined) {
     return (
       <Screen>
@@ -100,6 +108,12 @@ export default function ReviewScreen() {
     );
   }
 
+  // Deleted on another phone since this review started.
+  if (!cardExists(getDb(), card.id)) {
+    dropCard(card.id);
+    return null;
+  }
+
   const previews = previewIntervals(getDb(), card.id, Date.now());
   const source = sourceOf(card);
   const ratings = [
@@ -112,6 +126,10 @@ export default function ReviewScreen() {
   const current: CardRow = card;
   const cardId = card.id;
   function rate(rating: 1 | 2 | 3 | 4) {
+    if (!cardExists(getDb(), cardId)) {
+      dropCard(cardId);
+      return;
+    }
     writeDb((db) => reviewCard(db, cardId, rating, Date.now()));
     if (rating === 1) setMissed([...missed, current]);
     else setRight(right + 1);
@@ -126,7 +144,7 @@ export default function ReviewScreen() {
     setFlipped(!flipped);
   }
 
-  // A card the model got wrong can be taken out. The next card takes its place.
+  // A card the model got wrong can be taken out.
   function removeCard() {
     Alert.alert("Remove this card?", "It won't come back in your reviews.", [
       { text: "Cancel", style: "cancel" },
@@ -135,10 +153,7 @@ export default function ReviewScreen() {
         style: "destructive",
         onPress: () => {
           writeDb((db) => deleteCard(db, cardId));
-          setDeck(deck.filter((item) => item.id !== cardId));
-          setMissed(missed.filter((item) => item.id !== cardId));
-          setFlipped(false);
-          setRevealed(false);
+          dropCard(cardId);
         },
       },
     ]);

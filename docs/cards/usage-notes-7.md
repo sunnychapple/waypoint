@@ -193,3 +193,11 @@ Replace the opening sentence, so it stays true now that the study screens offer 
 ```tsx
       <Body>Recording, pages, flashcards, quizzes and search work on this iPhone. Only the cloud tasks you tap send text, and only for that task.</Body>
 ```
+
+---
+
+## Changes from review
+
+A card deleted on another phone during a review is skipped instead of crashing the screen. The button after saving says "Practise this session's cards", because that is what it opens. The cloud screen reads the notes once per change, not on every keystroke.
+
+Known limit: if one phone removes a card while another rates it later, the later rating brings the card back.

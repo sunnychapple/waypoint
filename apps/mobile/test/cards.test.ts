@@ -5,6 +5,7 @@ import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import {
+  cardExists,
   cardSourceHref,
   countDue,
   deleteCard,
@@ -122,6 +123,13 @@ describe("cards", () => {
     saveCards(db, deps(), sessionId, [card("A"), card("B")], "device_model");
     expect(sessionCardCount(db, sessionId)).toBe(2);
     expect(sessionCardCount(db, "no-such-session")).toBe(0);
+  });
+
+  it("cardExists follows a card being deleted", () => {
+    const [saved] = saveCards(db, deps(), sessionId, [card("gone")], "device_model");
+    expect(cardExists(db, saved!.id)).toBe(true);
+    deleteCard(db, saved!.id);
+    expect(cardExists(db, saved!.id)).toBe(false);
   });
 
   it("deleteCard removes one card, and an unknown id changes nothing", () => {
