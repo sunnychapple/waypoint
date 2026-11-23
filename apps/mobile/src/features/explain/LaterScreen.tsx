@@ -29,7 +29,7 @@ export default function LaterScreen() {
       </View>
       <Title>Questions for later</Title>
 
-      {empty ? <Body>Nothing saved for later. Tap a word in your notes to explain it, or flag a moment while recording.</Body> : null}
+      {empty ? <Body>Nothing saved for later. Tap a word in your notes to explain it, or tap Ask later while recording.</Body> : null}
 
       {groups.map((group) => (
         <View key={group.sessionId} style={styles.section}>
