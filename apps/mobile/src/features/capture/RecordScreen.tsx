@@ -191,7 +191,7 @@ function TimelineRow({ item, sessionId }: { item: TimelineItem; sessionId: strin
     case "gap":
     case "flag":
     case "photo":
-      return <TimeMarkRow item={item} />;
+      return <TimeMarkRow item={item} interactive={item.kind === "photo"} />;
   }
 }
 
