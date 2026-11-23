@@ -61,7 +61,7 @@ function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | n
   return (
     <View style={styles.item}>
       <Row
-        title={flag.question === "" ? "Flagged moment" : flag.question}
+        title={flag.question === "" ? "A moment you saved" : flag.question}
         subtitle={flag.pageNumber !== null ? `Page ${flag.pageNumber}` : formatOffset(flag.t)}
         onPress={() => router.push(openHref)}
       />
