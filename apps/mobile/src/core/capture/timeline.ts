@@ -9,6 +9,8 @@ export type TimelineItem =
 export type PartSpan = { index: number; startMs: number; durationMs: number };
 
 const GAP_MIN_MS = 1000;
+// The screen hears about a resume slightly after native started the new part, so a part starting this close is that part.
+const RESUME_SKEW_MS = 250;
 
 // Finals, gaps, flags and photos, in time order. All times are ms since the session started.
 // A gap is drawn as soon as recording resumes: from the end of the last part that had ended by the resume
@@ -22,7 +24,7 @@ export function buildTimeline(
 ): TimelineItem[] {
   const items: TimelineItem[] = finals.map((piece) => ({ kind: "line", key: `line-${piece.tStart}`, at: piece.tStart, end: piece.tEnd, text: piece.text }));
   for (const resumedAt of resumes) {
-    const before = parts.filter((part) => part.startMs < resumedAt - GAP_MIN_MS && part.startMs + part.durationMs <= resumedAt + GAP_MIN_MS).at(-1);
+    const before = parts.filter((part) => part.startMs < resumedAt - RESUME_SKEW_MS && part.startMs + part.durationMs <= resumedAt + GAP_MIN_MS).at(-1);
     if (before === undefined) continue;
     const gapStart = before.startMs + before.durationMs;
     const gapMs = resumedAt - gapStart;

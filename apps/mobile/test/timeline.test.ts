@@ -34,6 +34,12 @@ describe("buildTimeline", () => {
     expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
   });
 
+  it("measures a quick second resume from the short part before it", () => {
+    const parts = [part(0, 0, 10_000), part(1, 40_000, 500), part(2, 41_000, 5_000)];
+    const items = buildTimeline([], parts, [40_000, 41_000], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
+  });
+
   it("draws no gap for an instant restart, and does not measure from an earlier part", () => {
     const items = buildTimeline([], [part(0, 0, 10_000), part(1, 30_000, 10_005)], [40_000], [], []);
     expect(items).toEqual([]);
