@@ -17,7 +17,7 @@ enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, write
 /// - `io` owns the timeline, the open file and the sink, and the tap runs its work on it.
 /// The engine is stopped on `control` and never inside `io.sync`, so stopping cannot deadlock with the tap.
 final class AudioRecorder {
-  static let maxPartMs: Int64 = 300_000
+  static let maxPartMs: Int64 = 120_000
   private static let resumeDelays: [TimeInterval] = [0, 1, 3]
   private static let alertId = "waypoint.recording-paused"
   private static let alertDelay: TimeInterval = 3   // a pause shorter than this never shows an alert
@@ -38,6 +38,7 @@ final class AudioRecorder {
   private var lastLevelAt: Int64 = 0      // io
   private var writeFailed = false         // io: set on the first failed write of a run, so it pauses once
   private var runId = 0                   // io: the current run, so a late buffer from an earlier run is dropped
+  private var levelsOn = true             // io: off while nobody can see the level bars
 
   static func now() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
 
@@ -115,6 +116,10 @@ final class AudioRecorder {
     }
   }
 
+  func setLevelsEnabled(_ on: Bool) {
+    io.async { self.levelsOn = on }
+  }
+
   // MARK: control queue only
 
   private func startRun() throws {
@@ -164,8 +169,9 @@ final class AudioRecorder {
   private static func configureSession() throws {
     let audio = AVAudioSession.sharedInstance()
     // mixWithOthers: another app's sound no longer stops the recording. defaultToSpeaker: that sound plays from the
-    // speaker and not the earpiece, which is where playAndRecord would otherwise send it.
-    try audio.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .mixWithOthers, .defaultToSpeaker])
+    // speaker and not the earpiece. allowBluetoothA2DP: headphones play sound but the iPhone's own microphone keeps
+    // recording. A Bluetooth headset microphone (HFP) runs at 8 to 16 kHz, which the part file cannot encode at 64 kbps.
+    try audio.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothA2DP, .mixWithOthers, .defaultToSpeaker])
     try audio.setActive(true)
   }
 
@@ -184,7 +190,10 @@ final class AudioRecorder {
   private func attemptResume(from index: Int = 0) {
     retry?.cancel()
     retry = nil
-    guard index < Self.resumeDelays.count else { return }
+    guard index < Self.resumeDelays.count else {
+      scheduleAlert()   // iOS would not let it restart: say so now, because the first alert may have come during a call
+      return
+    }
     let work = DispatchWorkItem { [weak self] in
       guard let self, self.sessionId != nil, self.paused, self.wantsResume else { return }
       do { try self.restart() } catch { self.attemptResume(from: index + 1) }
@@ -313,7 +322,7 @@ final class AudioRecorder {
         return
       }
       sink?.append(buffer)
-      if now - lastLevelAt >= 100, let channels = buffer.floatChannelData {
+      if levelsOn, now - lastLevelAt >= 100, let channels = buffer.floatChannelData {
         lastLevelAt = now
         let samples = UnsafeBufferPointer(start: channels[0], count: Int(buffer.frameLength))
         onEvent?("onLevel", ["level": Double(LevelMeter.normalized(rms: LevelMeter.rms(samples)))])
@@ -323,12 +332,12 @@ final class AudioRecorder {
 
   private static func openFile(sessionId: String, index: Int, format: AVAudioFormat) throws -> AVAudioFile {
     let url = documents.appendingPathComponent(partPath(sessionId: sessionId, index: index))
-    let settings: [String: Any] = [
+    var settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
       AVSampleRateKey: format.sampleRate,
       AVNumberOfChannelsKey: format.channelCount,
-      AVEncoderBitRateKey: 64_000,
     ]
+    if format.sampleRate >= 24_000 { settings[AVEncoderBitRateKey] = 64_000 }   // refused below 24 kHz
     return try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
   }
 

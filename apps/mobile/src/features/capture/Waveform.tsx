@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppState, StyleSheet, View } from "react-native";
 import type { EventSubscription } from "expo";
-import { onRecorderLevel } from "../../../modules/waypoint-audio/index.ts";
+import { onRecorderLevel, setRecorderLevelsEnabled } from "../../../modules/waypoint-audio/index.ts";
 import { useColors } from "../../ui/theme.ts";
 
 const LEVELS_KEPT = 48;
@@ -17,9 +17,11 @@ export function Waveform() {
     const follow = (state: string | null | undefined): void => {
       if (state === "active" && levelEvents === null) {
         levelEvents = onRecorderLevel((e) => setLevels((previous) => [...previous.slice(-(LEVELS_KEPT - 1)), e.level]));
+        setRecorderLevelsEnabled(true);
       } else if (state !== "active" && levelEvents !== null) {
         levelEvents.remove();
         levelEvents = null;
+        setRecorderLevelsEnabled(false);
         setLevels([]);
       }
     };
@@ -28,6 +30,7 @@ export function Waveform() {
     return () => {
       appState.remove();
       levelEvents?.remove();
+      setRecorderLevelsEnabled(true);
     };
   }, []);
 

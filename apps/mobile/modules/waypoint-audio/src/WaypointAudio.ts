@@ -36,6 +36,7 @@ declare class WaypointAudioNative extends NativeModule<Events> {
   resume(): Promise<void>;
   stop(): Promise<number>;
   getStatus(): RecorderStatus;
+  setLevelsEnabled(on: boolean): void;
   getSpeechStatus(): Promise<SpeechStatus>;
   downloadSpeechPack(): Promise<SpeechStatus>;
   transcribeFile(file: string, startMs: number): Promise<TranscriptPiece[]>;
@@ -51,6 +52,7 @@ export const pauseRecording = (): Promise<void> => native.pause();
 export const resumeRecording = (): Promise<void> => native.resume();
 export const stopRecording = (): Promise<number> => native.stop();
 export const getRecorderStatus = (): RecorderStatus => native.getStatus();
+export const setRecorderLevelsEnabled = (on: boolean): void => native.setLevelsEnabled(on);
 export const onRecorderState = (l: (e: StateEvent) => void): EventSubscription => native.addListener("onState", l);
 export const onRecorderPart = (l: (e: PartEvent) => void): EventSubscription => native.addListener("onPart", l);
 export const onRecorderLevel = (l: (e: LevelEvent) => void): EventSubscription => native.addListener("onLevel", l);

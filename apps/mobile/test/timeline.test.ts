@@ -23,6 +23,16 @@ describe("buildTimeline", () => {
     ]);
   });
 
+  it("keeps a gap drawn after the part following the resume has closed", () => {
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 40_000, 20_000)], [40_000], [], []);
+    expect(items).toEqual([{ kind: "gap", key: "gap-40000", at: 10_000, gapMs: 30_000 }]);
+  });
+
+  it("draws no gap for an instant restart, and does not measure from an earlier part", () => {
+    const items = buildTimeline([], [part(0, 0, 10_000), part(1, 30_000, 10_005)], [40_000], [], []);
+    expect(items).toEqual([]);
+  });
+
   it("puts lines, gaps, flags and photos in time order", () => {
     const items = buildTimeline(
       [{ tStart: 70_000, tEnd: 71_000, text: "after", isFinal: true }, { tStart: 1000, tEnd: 2000, text: "before", isFinal: true }],

@@ -44,17 +44,18 @@ export default function SessionScreen() {
   const data = useQuery((db) => {
     const session = getSession(db, id);
     if (!session) return null;
+    const live = isLiveSession(getRecorderStatus(), id);
     return {
       session,
       spaceName: getSpace(db, session.spaceId)?.name ?? "",
       pages: session.kind === "pages" ? listPages(db, id) : [],
-      timeline: session.kind === "recording" ? recordingTimeline(db, id) : [],
+      timeline: session.kind === "recording" && !live ? recordingTimeline(db, id) : [],
       research: researchForSession(db, id),
       made: madeForSession(db, id),
       overviews: overviewsForSession(db, id),
       links: linksForSession(db, id),
       role: spaceGroups(db).get(session.spaceId)?.role ?? null,
-      second: session.kind === "recording" ? secondTranscript(db, id) : null,
+      second: session.kind === "recording" && !live ? secondTranscript(db, id) : null,
       // The recording's parts that are on this iPhone (a synced part may not be downloaded yet).
       playParts: session.kind === "recording" ? uploadParts(db, id).filter((part) => part.file !== "") : [],
     };
@@ -274,6 +275,7 @@ export default function SessionScreen() {
             ))}
             <Caption>Highlighted words are different from this iPhone's transcript.</Caption>
             {second.truncated ? <Caption>Only the minutes you paid for were transcribed.</Caption> : null}
+            {second.incomplete && !second.truncated ? <Caption>Some parts of this recording aren't in the better transcript.</Caption> : null}
           </>
         ) : (
           groupTimeline(timeline).map((row) =>
@@ -393,12 +395,12 @@ function madeRoute(item: MadeItem): string {
 }
 
 // The second transcript, one list of changed-word marks per recording part, or null when no cloud transcript exists.
-function secondTranscript(db: SqlDb, sessionId: string): { parts: DiffWord[][]; truncated: boolean } | null {
+function secondTranscript(db: SqlDb, sessionId: string): { parts: DiffWord[][]; truncated: boolean; incomplete: boolean } | null {
   const cloud = db.get<{ n: number }>("SELECT 1 AS n FROM segments WHERE session_id = ? AND source = 'cloud' LIMIT 1", [sessionId]);
   if (cloud === null) return null;
-  const parts = uploadParts(db, sessionId).map((part) =>
-    diffWords(partText(db, sessionId, "device", part), partText(db, sessionId, "cloud", part)),
-  );
+  const recorded = uploadParts(db, sessionId);
+  const parts = recorded.map((part) => diffWords(partText(db, sessionId, "device", part), partText(db, sessionId, "cloud", part)));
+  const incomplete = recorded.some((part) => partText(db, sessionId, "device", part).trim() !== "" && partText(db, sessionId, "cloud", part).trim() === "");
   const job = jobsForSession(db, sessionId).find((j) => j.type === "retranscribe" && j.state === "succeeded");
   let truncated = false;
   try {
@@ -406,7 +408,7 @@ function secondTranscript(db: SqlDb, sessionId: string): { parts: DiffWord[][]; 
   } catch {
     truncated = false;
   }
-  return { parts, truncated };
+  return { parts, truncated, incomplete };
 }
 
 // The page a search hit names, when this session has that page; otherwise null.
