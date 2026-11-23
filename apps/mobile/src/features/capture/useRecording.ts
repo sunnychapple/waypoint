@@ -41,6 +41,7 @@ import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts
 import { getSavingTo } from "../../core/db/spaces.ts";
 import { writeDb } from "../../platform/db.ts";
 import { deleteSessionFiles } from "../../platform/files.ts";
+import { askForPush } from "../../platform/push.ts";
 
 const deps = { now: Date.now, newId: randomUUID };
 const LEVELS_KEPT = 48;
@@ -192,6 +193,8 @@ export function useRecording(): RecordingModel {
         }
         setAnchor({ ms: 0, at: Date.now() });
         setRecorder("recording");
+        // The pause alert needs this. iOS shows its prompt only once, and the recording runs on behind it.
+        askForPush().catch(() => undefined);
         if (speech.pack === "not_installed") {
           setPack("downloading");
           downloadSpeechPack()
@@ -320,7 +323,9 @@ export function useRecording(): RecordingModel {
     toast,
     stopping,
     pause: () => attempt(pauseRecording()),
-    resume: () => attempt(resumeRecording()),
+    resume: () => {
+      resumeRecording().catch(() => Alert.alert("The microphone is still in use.", "Try again when the other app is finished."));
+    },
     flag,
     photo: () => void photo(),
     stop: () => void stop(),

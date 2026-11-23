@@ -1,5 +1,7 @@
 import AVFoundation
 import Foundation
+import UIKit
+import UserNotifications
 
 /// Gets every recorded buffer. The speech part (M6) implements it. Called on the recorder's io queue.
 protocol AudioBufferSink: AnyObject {
@@ -8,7 +10,7 @@ protocol AudioBufferSink: AnyObject {
   func runEnded()
 }
 
-enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, writeFailed }
+enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, writeFailed, micBusy }
 
 /// Two serial queues:
 /// - `control` runs start, pause, resume and stop.
@@ -16,6 +18,9 @@ enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, write
 /// The engine is stopped on `control` and never inside `io.sync`, so stopping cannot deadlock with the tap.
 final class AudioRecorder {
   static let maxPartMs: Int64 = 300_000
+  private static let resumeDelays: [TimeInterval] = [0, 1, 3]
+  private static let alertId = "waypoint.recording-paused"
+  private static let alertDelay: TimeInterval = 3   // a pause shorter than this never shows an alert
   var onEvent: ((String, [String: Any]) -> Void)?
   weak var sink: AudioBufferSink?
 
@@ -24,6 +29,8 @@ final class AudioRecorder {
   private var engine = AVAudioEngine()
   private var sessionId: String?          // control
   private var paused = false              // control
+  private var wantsResume = false         // control: the system paused us, and the person has not paused or stopped
+  private var retry: DispatchWorkItem?    // control: the next resume attempt
   private var observers: [NSObjectProtocol] = []
   private var ioSessionId: String?        // io
   private var timeline: RecordingTimeline? // io
@@ -54,9 +61,7 @@ final class AudioRecorder {
     try control.sync {
       guard self.sessionId == nil else { throw RecorderError.busy }
       guard AVAudioApplication.shared.recordPermission == .granted else { throw RecorderError.micDenied }
-      let audio = AVAudioSession.sharedInstance()
-      try audio.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP])
-      try audio.setActive(true)
+      try Self.configureSession()
       try FileManager.default.createDirectory(
         at: Self.documents.appendingPathComponent("sessions/\(sessionId)", isDirectory: true),
         withIntermediateDirectories: true)
@@ -73,6 +78,7 @@ final class AudioRecorder {
   func pause(reason: String) throws {
     try control.sync {
       guard sessionId != nil, !paused else { throw RecorderError.notRecording }
+      wantsResume = false
       pauseInControl(reason: reason)
     }
   }
@@ -80,7 +86,9 @@ final class AudioRecorder {
   func resume() throws {
     try control.sync {
       guard sessionId != nil, paused else { throw RecorderError.notPaused }
-      try startRun()
+      retry?.cancel()
+      retry = nil
+      try restart()
     }
   }
 
@@ -110,10 +118,12 @@ final class AudioRecorder {
     guard let id = sessionId else { throw RecorderError.notRecording }
     let input = engine.inputNode
     let format = input.outputFormat(forBus: 0)
+    // During a call iOS can report no input at all, and installing a tap on that format crashes the app.
+    guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.micBusy }
     try io.sync {
       guard var t = timeline, let part = t.startRun(now: Self.now()) else { throw RecorderError.busy }
-      timeline = t
       file = try Self.openFile(sessionId: id, index: part.index, format: format)
+      timeline = t   // only after the file opened, so a failed start leaves the timeline as it was
       writeFailed = false
       sink?.runStarted(sessionId: id, runStartMs: t.runStartMs ?? 0, format: format)
     }
@@ -125,11 +135,112 @@ final class AudioRecorder {
       try engine.start()
     } catch {
       input.removeTap(onBus: 0)
-      endRun()
+      abandonRun()
       throw error
     }
     paused = false
     emitState("recording", reason: "none", recordedMs: nil)
+  }
+
+  /// A run that never recorded: no part is reported and its empty file is removed.
+  private func abandonRun() {
+    io.sync {
+      guard var t = timeline, let id = ioSessionId else { return }
+      let dropped = t.cancelRun()
+      timeline = t
+      file = nil
+      if let dropped {
+        try? FileManager.default.removeItem(at: Self.documents.appendingPathComponent(Self.partPath(sessionId: id, index: dropped.index)))
+      }
+      sink?.runEnded()
+    }
+  }
+
+  private static func configureSession() throws {
+    let audio = AVAudioSession.sharedInstance()
+    // mixWithOthers: another app's sound no longer stops the recording. defaultToSpeaker: that sound plays from the
+    // speaker and not the earpiece, which is where playAndRecord would otherwise send it.
+    try audio.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .mixWithOthers, .defaultToSpeaker])
+    try audio.setActive(true)
+  }
+
+  /// Starts a new run on a fresh engine, because the old one can hold a format from before the interruption.
+  private func restart() throws {
+    try Self.configureSession()
+    engine = AVAudioEngine()
+    try startRun()
+    wantsResume = false
+    retry?.cancel()
+    retry = nil
+    clearAlert()
+  }
+
+  /// Tries to resume now, then again after each delay left in `resumeDelays`.
+  private func attemptResume(from index: Int = 0) {
+    retry?.cancel()
+    retry = nil
+    guard index < Self.resumeDelays.count else { return }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, self.sessionId != nil, self.paused, self.wantsResume else { return }
+      do { try self.restart() } catch { self.attemptResume(from: index + 1) }
+    }
+    retry = work
+    control.asyncAfter(deadline: .now() + Self.resumeDelays[index], execute: work)
+  }
+
+  private func interruptionBegan() {
+    retry?.cancel()
+    retry = nil
+    guard sessionId != nil, !paused else { return }
+    wantsResume = true
+    pauseInControl(reason: "interruption")
+    scheduleAlert()
+  }
+
+  private func interruptionEnded(shouldResume: Bool) {
+    guard sessionId != nil, paused, wantsResume, shouldResume else { return }
+    attemptResume()
+  }
+
+  /// The engine stops by itself when the audio hardware changes (a headset removed, another app changing the sample
+  /// rate) and no tap runs after that. Starts it again; if it cannot start, this is a pause like any other.
+  private func engineMayHaveStopped(_ candidate: AVAudioEngine) {
+    guard candidate === engine, sessionId != nil, !paused, !engine.isRunning else { return }
+    stopEngine()
+    endRun()
+    do {
+      try restart()
+    } catch {
+      paused = true
+      wantsResume = true
+      emitState("paused", reason: "route_change", recordedMs: nil)
+      scheduleAlert()
+      attemptResume(from: 1)
+    }
+  }
+
+  private func appBecameActive() {
+    guard sessionId != nil else { return }
+    if paused {
+      if wantsResume { attemptResume() }
+    } else {
+      engineMayHaveStopped(engine)
+    }
+  }
+
+  private func scheduleAlert() {
+    let content = UNMutableNotificationContent()
+    content.title = "Recording paused"
+    content.body = "Tap to resume. Your audio so far is safe."
+    content.sound = .default
+    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: Self.alertDelay, repeats: false)
+    UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.alertId, content: content, trigger: trigger))
+  }
+
+  private func clearAlert() {
+    let center = UNUserNotificationCenter.current()
+    center.removePendingNotificationRequests(withIdentifiers: [Self.alertId])
+    center.removeDeliveredNotifications(withIdentifiers: [Self.alertId])
   }
 
   private func pauseInControl(reason: String) {
@@ -156,6 +267,10 @@ final class AudioRecorder {
   }
 
   private func finish() {
+    retry?.cancel()
+    retry = nil
+    wantsResume = false
+    clearAlert()
     removeObservers()
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     io.sync { timeline = nil; ioSessionId = nil; file = nil }
@@ -185,6 +300,7 @@ final class AudioRecorder {
         control.async { [weak self] in
           guard let self, self.sessionId == id, !self.paused else { return }
           self.pauseInControl(reason: "write_failed")
+          self.scheduleAlert()
         }
         return
       }
@@ -227,13 +343,30 @@ final class AudioRecorder {
     observers = [
       center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { [weak self] note in
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
-        self?.control.async { if self?.sessionId != nil, self?.paused == false { self?.pauseInControl(reason: "interruption") } }
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        let options = AVAudioSession.InterruptionOptions(rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+        self?.control.async {
+          switch type {
+          case .began: self?.interruptionBegan()
+          case .ended: self?.interruptionEnded(shouldResume: options.contains(.shouldResume))
+          @unknown default: break
+          }
+        }
       },
       center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { [weak self] note in
         guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable else { return }
-        self?.control.async { if self?.sessionId != nil, self?.paused == false { self?.pauseInControl(reason: "route_change") } }
+        self?.control.async {
+          guard let self else { return }
+          self.engineMayHaveStopped(self.engine)
+        }
+      },
+      center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] note in
+        guard let stopped = note.object as? AVAudioEngine else { return }
+        self?.control.async { self?.engineMayHaveStopped(stopped) }
+      },
+      center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
+        self?.control.async { self?.appBecameActive() }
       },
       center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: nil) { [weak self] _ in
         self?.control.async {
@@ -241,9 +374,12 @@ final class AudioRecorder {
           if self.sessionId != nil, !self.paused {
             self.endRun()
             self.paused = true
+            self.wantsResume = true
             self.emitState("paused", reason: "media_reset", recordedMs: nil)
+            self.scheduleAlert()
           }
           self.engine = AVAudioEngine()
+          if self.wantsResume { self.attemptResume() }
         }
       },
     ]
