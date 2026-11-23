@@ -11,7 +11,7 @@ export function photoLabel(at: number): string {
 }
 
 export function flagLabel(at: number): string {
-  return `Flagged moment at ${formatOffset(at)}, opens Questions for later`;
+  return `Ask later at ${formatOffset(at)}, opens Questions for later`;
 }
 
 // A gap, flag or photo in a recording's timeline. The live recording screen and the saved session draw them the same way.
@@ -30,17 +30,17 @@ export function TimeMarkRow({ item, interactive = false }: { item: Exclude<Timel
     case "flag":
       return (
         <View style={styles.line}>
-          <Text style={[styles.time, { color: colors.flagInk }]}>{formatOffset(item.at)}</Text>
+          <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
           <Pressable
             disabled={!interactive}
             accessibilityRole={interactive ? "button" : undefined}
-            accessibilityLabel={interactive ? flagLabel(item.at) : "Flagged moment"}
+            accessibilityLabel={interactive ? flagLabel(item.at) : "Ask later"}
             hitSlop={8}
             onPress={() => router.push("/later")}
-            style={[styles.flagChip, { backgroundColor: colors.flagSoft }]}
+            style={[styles.flagChip, { backgroundColor: colors.surface2 }]}
           >
-            <SymbolView name="flag.fill" tintColor={colors.flag} size={12} />
-            <Text style={[styles.flagText, { color: colors.flagInk }]}>Flagged</Text>
+            <SymbolView name="questionmark.bubble" tintColor={colors.ink3} size={12} />
+            <Text style={[styles.flagText, { color: colors.ink2 }]}>Ask later</Text>
           </Pressable>
         </View>
       );

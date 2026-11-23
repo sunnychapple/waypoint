@@ -222,8 +222,8 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
 
       {model.toast ? (
         <View style={[styles.toast, { backgroundColor: colors.ink }]}>
-          <SymbolView name="flag.fill" tintColor={colors.flag} size={14} />
-          <Text style={[styles.toastText, { color: colors.bg }]}>Flagged moment at {formatOffset(model.toast.t)}</Text>
+          <SymbolView name="questionmark.bubble.fill" tintColor={colors.bg} size={14} />
+          <Text style={[styles.toastText, { color: colors.bg }]}>Saved to ask later at {formatOffset(model.toast.t)}</Text>
         </View>
       ) : null}
     </View>
@@ -316,18 +316,18 @@ function Dock({ model }: { model: Model }) {
 
       <View style={styles.actions}>
         <ActionButton label="Snap page" icon="camera.fill" onPress={model.photo} />
-        <ActionButton label="Flag" icon="flag.fill" onPress={model.flag} flag />
+        <ActionButton label="Ask later" icon="questionmark.bubble" onPress={model.flag} />
       </View>
     </View>
   );
 }
 
-function ActionButton({ label, icon, onPress, flag }: { label: string; icon: SFSymbol; onPress: () => void; flag?: boolean }) {
+function ActionButton({ label, icon, onPress }: { label: string; icon: SFSymbol; onPress: () => void }) {
   const colors = useColors();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.action}>
-      <View style={[styles.actionCircle, { backgroundColor: flag ? colors.flag : colors.surface2 }]}>
-        <SymbolView name={icon} tintColor={flag ? colors.flagInk : colors.ink} size={flag ? 26 : 20} />
+      <View style={[styles.actionCircle, { backgroundColor: colors.surface2 }]}>
+        <SymbolView name={icon} tintColor={colors.ink} size={20} />
       </View>
       <Text style={[styles.actionLabel, { color: colors.ink2 }]}>{label}</Text>
     </Pressable>

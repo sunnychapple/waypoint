@@ -29,7 +29,7 @@ export default function LaterScreen() {
       </View>
       <Title>Questions for later</Title>
 
-      {empty ? <Body>Nothing saved for later. Tap a word in your notes to explain it, or flag a moment while recording.</Body> : null}
+      {empty ? <Body>Nothing saved for later. Tap a word in your notes to explain it, or tap Ask later while recording.</Body> : null}
 
       {groups.map((group) => (
         <View key={group.sessionId} style={styles.section}>
@@ -61,7 +61,7 @@ function FlagItem({ flag, phrase, colors }: { flag: OpenFlag; phrase: string | n
   return (
     <View style={styles.item}>
       <Row
-        title={flag.question === "" ? "Flagged moment" : flag.question}
+        title={flag.question === "" ? "A moment you saved" : flag.question}
         subtitle={flag.pageNumber !== null ? `Page ${flag.pageNumber}` : formatOffset(flag.t)}
         onPress={() => router.push(openHref)}
       />

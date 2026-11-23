@@ -75,7 +75,7 @@ describe("timeline mark labels", () => {
   });
 
   it("labels a flag with its time and where it opens", () => {
-    expect(flagLabel(125_000)).toBe("Flagged moment at 2:05, opens Questions for later");
+    expect(flagLabel(125_000)).toBe("Ask later at 2:05, opens Questions for later");
   });
 });
 
