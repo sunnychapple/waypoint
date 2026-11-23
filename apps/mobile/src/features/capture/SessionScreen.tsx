@@ -451,12 +451,14 @@ function PageBlock({
       style={[styles.page, lit ? [styles.litLine, { backgroundColor: colors.accentSoft }] : null]}
     >
       <Caption>{String(number)}</Caption>
-      <Image
-        accessibilityLabel={`Page ${number}`}
-        source={{ uri: fileUri(file) }}
-        resizeMode="contain"
-        style={[styles.pageImage, { backgroundColor: colors.surface2 }]}
-      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Page ${number}, opens full screen`}
+        disabled={file === ""}
+        onPress={() => router.push({ pathname: "/photo", params: { file } })}
+      >
+        <Image source={{ uri: fileUri(file) }} resizeMode="contain" style={[styles.pageImage, { backgroundColor: colors.surface2 }]} />
+      </Pressable>
       {text === null ? <Caption>Reading this page…</Caption> : null}
       {blank ? (
         <>

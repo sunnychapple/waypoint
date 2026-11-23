@@ -16,7 +16,7 @@ export function flagLabel(at: number): string {
 
 // A gap, flag or photo in a recording's timeline. The live recording screen and the saved session draw them the same way.
 // A photo opens the full-screen viewer; a flag opens Questions for later.
-// Taps only work where `interactive` is set: the live recorder must not navigate away mid-recording.
+// Taps only work where `interactive` is set: the live recorder opens photos, but does not leave for Questions for later.
 export function TimeMarkRow({ item, interactive = false }: { item: Exclude<TimelineItem, { kind: "line" }>; interactive?: boolean }) {
   const colors = useColors();
   switch (item.kind) {

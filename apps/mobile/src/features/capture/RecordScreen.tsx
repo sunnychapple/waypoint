@@ -249,7 +249,7 @@ const TimelineRow = memo(function TimelineRow({ item, sessionId }: { item: Timel
     case "gap":
     case "flag":
     case "photo":
-      return <TimeMarkRow item={item} />;
+      return <TimeMarkRow item={item} interactive={item.kind === "photo"} />;
   }
 }, (a, b) => a.sessionId === b.sessionId && a.item.key === b.item.key);
 
