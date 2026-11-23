@@ -14,12 +14,45 @@ export function addPiece(live: LiveTranscript, piece: Piece): LiveTranscript {
 export type PartSpan = { startMs: number; durationMs: number };
 export type SegmentSpan = { tStart: number; tEnd: number };
 
-// Parts at least `minMs` long that no segment overlaps, so they need transcribeFile.
-// A segment overlaps when tStart < part end and tEnd > part start.
+// How much of start..end the segments cover, counting overlapping segments once.
+function coveredMs(start: number, end: number, segments: SegmentSpan[]): number {
+  const spans = segments
+    .filter((s) => s.tStart < end && s.tEnd > start)
+    .map((s) => ({ from: Math.max(s.tStart, start), to: Math.min(s.tEnd, end) }))
+    .sort((a, b) => a.from - b.from);
+  let covered = 0;
+  let cursor = start;
+  for (const span of spans) {
+    if (span.to <= cursor) continue;
+    covered += span.to - Math.max(span.from, cursor);
+    cursor = span.to;
+  }
+  return covered;
+}
+
+// The longest stretch of the part that no segment covers.
+function longestHole(part: PartSpan, segments: SegmentSpan[]): number {
+  const end = part.startMs + part.durationMs;
+  const spans = segments.filter((s) => s.tStart < end && s.tEnd > part.startMs).sort((a, b) => a.tStart - b.tStart);
+  let longest = 0;
+  let cursor = part.startMs;
+  for (const span of spans) {
+    longest = Math.max(longest, span.tStart - cursor);
+    cursor = Math.max(cursor, span.tEnd);
+  }
+  return Math.max(longest, end - cursor);
+}
+
+// Parts at least `minMs` long with a stretch of at least `minMs` that no segment covers, so they need transcribeFile.
 export function partsNeedingTranscription(parts: PartSpan[], segments: SegmentSpan[], minMs = 10_000): PartSpan[] {
-  return parts.filter((part) => {
-    if (part.durationMs < minMs) return false;
-    const end = part.startMs + part.durationMs;
-    return !segments.some((s) => s.tStart < end && s.tEnd > part.startMs);
+  return parts.filter((part) => part.durationMs >= minMs && longestHole(part, segments) >= minMs);
+}
+
+// The pieces of a re-transcribed part that fill a hole: those with less than half their time already written down.
+export function piecesToKeep<T extends SegmentSpan>(pieces: T[], existing: SegmentSpan[]): T[] {
+  return pieces.filter((piece) => {
+    const length = piece.tEnd - piece.tStart;
+    if (length <= 0) return !existing.some((s) => s.tStart <= piece.tStart && s.tEnd >= piece.tEnd);
+    return coveredMs(piece.tStart, piece.tEnd, existing) * 2 < length;
   });
 }

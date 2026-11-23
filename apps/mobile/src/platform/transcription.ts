@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { getRecorderStatus, getSpeechStatus, transcribeFile } from "../../modules/waypoint-audio/index.ts";
 import { pendingTranscriptions, recoverSessions, saveSegment } from "../core/capture/recording.ts";
+import { piecesToKeep } from "../core/capture/transcript.ts";
 import { dbGeneration, getDb, writeDb, writeDbIf } from "./db.ts";
 
 const TICK_MS = 20_000;
@@ -53,7 +54,10 @@ async function transcribeSession(
     if (getRecorderStatus().state !== "idle") return false;
     const pieces = await transcribeFile(part.file, part.startMs);
     writeDbIf(generation, (db) => {
-      for (const piece of pieces) saveSegment(db, sessionId, piece);
+      const existing = db
+        .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ?", [sessionId])
+        .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
+      for (const piece of piecesToKeep(pieces, existing)) saveSegment(db, sessionId, piece);
     });
   }
   writeDbIf(generation, (db) => db.run("UPDATE sessions SET transcript = 'done', indexed_at = NULL WHERE id = ?", [sessionId]));
