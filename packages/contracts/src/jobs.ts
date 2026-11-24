@@ -10,7 +10,10 @@ export const JOB_TEXT_MAX_CHARS = {
   mini_app: 24_000,
   practice: 28_000,
   research: 8_000,
+  problem_help: 4_000, // the text around the problem on its page
 } as const;
+// The one problem a person asked for help with (problem_help).
+export const JOB_PROBLEM_MAX_CHARS = 2_000;
 // The student's instruction for a written job, or the research question.
 export const JOB_PROMPT_MAX_CHARS = 500;
 
@@ -43,6 +46,12 @@ export const CreateJobRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("mini_app"), text: text(JOB_TEXT_MAX_CHARS.mini_app), prompt: prompt.optional() }),
   z.strictObject({ type: z.literal("practice"), text: text(JOB_TEXT_MAX_CHARS.practice), prompt: prompt.optional() }),
   z.strictObject({ type: z.literal("retranscribe"), minutes: z.number().gt(0).max(600) }),
+  z.strictObject({
+    type: z.literal("problem_help"),
+    problem: text(JOB_PROBLEM_MAX_CHARS),
+    // Empty when the problem was photographed on its own.
+    text: z.string().trim().max(JOB_TEXT_MAX_CHARS.problem_help),
+  }),
 ]);
 
 export type CreateJobRequest = z.infer<typeof CreateJobRequestSchema>;

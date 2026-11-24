@@ -31,6 +31,8 @@ export function jobRoute(config: LoadedConfig, type: CreateJobRequest["type"], z
 function jobInput(request: CreateJobRequest): JobInput | null {
   if (request.type === "retranscribe") return null;
   if (request.type === "research") return { text: request.text ?? "", prompt: request.question };
+  // The problem rides in prompt; text is the page around it.
+  if (request.type === "problem_help") return { text: request.text, prompt: request.problem };
   return { text: request.text, prompt: request.prompt ?? null };
 }
 

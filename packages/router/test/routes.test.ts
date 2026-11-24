@@ -95,3 +95,14 @@ describe("RouteTableSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("optional fixed tasks", () => {
+  test("a table without problem_help parses, and one with it parses", () => {
+    expect(RouteTableSchema.safeParse(DEFAULT_ROUTES).success).toBe(true);
+    expect(RouteTableSchema.safeParse({ ...DEFAULT_ROUTES, fixed: { ...DEFAULT_ROUTES.fixed, problem_help: "strong" } }).success).toBe(true);
+  });
+
+  test("problem_help pointing at an unknown tier is rejected", () => {
+    expect(RouteTableSchema.safeParse({ ...DEFAULT_ROUTES, fixed: { ...DEFAULT_ROUTES.fixed, problem_help: "huge" } }).success).toBe(false);
+  });
+});

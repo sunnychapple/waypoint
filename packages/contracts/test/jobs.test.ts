@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   CreateJobRequestSchema,
+  JOB_PROBLEM_MAX_CHARS,
   JOB_TEXT_MAX_CHARS,
   JobResponseSchema,
   JobViewSchema,
@@ -83,6 +84,7 @@ describe("CreateJobRequestSchema", () => {
       mini_app: 24000,
       practice: 28000,
       research: 8000,
+      problem_help: 4000,
     });
   });
 });
@@ -95,5 +97,33 @@ describe("job views", () => {
     expect(JobViewSchema.safeParse({ ...VIEW, quoted: 0 }).success).toBe(false);
     expect(JobViewSchema.safeParse({ ...VIEW, state: "paused" }).success).toBe(false);
     expect(JobResponseSchema.parse({ job: VIEW })).toEqual({ job: VIEW });
+  });
+});
+
+describe("problem_help requests", () => {
+  const HELP = { type: "problem_help", problem: "Find the missing value.", text: "Exercise 4. Find the missing value. Show your work." };
+
+  test("a problem and its page text parse, trimmed", () => {
+    expect(CreateJobRequestSchema.parse(HELP)).toEqual(HELP);
+    expect(CreateJobRequestSchema.parse({ ...HELP, problem: "  Find it.  " })).toEqual({ ...HELP, problem: "Find it." });
+  });
+
+  test("the caps are exact: problem 2,000 and text 4,000 characters", () => {
+    expect(CreateJobRequestSchema.safeParse({ ...HELP, problem: "a".repeat(JOB_PROBLEM_MAX_CHARS) }).success).toBe(true);
+    expect(CreateJobRequestSchema.safeParse({ ...HELP, problem: "a".repeat(JOB_PROBLEM_MAX_CHARS + 1) }).success).toBe(false);
+    expect(CreateJobRequestSchema.safeParse({ ...HELP, text: "a".repeat(JOB_TEXT_MAX_CHARS.problem_help) }).success).toBe(true);
+    expect(CreateJobRequestSchema.safeParse({ ...HELP, text: "a".repeat(JOB_TEXT_MAX_CHARS.problem_help + 1) }).success).toBe(false);
+  });
+
+  test("an empty page text is allowed, and a missing one is not", () => {
+    expect(CreateJobRequestSchema.parse({ ...HELP, text: "" })).toEqual({ ...HELP, text: "" });
+    expect(CreateJobRequestSchema.parse({ ...HELP, text: "   " })).toEqual({ ...HELP, text: "" });
+    expect(CreateJobRequestSchema.safeParse({ type: "problem_help", problem: "Find it." }).success).toBe(false);
+  });
+
+  test("a blank problem, a missing text, a prompt and an extra key are rejected", () => {
+    for (const body of [{ ...HELP, problem: "   " }, { type: "problem_help", problem: "Find it." }, { ...HELP, prompt: "short" }, { ...HELP, extra: 1 }]) {
+      expect(CreateJobRequestSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
   });
 });

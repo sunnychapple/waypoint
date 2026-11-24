@@ -1,4 +1,4 @@
-import { PRICE_KEYS, type PriceKey, type PriceTable } from "./table.ts";
+import { OPTIONAL_PRICE_KEYS, OPTIONAL_PRICES, PRICE_KEYS, type OptionalPriceKey, type PriceKey, type PriceTable } from "./table.ts";
 
 export type QuoteInput = {
   task: string;
@@ -16,7 +16,11 @@ function isPriceKey(value: string): value is PriceKey {
   return Object.hasOwn(PRICE_KEY_SET, value);
 }
 
-export function priceKeyFor(input: QuoteInput): PriceKey {
+function isOptionalPriceKey(value: string): value is OptionalPriceKey {
+  return OPTIONAL_PRICE_KEYS.some((key) => key === value);
+}
+
+export function priceKeyFor(input: QuoteInput): PriceKey | OptionalPriceKey {
   const { task, depth } = input;
   if (task === "research") {
     if (depth === undefined) {
@@ -34,6 +38,9 @@ export function priceKeyFor(input: QuoteInput): PriceKey {
   if (task !== "fallback_voice" && isPriceKey(task)) {
     return task;
   }
+  if (isOptionalPriceKey(task)) {
+    return task;
+  }
   throw new Error(`unknown task: ${task}`);
 }
 
@@ -41,7 +48,7 @@ const OVERVIEW_TASKS: readonly string[] = ["overview_script", "video_slides"];
 
 export function quoteCredits(table: PriceTable, input: QuoteInput): number {
   const key = priceKeyFor(input);
-  let credits = table.credits[key];
+  let credits = isOptionalPriceKey(key) ? (table.credits[key] ?? OPTIONAL_PRICES[key]) : table.credits[key];
   if (key === "retranscribe") {
     const { minutes } = input;
     if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0 || minutes > 600) {

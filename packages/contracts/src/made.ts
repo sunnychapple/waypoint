@@ -60,12 +60,28 @@ export const PracticeSetDraftSchema = z.object({
     .max(20),
 });
 
+// Step-by-step help on one problem. When the model can't tell what the problem asks, it says so instead of guessing.
+const ProblemHelpStepSchema = z.object({ step: z.string().min(1).max(200), why: z.string().min(1).max(300) });
+const ReadableHelpSchema = z.object({
+  readable: z.literal(true),
+  steps: z.array(ProblemHelpStepSchema).min(1).max(8),
+  answer: z.string().min(1).max(600),
+});
+// The reason is one short line. It is capped at 120 so an unreadable reply cannot carry an answer (a longer one is an invalid reply).
+const UnreadableHelpSchema = z.object({ readable: z.literal(false), reason: z.string().min(1).max(120) });
+export const ProblemHelpDraftSchema = z.discriminatedUnion("readable", [ReadableHelpSchema, UnreadableHelpSchema]);
+
 export const VideoSlidesResultSchema = VideoSlidesDraftSchema.extend({ v: z.literal(1) });
 export const DiagramResultSchema = DiagramDraftSchema.extend({ v: z.literal(1) });
 export const MiniAppResultSchema = MiniAppDraftSchema.extend({ v: z.literal(1) });
 export const PracticeSetResultSchema = PracticeSetDraftSchema.extend({ v: z.literal(1) });
+export const ProblemHelpResultSchema = z.discriminatedUnion("readable", [
+  ReadableHelpSchema.extend({ v: z.literal(1) }),
+  UnreadableHelpSchema.extend({ v: z.literal(1) }),
+]);
 
 export type VideoSlidesResult = z.infer<typeof VideoSlidesResultSchema>;
 export type DiagramResult = z.infer<typeof DiagramResultSchema>;
 export type MiniAppResult = z.infer<typeof MiniAppResultSchema>;
 export type PracticeSetResult = z.infer<typeof PracticeSetResultSchema>;
+export type ProblemHelpResult = z.infer<typeof ProblemHelpResultSchema>;

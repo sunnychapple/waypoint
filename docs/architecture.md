@@ -42,6 +42,7 @@ Deliberately not used: Containers, Vectorize, Stream, Images, Hyperdrive. Cloudf
 | Second transcript, opt-in | Cloud (Whisper large v3 turbo). Off by default, per session or always. The app shows which words changed. | 1 credit per minute |
 | Page reading, photo text | iPhone (Apple Vision) | Free |
 | Flashcards, quiz, Help me with a problem | iPhone (on-device model) | Free |
+| Help me with a problem, in the cloud (when the iPhone can't, or for a second opinion) | Cloud, open models | 5 credits (1 when the problem can't be read) |
 | Search and the search index | iPhone. The index never leaves the device. | Free |
 | Explain, more detail, double-check | Cloud, open models on Workers AI | 1 to 4 credits |
 | Research the web | Cloud: Cloudflare Web Search API (provider Ceramic.ai, zero data retention), Browser Run, open models | 15 to 125 credits |
@@ -89,7 +90,7 @@ One versioned REST surface on the API Worker plus one socket per group. Every re
 | Sync | `GET /v1/groups/:id/sync` (socket), `GET /v1/groups/:id/changes?after=`, `POST /v1/groups/:id/changes`, `POST /v1/blobs?group=&id=` (uploads the locked file through the Worker), `GET /v1/blobs/:id`, `POST /v1/sync/extra` (more sync for today, paid in credits; signed; decided, built by card D5) | Group room, R2, D1, wallet |
 | Shared links | `POST /v1/links`, `DELETE /v1/links/:id`, `GET /l/:id` (viewer page), `GET /v1/links/:id/data` | D1, R2, static assets |
 | Instant tasks | `POST /v1/tasks/quote`, `POST /v1/tasks/explain` (stream), `POST /v1/tasks/more-detail` (stream), `POST /v1/tasks/double-check`, `POST /v1/tasks/read-link` | Wallet, router, Workers AI through AI Gateway, Browser Run |
-| Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id`, `PUT /v1/jobs/:id/audio/:n`, `POST /v1/jobs/:id/audio/done` | Workflows, wallet, R2 |
+| Long jobs | `POST /v1/jobs` type `research \| overview_script \| video_slides \| diagram \| mini_app \| practice \| retranscribe \| problem_help`, `GET /v1/jobs/:id`, `GET /v1/jobs/:id/events` (stream), `GET /v1/jobs/:id/result`, `DELETE /v1/jobs/:id`, `PUT /v1/jobs/:id/audio/:n`, `POST /v1/jobs/:id/audio/done` | Workflows, wallet, R2 |
 | Wallet | `GET /v1/wallet` (balance, plan, entitlements), `GET /v1/wallet/ledger` | Wallet |
 | Privacy | `PUT /v1/settings/zero-retention` (Plus only; signed, H12) | D1 |
 | Purchases | `POST /v1/purchases/apple`, `POST /webhooks/apple`, `POST /webhooks/clerk` | Wallet, D1, Queues |
@@ -170,6 +171,7 @@ Added by later migrations (numbers fixed in `docs/build-plan.md`, "Build order")
 0010 purchases           + released_at                                              -- card D1a; rows of a deleted account that a later account may claim once
 0011 sync_days           (user_id, day, bytes)                                       -- card D3; bytes sent per UTC day against the daily budget
      sync_extras         (user_id, key, day, bytes)                                  -- card D3; extra bought for a day, one row per purchase (D5)
+0012 jobs             type + 'problem_help' (table rebuilt, same columns)        -- card P1
 ```
 
 ### Group room (one Durable Object per group, SQLite storage)
@@ -315,5 +317,6 @@ Pricing rule: one credit covers $0.0005 of provider cost. Task price in credits 
 | `practice` | 8 |
 | `retranscribe` | 1 per audio minute |
 | `fallback_voice` | +2 on top of an audio or video overview, on phones too old for the on-device voices |
+| `problem_help` | 5 (1 when the problem can't be read). Not in `2026-11-16.2`: the code default (`OPTIONAL_PRICES`) applies until a new version lists it |
 
 Products: free with 25 starter credits; Own it once (2,000 credits once, to the buyer only); Plus monthly or yearly (2,000 credits a month as a monthly allowance); credit packs of 1,000, 5,000 and 20,000. App Store product ids: `waypoint.own_it`, `waypoint.plus.monthly`, `waypoint.plus.yearly`, `waypoint.credits.1000`, `waypoint.credits.5000`, `waypoint.credits.20000`. Purchased credits never expire. Free syncs text only; audio and photos sync on paid plans. Included synced media is capped at 3 GB per person.

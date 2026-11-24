@@ -24,7 +24,7 @@ export const memoryFits: (bucket: ReturnType<typeof memoryBucket>["bucket"]) => 
   bucket,
 ) => bucket;
 
-const ALL_TYPES: JobType[] = ["research", "overview_script", "video_slides", "diagram", "mini_app", "practice", "retranscribe"];
+const ALL_TYPES: JobType[] = ["research", "overview_script", "video_slides", "diagram", "mini_app", "practice", "retranscribe", "problem_help"];
 const KEY = "key-job_run-0123456789";
 const MARKER = "MARKER-the-cell-takes-in-water";
 
@@ -38,7 +38,7 @@ function stopCounter() {
 }
 
 describe("workflow registry and time limits", () => {
-  test("jobWorkflow returns null for each of the seven types; with JOB_WORKFLOWS.diagram set, it returns what that function returns", () => {
+  test("jobWorkflow returns null for each of the eight types; with JOB_WORKFLOWS.diagram set, it returns what that function returns", () => {
     for (const type of ALL_TYPES) {
       expect(jobWorkflow({} as Env, type)).toBeNull();
     }
@@ -61,6 +61,7 @@ describe("workflow registry and time limits", () => {
     expect(jobTimeLimitMs({ type: "retranscribe", depth: null, minutes: 4.2 })).toBe(90 * MIN + 50_000);
     expect(jobTimeLimitMs({ type: "diagram", depth: null, minutes: null })).toBe(20 * MIN);
     expect(jobTimeLimitMs({ type: "practice", depth: null, minutes: null })).toBe(20 * MIN);
+    expect(jobTimeLimitMs({ type: "problem_help", depth: null, minutes: null })).toBe(20 * MIN);
     for (const type of ["overview_script", "video_slides", "mini_app"] as const) {
       expect(jobTimeLimitMs({ type, depth: null, minutes: null })).toBe(30 * MIN);
     }

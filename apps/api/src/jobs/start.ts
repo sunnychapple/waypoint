@@ -52,6 +52,7 @@ export const JOB_WORKFLOWS: Partial<Record<JobType, (env: Env) => JobWorkflow>> 
   diagram: (env) => env.WRITE_WORKFLOW,
   mini_app: (env) => env.WRITE_WORKFLOW,
   practice: (env) => env.WRITE_WORKFLOW,
+  problem_help: (env) => env.WRITE_WORKFLOW,
   research: (env) => env.RESEARCH_WORKFLOW,
 };
 
@@ -72,6 +73,7 @@ export function jobTimeLimitMs(input: { type: JobType; depth: ResearchDepth | nu
       return 90 * MINUTE + Math.ceil(input.minutes ?? 0) * 10_000;
     case "diagram":
     case "practice":
+    case "problem_help":
       return 20 * MINUTE;
     default:
       return 30 * MINUTE;

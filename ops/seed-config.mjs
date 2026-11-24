@@ -21,7 +21,7 @@ const { ConfigCurrentSchema, FlagsSchema, MinNativeSchema, RouterConfigSchema, V
 );
 const { loadConfig } = await import(path.join(root, "apps/api/src/config/load.ts"));
 const { PriceTableSchema, PRICE_TABLE_2026_11_16_2 } = await import(path.join(root, "packages/pricing/src/index.ts"));
-const { RouteTableSchema, FIXED_TASKS, TIERS, decideRoute } = await import(path.join(root, "packages/router/src/index.ts"));
+const { RouteTableSchema, FIXED_TASKS, OPTIONAL_FIXED_TASKS, TIERS, decideRoute } = await import(path.join(root, "packages/router/src/index.ts"));
 
 const apply = process.argv.includes("--apply");
 const errors = [];
@@ -107,7 +107,7 @@ if (errors.length === 0) {
     const loaded = await loadConfig(kv);
     console.log(`ok    loadConfig()                   prices ${loaded.prices.version}, routes ${loaded.routes.version}`);
     const minConfidence = loaded.router.min_confidence;
-    for (const task of FIXED_TASKS) {
+    for (const task of [...FIXED_TASKS, ...OPTIONAL_FIXED_TASKS]) {
       const d = decideRoute({ task, zeroRetention: false, routes: loaded.routes, minConfidence });
       console.log(`route ${task.padEnd(16)} ${d.ok ? `${d.tier.padEnd(8)} ${d.model}` : d.reason}`);
     }

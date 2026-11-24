@@ -12,6 +12,7 @@ export const QUOTE_TASKS = [
   "mini_app",
   "practice",
   "retranscribe",
+  "problem_help",
 ] as const;
 
 export const QuoteRequestSchema = z

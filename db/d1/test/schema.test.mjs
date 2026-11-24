@@ -579,3 +579,32 @@ test("a purchase's key can add a sync_extras row only once per user", () => {
   db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)");
   assert.throws(() => db.exec("INSERT INTO sync_extras (user_id, key, day, bytes) VALUES ('u1', 'k1', 20000, 10)"), /UNIQUE constraint failed/);
 });
+
+test("0012 keeps every job row, column order and index, accepts problem_help, and still rejects other types", () => {
+  const names = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
+  const at = names.indexOf("0012_jobs_problem_help.sql");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const sql of migrations.slice(0, at)) db.exec(sql);
+  seedGroupAndDevice(db);
+  db.exec(`INSERT INTO jobs (id, user_id, type, state, quoted, spent, route, result_key, created_at, expires_at, device_id,
+    command_key, model, retention, bytes_sent, deadline_at, finished_at)
+    VALUES ('j1', 'u1', 'practice', 'succeeded', 8, 8, 'standard', 'results/j1', 10, 20, 'd1', 'k1', 'm', 'standard', 99, 30, 40)`);
+  db.exec("INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j2', 'u1', 'research', 'queued', 15, 11)");
+  const before = db.prepare("SELECT * FROM jobs ORDER BY id").all();
+  for (const sql of migrations.slice(at)) db.exec(sql);
+  assert.deepEqual(db.prepare("SELECT * FROM jobs ORDER BY id").all(), before);
+  assert.deepEqual(db.prepare("PRAGMA table_info(jobs)").all().map((c) => c.name), EXPECTED.jobs);
+  assert.deepEqual(
+    db.prepare("SELECT name FROM sqlite_master WHERE tbl_name = 'jobs' AND type = 'index' AND sql IS NOT NULL").all().map((r) => r.name),
+    ["jobs_user_id_created_at"],
+  );
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'jobs_new'"), 0);
+  db.exec("INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j3', 'u1', 'problem_help', 'queued', 5, 12)");
+  assert.throws(() => db.exec("INSERT INTO jobs (id, user_id, type, state, quoted, created_at) VALUES ('j4', 'u1', 'summarize', 'queued', 5, 12)"), /CHECK constraint failed/);
+  db.exec("DELETE FROM devices WHERE id = 'd1'");
+  assert.equal(db.prepare("SELECT device_id FROM jobs WHERE id = 'j1'").get().device_id, null);
+  db.exec("DELETE FROM users WHERE id = 'u1'");
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM jobs"), 0);
+  assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+});

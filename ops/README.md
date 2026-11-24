@@ -32,6 +32,7 @@ so every row also needs **Workers AI** and an **AI Gateway** whose id equals `AI
 | Research job (quick / standard / deep) | plan + page notes: `read_link` (light); answer: `research` (standard) | `@cf/zai-org/glm-4.7-flash`, then `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workflows (`waypoint-research`), **Web Search API** via `env.AI.websearch` with provider `ceramic` (AI Gateway credits / Unified Billing loaded, Ceramic.ai terms accepted, $0.25 per 1,000 searches), **Browser Run** (`env.BROWSER.quickAction("markdown")`, compatibility date ≥ 2026-03-24), Workers Paid |
 | Overview script, video slides, diagram, mini app | fixed strong | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workflows (`waypoint-write`), R2, Workers Paid |
 | Practice set | fixed standard | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workflows (`waypoint-write`), R2, Workers Paid |
+| Problem help (`problem_help`) | standard: the code's default (`OPTIONAL_FIXED_TIERS`) until a routes version lists it | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | Workflows (`waypoint-write`), R2, Workers Paid |
 | Second transcript (retranscribe) | not routed | `@cf/openai/whisper-large-v3-turbo` (hard-coded in `apps/api/src/jobs/start.ts`) | Workflows (`waypoint-retranscribe`), R2 (audio upload), Workers Paid (base64 of one audio part needs more than Free's 10 ms CPU per step) |
 | Every job | | | Queues `waypoint-usage` and `waypoint-push`, Durable Objects (Wallet), D1, KV, Analytics Engine, rate limit `JOB_STARTS` |
 
@@ -89,7 +90,7 @@ script after the gate passes.
 **Credits for a test.** A new account gets 25 credits. Extra testing credits come from the owner grant below. That covers Explain, more detail,
 double-check, practice (8), diagram (18) or quick research (15), but not an overview (40), slides (50), mini app (40)
 or standard/deep research. More credits come only from a purchase (a Sandbox purchase of `waypoint.credits.1000`
-needs the App Store Connect products and the real `APPLE_BUNDLE_ID`).
+needs the App Store Connect products and the real `APPLE_BUNDLE_ID`). Problem help is 5 credits (1 when the problem can't be read). Its price and route are defaults in code (`OPTIONAL_PRICES`, `OPTIONAL_FIXED_TIERS`) until a new price table and routes version list `problem_help`.
 
 Placeholders in `wrangler.jsonc` that must be real before `wrangler deploy`: the D1 `database_id`, the KV `id`, and the
 rate limit `namespace_id`s if 1001 to 1003 are taken in the account. Build the viewer first

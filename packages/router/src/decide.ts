@@ -1,5 +1,5 @@
 import type { RouterAnswers } from "./questions.ts";
-import { TIERS, type RouteEntry, type RouteTable, type Tier } from "./routes.ts";
+import { OPTIONAL_FIXED_TIERS, TIERS, type RouteEntry, type RouteTable, type Tier } from "./routes.ts";
 
 const DEFAULT_MIN_CONFIDENCE = 0.6;
 
@@ -63,7 +63,12 @@ export function decideRoute(input: DecideRouteInput): RouteDecision {
   const { answers } = input;
 
   const fixed: Readonly<Record<string, Tier | undefined>> = input.routes.fixed;
-  const fixedTier = Object.hasOwn(fixed, input.task) ? fixed[input.task] : undefined;
+  const optional: Readonly<Record<string, Tier | undefined>> = OPTIONAL_FIXED_TIERS;
+  const fixedTier = Object.hasOwn(fixed, input.task)
+    ? fixed[input.task]
+    : Object.hasOwn(optional, input.task)
+      ? optional[input.task]
+      : undefined;
   let requestedTier: Tier;
   if (fixedTier !== undefined) {
     requestedTier = fixedTier;

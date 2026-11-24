@@ -8,6 +8,7 @@ export const JOB_TYPES = [
   "mini_app",
   "practice",
   "retranscribe",
+  "problem_help",
 ] as const;
 
 export const RESEARCH_DEPTHS = ["quick", "standard", "deep"] as const;

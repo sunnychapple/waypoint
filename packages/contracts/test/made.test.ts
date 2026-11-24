@@ -6,6 +6,8 @@ import {
   MiniAppResultSchema,
   PracticeSetDraftSchema,
   PracticeSetResultSchema,
+  ProblemHelpDraftSchema,
+  ProblemHelpResultSchema,
   VideoSlidesDraftSchema,
   VideoSlidesResultSchema,
 } from "../src/made.ts";
@@ -67,5 +69,42 @@ describe("made job schemas", () => {
     expect(MiniAppResultSchema.safeParse({ v: 2, title: "Slider", html: "<p>Hi</p>" }).success).toBe(false);
     expect(PracticeSetResultSchema.parse({ v: 1, title: "Osmosis", questions: [MC, SA, MC] }).v).toBe(1);
     expect(PracticeSetResultSchema.safeParse({ title: "Osmosis", questions: [MC, SA, MC] }).success).toBe(false);
+  });
+});
+
+describe("problem help", () => {
+  const STEP = { step: "Read what the question asks.", why: "Knowing the goal tells you which facts matter." };
+
+  test("a readable reply with steps and an answer parses; keys the model adds are dropped", () => {
+    const parsed = ProblemHelpDraftSchema.parse({ readable: true, steps: [STEP, STEP], answer: "The answer.", extra: 1 });
+    expect(parsed).toEqual({ readable: true, steps: [STEP, STEP], answer: "The answer." });
+  });
+
+  test("an unreadable reply with a reason parses", () => {
+    expect(ProblemHelpDraftSchema.parse({ readable: false, reason: "The question is cut off." })).toEqual({ readable: false, reason: "The question is cut off." });
+  });
+
+  test("an unreadable reason is at most 120 characters", () => {
+    expect(ProblemHelpDraftSchema.safeParse({ readable: false, reason: "a".repeat(120) }).success).toBe(true);
+    expect(ProblemHelpDraftSchema.safeParse({ readable: false, reason: "a".repeat(121) }).success).toBe(false);
+  });
+
+  test("no steps, nine steps, an empty answer, a step without why, and readable missing are rejected", () => {
+    for (const body of [
+      { readable: true, steps: [], answer: "A" },
+      { readable: true, steps: Array.from({ length: 9 }, () => STEP), answer: "A" },
+      { readable: true, steps: [STEP], answer: "" },
+      { readable: true, steps: [{ step: "Do it." }], answer: "A" },
+      { steps: [STEP], answer: "A" },
+      { readable: false, reason: "" },
+    ]) {
+      expect(ProblemHelpDraftSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+    }
+  });
+
+  test("the result needs v: 1, readable or not", () => {
+    expect(ProblemHelpResultSchema.parse({ v: 1, readable: true, steps: [STEP], answer: "A" }).v).toBe(1);
+    expect(ProblemHelpResultSchema.parse({ v: 1, readable: false, reason: "Too blurry." }).v).toBe(1);
+    expect(ProblemHelpResultSchema.safeParse({ readable: true, steps: [STEP], answer: "A" }).success).toBe(false);
   });
 });

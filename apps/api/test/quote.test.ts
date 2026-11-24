@@ -104,6 +104,7 @@ describe("POST /v1/tasks/quote: quotes", () => {
     ["overview_script with fallback_voice", { task: "overview_script", fallback_voice: true }, 42],
     ["retranscribe with 4 minutes", { task: "retranscribe", minutes: 4 }, 4],
     ["research at deep depth", { task: "research", depth: "deep" }, 125],
+    ["problem_help, which the live table does not list yet", { task: "problem_help" }, 5],
   ])("%s quotes the right credits", async (_name, request, credits) => {
     const { env } = makeEnv(goodConfigEntries(), view(1000, 0, 0));
     const res = await post(JSON.stringify(request), env);
