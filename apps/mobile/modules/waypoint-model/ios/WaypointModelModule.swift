@@ -76,6 +76,20 @@ public class WaypointModelModule: Module {
         }
       }
     }
+
+    AsyncFunction("summarize") { (text: String) async throws -> [String: Any] in
+      try await self.run { () async throws -> [String: Any] in
+        let prompt = "Give this text a short title and a short summary.\n\nText:\n\(text)"
+        do {
+          let session = LanguageModelSession(instructions: studyInstructions)
+          let response = try await session.respond(to: prompt, generating: SummaryDraft.self)
+          return ["title": response.content.title, "summary": response.content.summary]
+        } catch where modelErrorCode(error) == "declined" {
+          let p = prompt + "\n\nWrite exactly two lines:\nTITLE: a short title, at most eight words\nSUMMARY: two or three short sentences\nWrite nothing else."
+          return ["plainText": try await self.respondAsText(p)]
+        }
+      }
+    }
   }
 
   // Apple's default filter refuses ordinary schoolwork such as a page about a war. The text is the student's own page, so a

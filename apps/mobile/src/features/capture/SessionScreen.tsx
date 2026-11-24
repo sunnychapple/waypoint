@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { dateLine } from "../../core/capture/labels.ts";
+import { getSummary, needsSummary } from "../../core/capture/summary.ts";
 import { momentFromParam, nearestSegmentIndex } from "../../core/capture/moment.ts";
 import { listPages } from "../../core/capture/pages.ts";
 import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capture/second.ts";
@@ -27,6 +28,7 @@ import { useQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles, fileUri } from "../../platform/files.ts";
 import { linkRefused, revokeLink } from "../../platform/links.ts";
 import { retryPageRead } from "../../platform/pageReading.ts";
+import { summarizeSession } from "../../platform/summary.ts";
 import { Caption, PrimaryButton, Row, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -34,6 +36,7 @@ import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { PageTextEditor } from "./PageTextEditor.tsx";
 import { ParagraphRow } from "./ParagraphRow.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
+import { SummaryCard } from "./SummaryCard.tsx";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 
 // One session: its title, when and where it was saved, and what to do with it.
@@ -56,6 +59,8 @@ export default function SessionScreen() {
       overviews: overviewsForSession(db, id),
       links: linksForSession(db, id),
       role: spaceGroups(db).get(session.spaceId)?.role ?? null,
+      summary: getSummary(db, id),
+      needsSummary: !live && needsSummary(db, id),
       second: session.kind === "recording" && !live ? secondTranscript(db, id) : null,
       // The recording's parts that are on this iPhone (a synced part may not be downloaded yet).
       playParts: session.kind === "recording" ? uploadParts(db, id).filter((part) => part.file !== "") : [],
@@ -77,6 +82,12 @@ export default function SessionScreen() {
     const timer = setTimeout(() => setLit(null), 2000);
     return () => clearTimeout(timer);
   }, [lit]);
+  // After a recording stops, and after Continue recording stops again, the iPhone's model writes the title and summary.
+  const wantsSummary = data !== null && data.needsSummary && data.role !== "viewer";
+  const recordedMs = data?.session.recordedMs ?? 0;
+  useEffect(() => {
+    if (wantsSummary) void summarizeSession(id, recordedMs);
+  }, [wantsSummary, id, recordedMs]);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
@@ -200,6 +211,9 @@ export default function SessionScreen() {
           </Pressable>
         )}
         <Caption>{`${dateLine(session.startedAt, offset)} · ${detail}`}</Caption>
+        {data.summary !== null && data.summary.summary !== null ? (
+          <SummaryCard sessionId={id} text={data.summary.summary} editable={role !== "viewer"} />
+        ) : null}
 
         {session.kind === "recording" && session.transcript === "waiting" ? (
           <Caption>Writing down the recording on this iPhone…</Caption>

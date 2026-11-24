@@ -18,6 +18,7 @@ vi.mock("../src/platform/files.ts", () => ({ fileUri: (p: string) => `file:///do
 vi.mock("../src/platform/db.ts", () => ({ getDb: () => ({}), useQuery: () => null, writeDb: () => undefined }));
 vi.mock("../src/platform/config.ts", () => ({ useConfig: () => null }));
 vi.mock("../src/platform/pageReading.ts", () => ({ retryPageRead: async () => false }));
+vi.mock("../src/platform/summary.ts", () => ({ summarizeSession: async () => undefined }));
 vi.mock("../src/platform/links.ts", () => ({ linkRefused: () => false, revokeLink: async () => undefined }));
 vi.mock("../src/platform/sync.ts", () => ({}));
 vi.mock("../src/features/capture/RecordingPlayer.tsx", () => ({ RecordingPlayer: () => null }));

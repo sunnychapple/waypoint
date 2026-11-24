@@ -222,3 +222,48 @@ describe("summarizeUnits", () => {
     await expect(summarizeUnits(port, [unit("Words")])).rejects.toEqual({ code: "unsupported_language" });
   });
 });
+
+describe("summary review fixes", () => {
+  let db: SqlDb;
+  let ids: number;
+  let spaceId: string;
+  const deps = { now: () => startedAt, newId: () => `r-${++ids}` };
+
+  beforeEach(() => {
+    db = createMemoryDb();
+    migrate(db);
+    ids = 0;
+    spaceId = ensureDefaultSpace(db, deps).id;
+  });
+
+  it("applySummary does not overwrite a summary that already exists (one synced from another phone)", () => {
+    const session = startRecordingSession(db, deps, spaceId, true);
+    saveSegment(db, session.id, { tStart: 0, tEnd: 1000, text: "Welcome to biology" });
+    db.run("UPDATE sessions SET state = 'saved', transcript = 'done', ended_at = ? WHERE id = ?", [startedAt + 1000, session.id]);
+    nameRecording(db, session.id);
+    db.run("UPDATE sessions SET summary = 'Written on the other phone.' WHERE id = ?", [session.id]);
+    applySummary(db, session.id, { title: "Cell parts", summary: "Cells have parts." });
+    expect(getSummary(db, session.id)?.summary).toBe("Written on the other phone.");
+    expect(getSession(db, session.id)?.title).toBe("Cell parts");
+  });
+
+  it("summarizeUnits halves a chunk that is too long and makes the summary from the halves", async () => {
+    const units: Unit[] = [
+      { text: "Alpha cells", captureId: null, t: null },
+      { text: "Beta organs", captureId: null, t: null },
+    ];
+    const asked: string[] = [];
+    const port: SummaryPort = {
+      contextSize: () => 4096,
+      summarize: async (text: string) => {
+        asked.push(text);
+        if (text.includes("Alpha") && text.includes("Beta")) throw Object.assign(new Error("long"), { code: "context_too_long" });
+        return { title: "Cells", summary: text };
+      },
+    };
+    const made = await summarizeUnits(port, units);
+    expect(asked).toContain("Alpha cells");
+    expect(asked).toContain("Beta organs");
+    expect(made?.summary).toContain("Alpha");
+  });
+});

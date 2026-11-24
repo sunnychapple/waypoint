@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { SqlDb } from "../db/sql.ts";
-import { inputBudget, packUnits, type Unit } from "../study/generate.ts";
+import { halve, inputBudget, packUnits, type Unit } from "../study/generate.ts";
 import { titleFromText } from "./pages.ts";
 
 // What the iPhone's model is asked for (modules/waypoint-model summarize): a title and a summary of some text.
@@ -37,12 +37,13 @@ export function staleSummary(db: SqlDb, sessionId: string): void {
   db.run("UPDATE sessions SET summary = NULL WHERE id = ? AND summary_auto = 1 AND summary IS NOT NULL", [sessionId]);
 }
 
-// Writes what the model made. A title or a summary the person typed is never replaced.
+// Writes what the model made. A title or a summary the person typed is never replaced. A summary is written only when
+// there is none yet, so one synced from another phone during generation is kept.
 export function applySummary(db: SqlDb, sessionId: string, made: MadeSummary): void {
   db.run(
     `UPDATE sessions SET title = CASE WHEN title_auto = 1 THEN ? ELSE title END,
-       summary = CASE WHEN summary_auto = 1 THEN ? ELSE summary END
-     WHERE id = ? AND (title_auto = 1 OR summary_auto = 1)`,
+       summary = CASE WHEN summary_auto = 1 AND summary IS NULL THEN ? ELSE summary END
+     WHERE id = ? AND (title_auto = 1 OR (summary_auto = 1 AND summary IS NULL))`,
     [made.title, made.summary, sessionId],
   );
 }
@@ -87,23 +88,49 @@ export function cleanSummary(raw: unknown): MadeSummary | null {
   return { title: shortTitle, summary: fit(shortSummary, SUMMARY_MAX_CHARS) };
 }
 
+function joinUnits(units: Unit[]): string {
+  return units.map((unit) => unit.text).join("\n\n");
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+// Asks the model about one chunk. On context_too_long the chunk is halved once and each half is asked; a half that is
+// still too long is skipped, so the summary is made from the chunks that worked. Other errors are thrown.
+async function summarizeChunk(port: SummaryPort, group: Unit[]): Promise<MadeSummary[]> {
+  const ask = async (units: Unit[]): Promise<MadeSummary | null> => cleanSummary(await port.summarize(joinUnits(units)));
+  try {
+    const one = await ask(group);
+    return one === null ? [] : [one];
+  } catch (error) {
+    if (!hasCode(error, "context_too_long")) throw error;
+  }
+  const out: MadeSummary[] = [];
+  for (const half of halve(group)) {
+    try {
+      const one = await ask(half);
+      if (one !== null) out.push(one);
+    } catch (error) {
+      if (!hasCode(error, "context_too_long")) throw error;
+    }
+  }
+  return out;
+}
+
 // The text in pieces that fit the model, each summarized; when there is more than one, their summaries are summarized
 // the same way until one is left. Null when there is no text or nothing usable came back. Model errors are thrown.
 export async function summarizeUnits(port: SummaryPort, units: Unit[]): Promise<MadeSummary | null> {
   const budget = inputBudget(port.contextSize());
-  const join = (group: Unit[]): string => group.map((unit) => unit.text).join("\n\n");
-  let texts = packUnits(units.filter((unit) => unit.text.trim() !== ""), budget).map(join);
+  let groups = packUnits(units.filter((unit) => unit.text.trim() !== ""), budget);
   while (true) {
     const made: MadeSummary[] = [];
-    for (const text of texts) {
-      const one = cleanSummary(await port.summarize(text));
-      if (one !== null) made.push(one);
-    }
+    for (const group of groups) made.push(...(await summarizeChunk(port, group)));
     const [first] = made;
     if (first === undefined || made.length === 1) return first ?? null;
-    const next = packUnits(made.map((m) => ({ text: m.summary, captureId: null, t: null })), budget).map(join);
+    const next = packUnits(made.map((m) => ({ text: m.summary, captureId: null, t: null })), budget);
     // The summaries did not get any fewer: the first piece's summary stands.
-    if (next.length >= texts.length) return first;
-    texts = next;
+    if (next.length >= groups.length) return first;
+    groups = next;
   }
 }

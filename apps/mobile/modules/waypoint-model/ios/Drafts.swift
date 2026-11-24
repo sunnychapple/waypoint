@@ -48,3 +48,10 @@ Do not add facts that are not in the text. Write short, plain sentences at the r
   @Guide(description: "The final answer")
   var answer: String
 }
+
+@Generable struct SummaryDraft {
+  @Guide(description: "A short title that names the main topic, at most eight words, in the language of the text")
+  var title: String
+  @Guide(description: "Two or three short sentences saying what the text covers, in the language of the text")
+  var summary: String
+}
