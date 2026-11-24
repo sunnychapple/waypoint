@@ -11,34 +11,35 @@ import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "..
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
 
-// Each page full width, with its problems drawn as tappable outlines. Tapping one opens its steps.
+// Each page full width, with its problems drawn as tappable outlines. Tapping one opens its steps (or, without the
+// on-device model, the cloud screen for it).
 // A page with no problems found says so, and offers a retake or a problem typed in.
 export default function HelpPickScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [availability] = useState(getAvailability);
   const pages = useQuery((db) => pagesWithLines(db, sessionId), sessionId);
 
-  if (availability !== "available") {
-    return (
-      <Screen>
-        <CloseButton />
-        <ModelUnavailable availability={availability} sessionId={sessionId} />
-      </Screen>
-    );
-  }
+  // Without the on-device model, a tapped problem goes straight to the cloud screen, which shows the price before anything is sent.
+  const help = availability === "available" ? "/study/help-steps" : "/study/help-cloud";
 
   return (
     <Screen>
       <CloseButton />
+      {availability !== "available" ? (
+        <>
+          <ModelUnavailable availability={availability} />
+          <Body>You can still get help from NotePath's cloud (uses credits).</Body>
+        </>
+      ) : null}
       <Title>Tap a problem</Title>
       {pages.map((page) => (
-        <PageProblems key={page.id} sessionId={sessionId} page={page} />
+        <PageProblems key={page.id} sessionId={sessionId} page={page} help={help} />
       ))}
     </Screen>
   );
 }
 
-function PageProblems({ sessionId, page }: { sessionId: string; page: PageWithLines }) {
+function PageProblems({ sessionId, page, help }: { sessionId: string; page: PageWithLines; help: string }) {
   const colors = useColors();
   const [ratio, setRatio] = useState(1 / 1.4);
   const [typing, setTyping] = useState(false);
@@ -59,7 +60,7 @@ function PageProblems({ sessionId, page }: { sessionId: string; page: PageWithLi
             key={`${page.id}-${index}`}
             accessibilityRole="button"
             accessibilityLabel={`Problem ${index + 1}`}
-            onPress={() => router.push(`/study/help-steps?sessionId=${sessionId}&captureId=${page.id}&block=${index}`)}
+            onPress={() => router.push(`${help}?sessionId=${sessionId}&captureId=${page.id}&block=${index}`)}
             style={[
               styles.outline,
               {
@@ -95,7 +96,7 @@ function PageProblems({ sessionId, page }: { sessionId: string; page: PageWithLi
                 <PrimaryButton
                   label="Help me"
                   onPress={() =>
-                    router.push(`/study/help-steps?sessionId=${sessionId}&captureId=${page.id}&text=${encodeURIComponent(typed.trim())}`)
+                    router.push(`${help}?sessionId=${sessionId}&captureId=${page.id}&text=${encodeURIComponent(typed.trim())}`)
                   }
                 />
               )}

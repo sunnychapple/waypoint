@@ -73,6 +73,7 @@ function RootStack() {
         <Stack.Screen name="study/quiz" />
         <Stack.Screen name="study/help" />
         <Stack.Screen name="study/help-steps" />
+        <Stack.Screen name="study/help-cloud" />
         <Stack.Screen name="sent" options={{ presentation: "modal" }} />
         <Stack.Screen name="invite/[token]" />
         <Stack.Screen name="join" options={{ presentation: "formSheet" }} />

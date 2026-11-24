@@ -2,19 +2,21 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { cleanHelp } from "../../core/study/drafts.ts";
-import { problemOf, showAnswer, showNextStep, startHelp, typedProblemOf, type HelpState } from "../../core/study/help.ts";
+import { cleanHelp, type HelpDraft } from "../../core/study/drafts.ts";
+import { problemOf, typedProblemOf } from "../../core/study/help.ts";
 import { getDb } from "../../platform/db.ts";
 import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
-import { Body, Caption, PrimaryButton, Screen, SecondaryButton } from "../../ui/kit.tsx";
+import { Body, PrimaryButton, Screen, SecondaryButton } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
+import { StepByStep } from "./StepByStep.tsx";
 
 function isDeclined(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "declined";
 }
 
-// Steps first, the answer last. One step shows at a time, and the answer only after the last step.
+// Help on one problem, worked out on this iPhone. When that can't be done, or for a second opinion, "Help with the
+// cloud" opens the cloud screen for the same problem (it shows the price first).
 export default function HelpStepsScreen() {
   const colors = useColors();
   // A problem is either a block the page's text found (block) or one the student typed in (text).
@@ -23,7 +25,7 @@ export default function HelpStepsScreen() {
   const [problem] = useState(() => (text === undefined ? problemOf(getDb(), captureId, Number(block)) : typedProblemOf(getDb(), captureId, text)));
   const [attempt, setAttempt] = useState(0);
   const [outcome, setOutcome] = useState<"working" | "failed" | "declined" | "ready">("working");
-  const [help, setHelp] = useState<HelpState | null>(null);
+  const [draft, setDraft] = useState<HelpDraft | null>(null);
 
   useEffect(() => {
     if (availability !== "available" || problem === null) return;
@@ -32,13 +34,13 @@ export default function HelpStepsScreen() {
     setOutcome("working");
     async function run() {
       try {
-        const draft = cleanHelp(await helpWithProblem(target.text, target.context));
+        const cleaned = cleanHelp(await helpWithProblem(target.text, target.context));
         if (!active) return;
-        if (draft === null) {
+        if (cleaned === null) {
           setOutcome("failed");
           return;
         }
-        setHelp(startHelp(draft));
+        setDraft(cleaned);
         setOutcome("ready");
       } catch (error) {
         if (active) setOutcome(isDeclined(error) ? "declined" : "failed");
@@ -50,11 +52,17 @@ export default function HelpStepsScreen() {
     };
   }, [attempt, availability, problem]);
 
+  const cloudHref = `/study/help-cloud?sessionId=${encodeURIComponent(sessionId)}&captureId=${encodeURIComponent(captureId)}${
+    text === undefined ? `&block=${block ?? ""}` : `&text=${encodeURIComponent(text)}`
+  }`;
+  const cloudButton = <SecondaryButton label="Help with the cloud" icon="cloud" onPress={() => router.push(cloudHref)} />;
+
   if (availability !== "available") {
     return (
       <Screen>
         <CloseButton />
-        <ModelUnavailable availability={availability} sessionId={sessionId} />
+        <ModelUnavailable availability={availability} />
+        {problem !== null ? cloudButton : null}
       </Screen>
     );
   }
@@ -85,37 +93,17 @@ export default function HelpStepsScreen() {
         <>
           <Body>Couldn't work this one out on this iPhone.</Body>
           <PrimaryButton label="Try again" onPress={() => setAttempt(attempt + 1)} />
+          {cloudButton}
         </>
       ) : null}
-      {outcome === "declined" ? <Body>This problem can't be answered here.</Body> : null}
-
-      {outcome === "ready" && help !== null ? (
+      {outcome === "declined" ? (
         <>
-          {help.steps.slice(0, help.shown).map((step, index) => (
-            <View key={index} style={styles.step}>
-              <Caption>{`Step ${index + 1} of ${help.steps.length}`}</Caption>
-              <Text style={[styles.stepTitle, { color: colors.ink }]}>{step.title}</Text>
-              <Body>{step.detail}</Body>
-            </View>
-          ))}
-          {help.shown < help.steps.length ? <PrimaryButton label="Next step" onPress={() => setHelp(showNextStep(help))} /> : null}
-          {help.shown === help.steps.length && !help.answerShown ? (
-            <PrimaryButton label="Show the answer" onPress={() => setHelp(showAnswer(help))} />
-          ) : null}
-          {help.answerShown ? (
-            <View style={[styles.answer, { backgroundColor: colors.localSoft }]}>
-              <Text style={[styles.answerText, { color: colors.localInk }]}>{help.answer}</Text>
-            </View>
-          ) : null}
-          <Caption style={styles.caption}>Try each step yourself before you look at the next one.</Caption>
-          {help.answerShown ? (
-            <>
-              <PrimaryButton label="Done" onPress={() => router.back()} />
-              <SecondaryButton label="Help with another problem" onPress={() => backToPick(sessionId)} />
-            </>
-          ) : null}
+          <Body>This problem can't be answered here.</Body>
+          {cloudButton}
         </>
       ) : null}
+
+      {outcome === "ready" && draft !== null ? <StepByStep key={attempt} draft={draft} onAnother={() => backToPick(sessionId)} after={cloudButton} /> : null}
     </Screen>
   );
 }
@@ -140,9 +128,4 @@ const styles = StyleSheet.create({
   close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   problem: { borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, padding: 20 },
   problemText: { fontFamily: "Georgia", fontSize: 22, fontWeight: "700", lineHeight: 30 },
-  step: { gap: 6 },
-  stepTitle: { fontSize: 19, fontWeight: "700" },
-  answer: { borderRadius: 16, padding: 16 },
-  answerText: { fontSize: 19, fontWeight: "700", lineHeight: 26 },
-  caption: { textAlign: "center" },
 });
