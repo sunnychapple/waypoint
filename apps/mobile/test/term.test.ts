@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanTermGuess, guessHeadline, guessLabel, guessSentence } from "../src/core/explain/term.ts";
+import { cleanTermGuess, guessHeadline, guessLabel, guessSentence, replaceWord } from "../src/core/explain/term.ts";
 
 const guess = (over: Record<string, unknown> = {}) => ({
   misheard: true,
@@ -59,5 +59,28 @@ describe("cleanTermGuess", () => {
   it("trims quotes and a final full stop from each part", () => {
     const g = cleanTermGuess(guess({ term: "“qua”", original: "'qua'.", language: " latin. ", meaning: "\"in the role of\"." }), "kwaw");
     expect(g).toMatchObject({ term: "qua", original: null, language: "latin", meaning: "in the role of" });
+  });
+});
+
+describe("replaceWord", () => {
+  it("replaces the word at the given place, not another copy of it", () => {
+    expect(replaceWord("the kwaw and kwaw", 1, "kwaw", "qua")).toBe("the qua and kwaw");
+    expect(replaceWord("the kwaw and kwaw", 3, "kwaw", "qua")).toBe("the kwaw and qua");
+  });
+
+  it("does not match inside a longer word", () => {
+    expect(replaceWord("kwawk kwaw", 0, "kwaw", "qua")).toBeNull();
+    expect(replaceWord("kwawk kwaw", 1, "kwaw", "qua")).toBe("kwawk qua");
+  });
+
+  it("keeps the punctuation around the word", () => {
+    expect(replaceWord("(kwaw),", 0, "kwaw", "qua")).toBe("(qua),");
+    expect(replaceWord("“Kwaw?” she said", 0, "Kwaw", "Qua")).toBe("“Qua?” she said");
+  });
+
+  it("matches the word as text, and gives null for a word that is not there or not the heard one", () => {
+    expect(replaceWord("a+b c", 0, "a+b", "x")).toBe("x c");
+    expect(replaceWord("one two", 2, "two", "x")).toBeNull();
+    expect(replaceWord("one two", 1, "three", "x")).toBeNull();
   });
 });

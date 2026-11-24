@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { splitWords } from "./excerpt.ts";
 
 // S3: what the model thinks was said where the transcript wrote `heard`. `original` is the term in its own script when
 // that differs from `term`.
@@ -43,4 +44,26 @@ export function guessLabel(guess: TermGuess): string {
 // "The transcript wrote "<heard>". <Term> is the <Language> word for <meaning>."
 export function guessSentence(guess: TermGuess): string {
   return `The transcript wrote "${guess.heard}". ${upper(guess.term)} is the ${upper(guess.language)} word for ${guess.meaning}.`;
+}
+
+// The line with its `index`-th word (counted as wordsOf counts, from 0) swapped for `term`, the punctuation around it kept.
+// Null when the line has no such word or that word is not `heard`.
+export function replaceWord(text: string, index: number, heard: string, term: string): string | null {
+  let seen = -1;
+  let out = "";
+  for (const token of splitWords(text)) {
+    if (token.word === null) {
+      out += token.text;
+      continue;
+    }
+    seen += 1;
+    if (seen !== index) {
+      out += token.text;
+      continue;
+    }
+    if (token.word !== heard) return null;
+    const start = token.text.indexOf(token.word);
+    out += token.text.slice(0, start) + term + token.text.slice(start + token.word.length);
+  }
+  return seen >= index ? out : null;
 }

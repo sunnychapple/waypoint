@@ -82,7 +82,9 @@ export function selectionModel(input: SelectionInput): SelectionModel {
       const first = picked?.lines[0];
       if (sessionId === null || picked === null || first === undefined || !canExplain(picked.text)) return;
       setSelection(null);
-      router.push({ pathname: "/explain", params: { sessionId, t: String(first.at), word: picked.text } });
+      // A single word also says its place in the line, so Explain can offer to fix the transcript there (S6).
+      const single = picked.lines.length === 1 && first.from === first.to;
+      router.push({ pathname: "/explain", params: { sessionId, t: String(first.at), word: picked.text, ...(single ? { index: String(first.from) } : {}) } });
     },
     highlight: () => {
       if (!canChange || sessionId === null || picked === null) return;
