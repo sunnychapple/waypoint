@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { addFlag, addPhoto, finishRecording, savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
+import { addFlag, addPhoto, finishRecording, nameRecording, savePart, saveSegment, startRecordingSession } from "../src/core/capture/recording.ts";
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { moveSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
@@ -113,7 +113,7 @@ describe("collecting changes", () => {
     expect(send(a)).toEqual([]);
     a.db.run("UPDATE sessions SET summary = 'S'");
     const summary = one(send(a), "upsert", "sessions");
-    expect(summary.row).toMatchObject({ summary: "S", summary_auto: 1, title_auto: 0 });
+    expect(summary.row).toMatchObject({ summary: "S", summary_auto: 1, title_auto: 1 });
   });
   it("a deleted session keeps its group; sent entries leave the outbox", () => {
     const a = device("a");
@@ -426,6 +426,37 @@ describe("applying changes", () => {
     expect(back.row).toMatchObject({ title: "Mitosis", title_auto: 0 });
     expect(back.at).toBeGreaterThan(made.at);
   });
+  it("a recording named by the app on one phone is named the same on another, even when it synced before Stop", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    expect(applyChange(b.db, G, one(send(a), "upsert", "sessions"), "dev_a")).toBe("applied");
+    // A stops and the app names the recording. Its title_auto was 1 from the start, so B never holds it as typed.
+    finishRecording(a.db, s.id, 9_000, 8_000);
+    nameRecording(a.db, s.id);
+    const named = one(send(a), "upsert", "sessions");
+    expect(named.row).toMatchObject({ title_auto: 1 });
+    expect(applyChange(b.db, G, named, "dev_a")).toBe("applied");
+    expect(title(b, s.id)).toBe(title(a, s.id));
+    expect(title(b, s.id)).not.toBe("New recording");
+    expect(b.db.get("SELECT title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ title_auto: 1 });
+    // B syncs back: A keeps the app title it made.
+    for (const change of send(b).filter((c) => c.op === "upsert" && c.table === "sessions")) applyChange(a.db, G, change, "dev_b");
+    expect(title(a, s.id)).not.toBe("New recording");
+    expect(a.db.get("SELECT title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ title_auto: 1 });
+  });
+  it("a phone that holds the default name as typed (from before this fix) takes the app's title", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    expect(applyChange(b.db, G, one(send(a), "upsert", "sessions"), "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET title_auto = 0 WHERE id = ?", [s.id]);
+    finishRecording(a.db, s.id, 9_000, 8_000);
+    nameRecording(a.db, s.id);
+    expect(applyChange(b.db, G, one(send(a), "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(title(b, s.id)).toBe(title(a, s.id));
+    expect(b.db.get("SELECT title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ title_auto: 1 });
+  });
   it("a received summary over 2,000 characters is cut to 2,000", () => {
     const a = device("a");
     const b = device("b");
@@ -461,9 +492,9 @@ describe("applying changes", () => {
       return { ...session, at, row: { ...row, ...extra } };
     };
     expect(applyChange(b.db, G, only(session.at + 5, { summary_auto: 0 }), "dev_a")).toBe("applied");
-    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 0 });
+    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 1 });
     expect(applyChange(b.db, G, only(session.at + 10, { summary: "Sent" }), "dev_a")).toBe("applied");
-    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Sent", summary_auto: 0, title_auto: 0 });
+    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Sent", summary_auto: 0, title_auto: 1 });
     expect(applyChange(b.db, G, only(session.at + 15, { title_auto: 1 }), "dev_a")).toBe("applied");
     expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Sent", summary_auto: 0, title_auto: 1 });
   });

@@ -4,7 +4,9 @@ import { getAvailability, getContextSize, summarize } from "../../modules/waypoi
 import { applySummary, needsSummary, summarizeUnits, type MadeSummary } from "../core/capture/summary.ts";
 import { getSession } from "../core/capture/sessions.ts";
 import { studyUnits } from "../core/study/units.ts";
+import type { Unit } from "../core/study/generate.ts";
 import { dbGeneration, getDb, writeDbIf } from "./db.ts";
+import { personWaiting } from "./modelTurn.ts";
 
 // Tried in this run of the app, by notes, session and recorded length. Recording more makes a new key.
 const tried = new Set<string>();
@@ -18,6 +20,14 @@ AppState.addEventListener("change", (state) => {
 
 // Thrown before a model call once the run should stop. Its code is not one of the final outcomes, so the key is released.
 const STOPPED = Object.assign(new Error("summary stopped"), { code: "stopped" });
+
+// A fingerprint of the text a run reads (the joined studyUnits text): its length and a hash, so each check stays cheap.
+function fingerprint(units: Unit[]): string {
+  const text = units.map((unit) => unit.text).join("\n\n");
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0;
+  return `${text.length}:${hash}`;
+}
 
 // Declined, or a language the model does not support, will not change by asking again. Anything else may.
 function isFinal(error: unknown): boolean {
@@ -50,14 +60,25 @@ export async function summarizeSession(sessionId: string, recordedMs: number): P
     tried.delete(key);
     retry.set(sessionId, recordedMs);
   };
-  // Stops when the recorder starts, the app leaves the front, or the session's recorded length moves on.
-  // A throw (someone signed out) counts as a stop.
+  // The text this run is made from. A line hidden or shown during the model call changes it, and the run is released.
+  let units: Unit[];
+  try {
+    units = studyUnits(getDb(), sessionId);
+  } catch {
+    release();
+    return;
+  }
+  const started = fingerprint(units);
+  // Stops when the recorder starts, the app leaves the front, the session's recorded length moves on, the person is
+  // waiting for the model, or the text changed. A throw (someone signed out) counts as a stop.
   const shouldStop = (): boolean => {
     try {
       return (
         getRecorderStatus().state !== "idle" ||
         AppState.currentState !== "active" ||
-        getSession(getDb(), sessionId)?.recordedMs !== recordedMs
+        personWaiting() ||
+        getSession(getDb(), sessionId)?.recordedMs !== recordedMs ||
+        fingerprint(studyUnits(getDb(), sessionId)) !== started
       );
     } catch {
       return true;
@@ -73,7 +94,7 @@ export async function summarizeSession(sessionId: string, recordedMs: number): P
           return summarize(text);
         },
       },
-      studyUnits(getDb(), sessionId),
+      units,
     );
   } catch (error) {
     // Declined, unsupported language, or busy, failed, a stop: the title stays the first words, or the run is tried again.

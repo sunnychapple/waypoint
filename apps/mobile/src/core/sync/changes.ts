@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { SqlDb, SqlValue } from "../db/sql.ts";
 import { freeSpaceName } from "../db/spaces.ts";
 
+// The default name of a new recording. A copy of DEFAULT_RECORDING_TITLE in core/capture/recording.ts: importing it
+// here would make a cycle (recording -> sessions -> changes). Keep the two equal.
+const NEW_RECORDING_TITLE = "New recording";
+
 // What one locked change says (M29a). The plaintext is this JSON; it is locked with the group key under
 // context("change", group id, device id, kind) (docs/security.md section 11). kind is in clear for the room.
 export const SYNC_TABLES = ["spaces", "sessions", "captures", "flags", "cards", "line_marks", "notes"] as const;
@@ -319,7 +323,15 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     // A title this phone's person typed wins over a title the app made on another phone. This phone keeps its title and
     // sends it back, so the other phones take it too (its dirty row gets a newer clock when the outbox is collected).
     const typed = here !== null ? db.get<{ title: string; title_auto: number }>("SELECT title, title_auto FROM sessions WHERE id = ?", [key]) : null;
-    if (typed !== null && typed !== undefined && typed.title_auto === 0 && row.title_auto === 1 && typed.title !== row.title) {
+    // The default name is not a typed title: a phone that still holds it (from before recordings started as the app's) takes the app's.
+    if (
+      typed !== null &&
+      typed !== undefined &&
+      typed.title_auto === 0 &&
+      typed.title !== NEW_RECORDING_TITLE &&
+      row.title_auto === 1 &&
+      typed.title !== row.title
+    ) {
       row = { ...row, title: typed.title, title_auto: 0 };
       db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 0, NULL)", [key]);
     }

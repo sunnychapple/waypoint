@@ -5,6 +5,7 @@ import { SymbolView } from "expo-symbols";
 import { cleanHelp, type HelpDraft } from "../../core/study/drafts.ts";
 import { problemOf, typedProblemOf } from "../../core/study/help.ts";
 import { getDb } from "../../platform/db.ts";
+import { asPerson } from "../../platform/modelTurn.ts";
 import { getAvailability, helpWithProblem } from "../../../modules/waypoint-model/index.ts";
 import { Body, PrimaryButton, Screen, SecondaryButton } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
@@ -34,7 +35,7 @@ export default function HelpStepsScreen() {
     setOutcome("working");
     async function run() {
       try {
-        const cleaned = cleanHelp(await helpWithProblem(target.text, target.context));
+        const cleaned = cleanHelp(await asPerson(() => helpWithProblem(target.text, target.context)));
         if (!active) return;
         if (cleaned === null) {
           setOutcome("failed");

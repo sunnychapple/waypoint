@@ -72,12 +72,12 @@ function toSummary(row: SummaryDbRow): SessionSummary {
 export function createSession(
   db: SqlDb,
   deps: Deps,
-  input: { spaceId: string; kind: SessionKind; title: string; state: SessionState },
+  input: { spaceId: string; kind: SessionKind; title: string; state: SessionState; titleAuto?: boolean },
 ): SessionRow {
   const id = deps.newId();
   db.run(
-    "INSERT INTO sessions (id, space_id, kind, title, state, started_at, recorded_ms) VALUES (?, ?, ?, ?, ?, ?, 0)",
-    [id, input.spaceId, input.kind, input.title, input.state, deps.now()],
+    "INSERT INTO sessions (id, space_id, kind, title, state, started_at, recorded_ms, title_auto) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+    [id, input.spaceId, input.kind, input.title, input.state, deps.now(), input.titleAuto === true ? 1 : 0],
   );
   const row = getSession(db, id);
   if (!row) throw new Error(`session not saved: ${id}`);
