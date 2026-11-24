@@ -229,10 +229,11 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
 
 // Waiting sessions that are saved or interrupted, each with the audio parts that have a hole in their on-device words.
 // A session is skipped only when every part that needs writing down is on another phone (file = ''): that phone writes
-// them down, and marking it failed here would sync "failed" back to it. Otherwise the parts here are written down.
+// them down, and marking it failed here would sync "failed" back to it. Otherwise the parts here are written down, and
+// `elsewhere` says whether some still wait for another phone, so this one must not mark the session done.
 export function pendingTranscriptions(
   db: SqlDb,
-): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[] }[] {
+): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[]; elsewhere: boolean }[] {
   const sessions = db.all<{ id: string }>(
     "SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted') ORDER BY started_at",
   );
@@ -255,7 +256,8 @@ export function pendingTranscriptions(
       sessionId: session.id,
       parts: here.map((p) => ({ file: p.file, startMs: p.span.startMs, durationMs: p.span.durationMs })),
       skip,
+      elsewhere: here.length < parts.length,
     };
   });
-  return result.filter((session) => !session.skip).map(({ sessionId, parts }) => ({ sessionId, parts }));
+  return result.filter((session) => !session.skip).map(({ sessionId, parts, elsewhere }) => ({ sessionId, parts, elsewhere }));
 }

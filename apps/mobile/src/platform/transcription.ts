@@ -10,6 +10,9 @@ const TICK_MS = 20_000;
 let recovered = false;
 let ticking = false;
 let packMissing = false;
+// Sessions whose parts here were written down this launch while other parts wait for another phone. They stay waiting
+// (so that phone still writes its parts) but are not redone here every 20 seconds.
+const doneHere = new Set<string>();
 
 // Writes down the audio of sessions whose words were not written live. Runs only while the app is active,
 // the speech pack is installed and the recorder is idle. Errors are kept per session; see below.
@@ -27,8 +30,9 @@ async function tick(): Promise<void> {
     if (packMissing || (await getSpeechStatus()).pack !== "installed") return;
     const generation = dbGeneration();
     for (const session of pendingTranscriptions(getDb())) {
+      if (doneHere.has(session.sessionId)) continue;
       try {
-        await transcribeSession(session.sessionId, session.parts, generation);
+        if ((await transcribeSession(session.sessionId, session.parts, generation, session.elsewhere)) && session.elsewhere) doneHere.add(session.sessionId);
       } catch (error) {
         if (codeOf(error) === "speech_pack_missing") {
           packMissing = true;
@@ -49,6 +53,7 @@ async function transcribeSession(
   sessionId: string,
   parts: { file: string; startMs: number; durationMs: number }[],
   generation: number,
+  elsewhere: boolean,
 ): Promise<boolean> {
   for (const part of parts) {
     if (getRecorderStatus().state !== "idle") return false;
@@ -70,7 +75,10 @@ async function transcribeSession(
       });
     });
   }
-  writeDbIf(generation, (db) => db.run("UPDATE sessions SET transcript = 'done', indexed_at = NULL WHERE id = ?", [sessionId]));
+  // Parts that only another phone has still need its pass: leave the session waiting for it.
+  writeDbIf(generation, (db) =>
+    db.run(`UPDATE sessions SET ${elsewhere ? "" : "transcript = 'done', "}indexed_at = NULL WHERE id = ?`, [sessionId]),
+  );
   return true;
 }
 

@@ -140,7 +140,7 @@ describe("recording", () => {
     savePart(db, deps(), live.id, { index: 0, startMs: 0, durationMs: 20_000, file: "live.m4a" });
 
     expect(pendingTranscriptions(db)).toEqual([
-      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
+      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }], elsewhere: false },
     ]);
   });
 
@@ -157,7 +157,7 @@ describe("recording", () => {
     savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
     savePart(db, deps(), waiting.id, { index: 1, startMs: 20_000, durationMs: 20_000, file: "p1.m4a" });
     expect(pendingTranscriptions(db)).toEqual([
-      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
+      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }], elsewhere: true },
     ]);
   });
 
@@ -176,7 +176,7 @@ describe("recording", () => {
     finishRecording(db, waiting.id, 9000, 0);
     savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "p0.m4a" });
     db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES (?, 0, 20000, 'cloud words', 'cloud')", [waiting.id]);
-    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }], elsewhere: false }]);
   });
 
   it("recoverSessions sets the length and end time from the saved audio parts", () => {
@@ -199,7 +199,7 @@ describe("recording", () => {
     insertSession("crashed", "recording", "live");
     savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 20_000, file: "c0.m4a" });
     recoverSessions(db, { sessionId: "", state: "idle" });
-    expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }], elsewhere: false }]);
   });
 
   it("leaves another member's recording in a shared space alone when this phone holds none of it", () => {

@@ -611,6 +611,23 @@ describe("applying changes", () => {
     expect(b.db.all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? ORDER BY t_start", [s.id]).map((r) => r.text)).toEqual(["theirs", "mine", "older"]);
     expect(b.db.all<{ row_id: string }>("SELECT row_id FROM dirty WHERE table_name = 'segments'")).toEqual([{ row_id: `${s.id}:device:0` }]);
   });
+  it("while this phone records, a merged bucket from a phone whose clock is ahead goes back out newer than it", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "theirs" });
+    const changes = send(a);
+    for (const c of changes) if (c.op !== "segments") applyChange(b.db, G, c, "dev_a");
+    setSetting(b.db, `recording_here:${s.id}`, "1");
+    saveSegment(b.db, s.id, { tStart: 5_000, tEnd: 6_000, text: "mine" });
+    send(b);
+    const ahead = Date.now() + 86_400_000;
+    const bucket = one(changes, "segments");
+    expect(applyChange(b.db, G, { ...bucket, at: ahead }, "dev_a")).toBe("applied");
+    const back = one(send(b), "segments");
+    expect(back.at).toBeGreaterThan(ahead);
+    expect(back.rows.map((r) => r.text)).toEqual(["theirs", "mine"]);
+  });
   it("while this phone records, a device bucket that adds no new words leaves no dirty row", () => {
     const a = device("a");
     const b = device("b");

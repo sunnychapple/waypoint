@@ -234,8 +234,8 @@ From `apps/mobile`: `npm run typecheck`, `npm test`, `npm run test:swift`, `npm 
 ### Review fixes
 
 - changes.ts: while this phone records a session, a device bucket is merged before the "older" check, so an older bucket from another phone still adds its words, and a bucket that gained words is sent back as a dirty bucket. Cloud buckets still replace.
-- recording.ts: a session is skipped only when every part that needs writing down is on another phone; the parts here are written down, and the rest keep their holes.
-  - Known limit: when two phones each recorded parts of one session and both have parts that need a second pass, the first phone to finish marks the session done, so the other phone's parts keep their holes.
+- recording.ts and transcription.ts: a session is skipped only when every part that needs writing down is on another phone. Otherwise the parts here are written down, and when some parts are only on another phone the session stays waiting for that phone (this phone does not redo it again in the same launch). The last phone to finish marks it done.
+- changes.ts (second round): the "newer" check always runs, so the re-sent merged bucket is newer than the one it merged, even from a phone whose clock is ahead.
 - AudioRecorder.swift: `start()` sets the session id first, so status never reports idle during a start, and clears it again if setup throws.
 - ReviewScreen.tsx: "everyone" is named only when the card's space is a shared group.
 

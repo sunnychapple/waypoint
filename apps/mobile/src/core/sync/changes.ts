@@ -333,7 +333,9 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     // words this one just wrote, even with an older bucket: add theirs instead, then send the merged bucket back so both
     // phones end with every word. "recording_here:" is RECORDING_HERE_PREFIX in sessions.ts, which imports this file.
     const merging = change.source === "device" && db.get("SELECT 1 AS n FROM settings WHERE key = ?", [`recording_here:${sessionId}`]) !== null;
-    if (!merging && !newer(db, table, key, change.at, deviceId)) return "older";
+    // Always recorded, so this phone's re-send of a merged bucket is newer than the bucket it merged.
+    const fresh = newer(db, table, key, change.at, deviceId);
+    if (!merging && !fresh) return "older";
     const count = (): number => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to])?.n ?? 0;
     const before = count();
     if (!merging) db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
