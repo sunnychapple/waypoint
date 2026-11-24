@@ -752,6 +752,13 @@ export function applyMarks(items: TimelineItem[], marks: ReadonlyMap<number, Lin
 
 Checks: typecheck, test.
 
+### Review fixes
+
+- Shared split: `wordsOf` in `selection.ts` is now `splitWords` from `excerpt.ts` with the null tokens dropped (punctuation on its own, and tokens over 100 characters). `lineWordCount`, `pickedText`, `paragraphSelection`, `explainedWords` and `marks.ts` `fitSpans` all use it, so one index means the same word in the renderer, in selection, in highlights and in explained-word marks. Picked text loses punctuation inside its words' edges (`Cells, divide` is sent as `Cells divide`).
+- Performance: `explainedWords` records each line's first word position while it collects words. Each explanation's scan starts at its line and stops at the line's last word; a phrase can still run into the next line. Callers must memoize the result on `[lines, explanations]`, since each call rebuilds the word list.
+- Known limit: scripts written without spaces (Chinese, Japanese, Thai) count a whole line as one word, so selection, highlights and explained-word marks work per line. A later change could split with `Intl.Segmenter` in the one shared function.
+- For T7 to T9: hiding a line can regroup paragraphs, because `applyMarks` filters before `groupTimeline`. Picked text sent to Explain should leave out hidden lines unless they were shown and picked.
+
 ---
 
 ## T5 · Notes in the timeline, and the Note button

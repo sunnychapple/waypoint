@@ -171,3 +171,14 @@ export function verdictOf(text: string): "correct" | "partly" | "not" | null {
   if (first === "not correct") return "not";
   return null;
 }
+
+export type ExplainedTerm = { id: string; t: number; term: string };
+
+// Saved explanations of a recording's words (not of a page), to mark them in its transcript (note 1). t is the start of
+// the line the words were selected in.
+export function explainedInTranscript(db: SqlDb, sessionId: string): ExplainedTerm[] {
+  return db.all<ExplainedTerm>(
+    "SELECT id, t, term FROM explanations WHERE session_id = ? AND saved = 1 AND capture_id IS NULL ORDER BY created_at",
+    [sessionId],
+  );
+}

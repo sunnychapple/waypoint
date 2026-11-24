@@ -49,7 +49,7 @@ export function contextCopy(isPage: boolean): { sent: string; missing: string } 
 
 export type Token = { text: string; word: string | null };
 
-const EDGE = /^[\s"'“”‘’()[\]{}.,;:!?…—–-]+|[\s"'“”‘’()[\]{}.,;:!?…—–-]+$/g;
+export const EDGE = /^[\s"'“”‘’()[\]{}.,;:!?…—–-]+|[\s"'“”‘’()[\]{}.,;:!?…—–-]+$/g;
 
 // The tappable word inside a token: punctuation trimmed from both ends; null when nothing is left or it is too long.
 export function cleanWord(token: string): string | null {
