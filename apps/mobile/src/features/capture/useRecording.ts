@@ -23,6 +23,7 @@ import {
 } from "../../../modules/waypoint-audio/index.ts";
 import { isScannerSupported, openCamera, scanPages } from "../../../modules/waypoint-pages/index.ts";
 import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
+import { staleSummary } from "../../core/capture/summary.ts";
 import { addPiece, EMPTY_LIVE, type LiveTranscript, type Piece } from "../../core/capture/transcript.ts";
 import { getSetting } from "../../core/db/settings.ts";
 import {
@@ -157,6 +158,7 @@ export function useRecording(): RecordingModel {
               if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
               finishRecording(db, current.id, Date.now(), recordedMs);
               nameRecording(db, current.id);
+              staleSummary(db, current.id);
             }),
           () => undefined, // never started, or already stopped: the next launch's recoverSessions marks it interrupted
         )
@@ -345,6 +347,8 @@ export function useRecording(): RecordingModel {
         if (brokeRef.current) db.run("UPDATE sessions SET transcript = 'waiting' WHERE id = ? AND transcript = 'live'", [current.id]);
         finishRecording(db, current.id, Date.now(), recordedMs);
         nameRecording(db, current.id);
+        // A continued recording's summary no longer covers it; its session screen writes a new one.
+        staleSummary(db, current.id);
       });
       // A continued recording was opened from its session, so going back lands there.
       if (continuedRef.current !== null) router.back();
