@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AppState, Linking } from "react-native";
 import { randomUUID } from "expo-crypto";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   downloadSpeechPack,
   getMicPermission,
@@ -105,6 +105,7 @@ export function useRecording(): RecordingModel {
   const clockOffsetRef = useRef(0);
   const brokeRef = useRef(false);
   const stoppingRef = useRef(false);
+  const noteOpenRef = useRef(false); // a note sheet is over the recording; cleared when this screen is focused again
   // True while the camera is opening or open: a second Photo tap does nothing.
   const photoBusyRef = useRef(false);
 
@@ -294,12 +295,21 @@ export function useRecording(): RecordingModel {
   }
 
   // Note (note 13): a sheet over the recording, at this moment in the timeline. The recording keeps running.
+  // One sheet at a time, and none while the recording is stopping.
   function note(): void {
     const current = sessionRef.current;
-    if (!current) return;
+    if (!current || stoppingRef.current || noteOpenRef.current) return;
+    noteOpenRef.current = true;
     const t = Date.now() - current.startedAt + clockOffsetRef.current;
     router.push({ pathname: "/note", params: { sessionId: current.id, t: String(t) } });
   }
+
+  // Back on this screen (the note sheet closed, by Save, Cancel or a swipe), another note may be opened.
+  useFocusEffect(
+    useCallback(() => {
+      noteOpenRef.current = false;
+    }, []),
+  );
 
   // Photo for a board or a demonstration; Page in the camera opens the page scanner instead.
   async function photo(): Promise<void> {

@@ -1010,6 +1010,12 @@ After the `second-transcript` screen: `<Stack.Screen name="note" options={{ pres
 
 Checks: typecheck, test, export:ios.
 
+### Review fixes
+
+- `useRecording.ts`: `note()` does nothing while the recording is stopping, or while a note sheet is already open. The open flag is a ref set when the sheet is pushed and cleared by `useFocusEffect` inside the hook, which runs when the record screen is focused again.
+- `TimelineMarks.tsx`: a note the person cannot change is a plain `View` with `accessible` and the label "Note: <text>", not a disabled Pressable.
+- `NoteSheet.tsx`: `save()` shows "Couldn't save the note." and keeps the sheet open when `writeDbIf` returns undefined (the account changed). Saving an existing note with its text blanked asks first, with the Delete confirmation, and deletes it on confirm.
+
 ---
 
 ## T6 · Who's talking?

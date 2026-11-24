@@ -24,20 +24,8 @@ export default function NoteSheet() {
   const quote = existing?.quote ?? (params.quote ?? "").slice(0, QUOTE_MAX_CHARS);
   const missing = (asked && existing === null) || sessionId === "" || !Number.isFinite(t);
 
-  function save(): void {
-    try {
-      writeDbIf(generation, (db) => {
-        if (existing !== null) updateNote(db, existing.id, draft);
-        else addNote(db, deps, sessionId, t, draft, quote);
-      });
-    } catch {
-      Alert.alert("Couldn't save this note.", "The recording may have been removed.");
-      return;
-    }
-    router.back();
-  }
-
-  function remove(): void {
+  // The same confirmation for Delete and for saving an emptied note (which deletes it).
+  function confirmDelete(): void {
     if (existing === null) return;
     Alert.alert("Delete this note?", undefined, [
       { text: "Cancel", style: "cancel" },
@@ -50,6 +38,30 @@ export default function NoteSheet() {
         },
       },
     ]);
+  }
+
+  function save(): void {
+    if (existing !== null && draft.trim() === "") {
+      confirmDelete();
+      return;
+    }
+    let saved: true | undefined;
+    try {
+      saved = writeDbIf(generation, (db) => {
+        if (existing !== null) updateNote(db, existing.id, draft);
+        else addNote(db, deps, sessionId, t, draft, quote);
+        return true as const;
+      });
+    } catch {
+      Alert.alert("Couldn't save this note.", "The recording may have been removed.");
+      return;
+    }
+    // undefined: the account changed since the sheet opened, so nothing was written. Keep the sheet open.
+    if (saved === undefined) {
+      Alert.alert("Couldn't save the note.");
+      return;
+    }
+    router.back();
   }
 
   return (
@@ -83,7 +95,7 @@ export default function NoteSheet() {
           />
         )}
         {existing !== null ? (
-          <Pressable accessibilityRole="button" onPress={remove} style={styles.action}>
+          <Pressable accessibilityRole="button" onPress={confirmDelete} style={styles.action}>
             <Text style={[styles.actionText, { color: colors.danger }]}>Delete note</Text>
           </Pressable>
         ) : null}

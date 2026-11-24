@@ -67,24 +67,36 @@ export function TimeMarkRow({
           </Pressable>
         </View>
       );
-    case "note":
+    case "note": {
+      const body = (
+        <>
+          {item.quote !== "" ? (
+            <Text numberOfLines={2} style={[styles.quote, { color: colors.ink2 }]}>{`“${item.quote}”`}</Text>
+          ) : null}
+          <Text style={[styles.noteText, { color: colors.ink }]}>{item.text}</Text>
+        </>
+      );
+      const box = [styles.note, { backgroundColor: colors.surface2, borderLeftColor: colors.accent }];
       return (
         <View style={styles.line}>
           <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
-          <Pressable
-            disabled={!canChange}
-            accessibilityRole={canChange ? "button" : undefined}
-            accessibilityLabel={canChange ? `Your note: ${item.text}. Opens the note` : `Note: ${item.text}`}
-            onPress={() => router.push({ pathname: "/note", params: { id: item.id } })}
-            style={[styles.note, { backgroundColor: colors.surface2, borderLeftColor: colors.accent }]}
-          >
-            {item.quote !== "" ? (
-              <Text numberOfLines={2} style={[styles.quote, { color: colors.ink2 }]}>{`“${item.quote}”`}</Text>
-            ) : null}
-            <Text style={[styles.noteText, { color: colors.ink }]}>{item.text}</Text>
-          </Pressable>
+          {canChange ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Your note: ${item.text}. Opens the note`}
+              onPress={() => router.push({ pathname: "/note", params: { id: item.id } })}
+              style={box}
+            >
+              {body}
+            </Pressable>
+          ) : (
+            <View accessible accessibilityLabel={`Note: ${item.text}`} style={box}>
+              {body}
+            </View>
+          )}
         </View>
       );
+    }
   }
 }
 
