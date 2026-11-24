@@ -61,6 +61,7 @@ export const TASK_LABELS: Readonly<Record<string, string>> = {
   mini_app: "Mini app",
   practice: "Practice set",
   retranscribe: "Better transcript",
+  problem_help: "Problem help",
 };
 
 // The fields of a sent body, in the order the "What was sent" screen shows them. Unknown fields are shown too, so the

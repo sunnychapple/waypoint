@@ -456,4 +456,59 @@ CREATE TRIGGER sync_notes_delete AFTER DELETE ON notes WHEN (SELECT applying FRO
 END;
 `,
   },
+  {
+    // Card P2. Adds problem_help to the CHECKs of jobs and sent_log (SQLite rebuilds a table to change a CHECK: same
+    // columns in the same order, every row copied, then its indexes again), and keeps cloud help answers on this iPhone.
+    version: 12,
+    sql: `
+CREATE TABLE jobs_new (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN ('research', 'overview_script', 'video_slides', 'diagram', 'mini_app', 'practice', 'retranscribe', 'problem_help')),
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  request_key TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  quoted INTEGER NOT NULL CHECK (quoted >= 1),
+  spent INTEGER CHECK (spent >= 0),
+  result_ready INTEGER NOT NULL DEFAULT 0 CHECK (result_ready IN (0, 1)),
+  detail TEXT NOT NULL DEFAULT '{}',
+  saved_at INTEGER,
+  deleted_at INTEGER,
+  problem TEXT CHECK (problem IN ('unreadable')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+INSERT INTO jobs_new (id, type, session_id, request_key, state, quoted, spent, result_ready, detail, saved_at, deleted_at, problem, created_at, updated_at)
+  SELECT id, type, session_id, request_key, state, quoted, spent, result_ready, detail, saved_at, deleted_at, problem, created_at, updated_at FROM jobs;
+DROP TABLE jobs;
+ALTER TABLE jobs_new RENAME TO jobs;
+CREATE INDEX jobs_open ON jobs (deleted_at, created_at);
+CREATE INDEX jobs_session ON jobs (session_id, created_at);
+
+CREATE TABLE sent_log_new (
+  id TEXT PRIMARY KEY,
+  task TEXT NOT NULL CHECK (task IN ('explain', 'more_detail', 'double_check', 'read_link', 'research', 'overview_script', 'video_slides', 'diagram', 'mini_app', 'practice', 'retranscribe', 'problem_help')),
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  sent TEXT NOT NULL,
+  bytes INTEGER NOT NULL CHECK (bytes >= 0),
+  credits INTEGER CHECK (credits >= 0),
+  retention TEXT CHECK (retention IN ('standard', 'zero')),
+  at INTEGER NOT NULL
+);
+INSERT INTO sent_log_new (id, task, session_id, sent, bytes, credits, retention, at)
+  SELECT id, task, session_id, sent, bytes, credits, retention, at FROM sent_log;
+DROP TABLE sent_log;
+ALTER TABLE sent_log_new RENAME TO sent_log;
+CREATE INDEX sent_log_at ON sent_log (at);
+
+CREATE TABLE help_answers (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
+  capture_id TEXT REFERENCES captures (id) ON DELETE SET NULL,
+  problem TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX help_answers_session ON help_answers (session_id, created_at);
+`,
+  },
 ];

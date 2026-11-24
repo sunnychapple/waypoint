@@ -61,6 +61,6 @@ describe("sent", () => {
     expect(sentFields("[1]")).toEqual([{ label: "Sent", text: "[1]" }]);
   });
   it("every task has a label", () => {
-    expect(Object.keys(TASK_LABELS)).toHaveLength(12);
+    expect(Object.keys(TASK_LABELS)).toHaveLength(13);
   });
 });
