@@ -146,3 +146,33 @@ describe("indexer", () => {
     expect(sizes).toEqual([16, 4]);
   });
 });
+
+describe("indexer with the person's edits (Next 1)", () => {
+  it("indexes the edited text and none from a hidden line", async () => {
+    addSession("s1", "saved", 100, ["old words", "side talk"]);
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('s1:0', 's1', 0, 'supply and demand', 0, NULL, '[]', 1)");
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('s1:1000', 's1', 1000, NULL, 1, NULL, '[]', 1)");
+    expect(await indexSession(db, fakeEmbedder(vectors), "s1", 5000)).toBe(1);
+    const chunkText = db.all<{ text: string }>("SELECT text FROM chunks WHERE session_id = 's1'").map((row) => row.text).join(" ");
+    expect(chunkText).toContain("supply and demand");
+    expect(chunkText).not.toContain("side talk");
+    expect(chunkText).not.toContain("old words");
+  });
+
+  it("a mark written while the embedder runs is seen, so the session is indexed again", async () => {
+    addSession("s1", "saved", 100, ["old words"]);
+    await indexSession(db, fakeEmbedder(vectors), "s1", 5000);
+    db.run("UPDATE sessions SET indexed_at = NULL WHERE id = 's1'");
+    const embedder: Embedder = {
+      modelVersion: "test-1",
+      embed: async (texts) => {
+        db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('s1:0', 's1', 0, 'supply and demand', 0, NULL, '[]', 2)");
+        return texts.map(() => [1, 0, 0]);
+      },
+    };
+    expect(await indexSession(db, embedder, "s1", 6000)).toBe(0);
+    expect(db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = 's1'")?.indexed_at).toBeNull();
+    expect(await indexSession(db, fakeEmbedder(vectors), "s1", 7000)).toBe(1);
+    expect(db.all<{ text: string }>("SELECT text FROM chunks WHERE session_id = 's1'").map((row) => row.text)).toEqual(["supply and demand"]);
+  });
+});

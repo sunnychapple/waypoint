@@ -1,6 +1,6 @@
 import { WORD_MAX_CHARS } from "@waypoint/contracts";
 import type { SqlDb } from "../db/sql.ts";
-import { lineAt, listSegments } from "../capture/segments.ts";
+import { lineAt, studyLines } from "../capture/segments.ts";
 
 // Offline (or after a failed answer): keep the question as a flag at that moment. A word tapped on a page keeps the page.
 // The same question still open at the same place is not added twice.
@@ -65,7 +65,7 @@ export function openFlags(db: SqlDb): OpenFlag[] {
 // The phrase a flag with no word is explained by: the transcript line at its time, collapsed and cut to the word limit
 // the explain request accepts. Null when the session has no transcript line at that time yet.
 export function phraseForFlag(db: SqlDb, flag: Pick<OpenFlag, "sessionId" | "t">): string | null {
-  const line = lineAt(listSegments(db, flag.sessionId), flag.t);
+  const line = lineAt(studyLines(db, flag.sessionId), flag.t);
   if (line === null) return null;
   const phrase = line.text.replace(/\s+/g, " ").trim().slice(0, WORD_MAX_CHARS).trim();
   return phrase === "" ? null : phrase;

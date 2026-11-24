@@ -12,17 +12,23 @@ export function listSegments(db: SqlDb, sessionId: string): SegmentLine[] {
 
 // The transcript as the person keeps it (Next 1): their words in place of what was heard, with hidden lines and lines
 // left empty taken out. Everything that reads the transcript to make or send something uses this: flashcards, quizzes,
-// search, share links, Explain's excerpt and the cloud tasks. Only device lines are used, so a session with only cloud
-// segments gives []; T3 decides what to show then.
+// search, share links, Explain's excerpt and the cloud tasks. A session with no device lines at all (only cloud segments)
+// gives the cloud segments' text instead, since marks only ever key device lines. Hidden lines never fall back.
 export function studyLines(db: SqlDb, sessionId: string): SegmentLine[] {
-  return db
-    .all<SegmentLine>(
-      `SELECT s.t_start AS tStart, s.t_end AS tEnd, COALESCE(m.text, s.text) AS text
-       FROM segments s LEFT JOIN line_marks m ON m.session_id = s.session_id AND m.t_start = s.t_start
-       WHERE s.session_id = ? AND s.source = 'device' AND COALESCE(m.hidden, 0) = 0 ORDER BY s.t_start`,
-      [sessionId],
-    )
-    .filter((line) => line.text.trim() !== "");
+  const device = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM segments WHERE session_id = ? AND source = 'device'", [sessionId]);
+  const lines =
+    (device?.n ?? 0) > 0
+      ? db.all<SegmentLine>(
+          `SELECT s.t_start AS tStart, s.t_end AS tEnd, COALESCE(m.text, s.text) AS text
+           FROM segments s LEFT JOIN line_marks m ON m.session_id = s.session_id AND m.t_start = s.t_start
+           WHERE s.session_id = ? AND s.source = 'device' AND COALESCE(m.hidden, 0) = 0 ORDER BY s.t_start`,
+          [sessionId],
+        )
+      : db.all<SegmentLine>(
+          "SELECT t_start AS tStart, t_end AS tEnd, text FROM segments WHERE session_id = ? AND source = 'cloud' ORDER BY t_start",
+          [sessionId],
+        );
+  return lines.filter((line) => line.text.trim() !== "");
 }
 
 // A flag is tapped just after something is heard, so the moment often falls in the pause after the line (D9 notes: the

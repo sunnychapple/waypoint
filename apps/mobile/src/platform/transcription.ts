@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { AppState } from "react-native";
 import { getRecorderStatus, getSpeechStatus, transcribeFile } from "../../modules/waypoint-audio/index.ts";
 import { pendingTranscriptions, recoverSessions, saveSegment } from "../core/capture/recording.ts";
-import { replacementFor } from "../core/capture/transcript.ts";
+import { partUpdate } from "../core/capture/transcript.ts";
 import { dbGeneration, getDb, writeDb, writeDbIf } from "./db.ts";
 
 const TICK_MS = 20_000;
@@ -62,16 +62,21 @@ async function transcribeSession(
       const existing = db
         .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ? AND source = 'device'", [sessionId])
         .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
-      const fresh = replacementFor(part, pieces, existing);
-      if (fresh === null) return;
+      // Lines the person changed are kept as they are (partUpdate).
+      const marked = db.all<{ t_start: number }>("SELECT t_start FROM line_marks WHERE session_id = ?", [sessionId]).map((row) => row.t_start);
+      const update = partUpdate(part, pieces, existing, marked);
+      if (update === null) return;
       db.transaction(() => {
-        db.run("DELETE FROM segments WHERE session_id = ? AND source = 'device' AND t_start >= ? AND t_start < ? AND t_end <= ?", [
-          sessionId,
-          part.startMs,
-          part.startMs + part.durationMs,
-          part.startMs + part.durationMs,
-        ]);
-        for (const piece of fresh) saveSegment(db, sessionId, piece);
+        // Only the part's own segments are replaced: a segment that runs on into the next part is kept (replacementFor).
+        if (update.replace) {
+          db.run("DELETE FROM segments WHERE session_id = ? AND source = 'device' AND t_start >= ? AND t_start < ? AND t_end <= ?", [
+            sessionId,
+            part.startMs,
+            part.startMs + part.durationMs,
+            part.startMs + part.durationMs,
+          ]);
+        }
+        for (const piece of update.pieces) saveSegment(db, sessionId, piece);
       });
     });
   }

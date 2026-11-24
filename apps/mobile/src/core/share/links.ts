@@ -1,5 +1,6 @@
 import { SharedItemSchema, type SharedItem } from "@waypoint/contracts";
 import type { SqlDb } from "../db/sql.ts";
+import { studyLines } from "../capture/segments.ts";
 import { utf8Length } from "../explain/sent.ts";
 
 // Shared links (M30b). The item is one session as text; the link key is made natively (lockLink) and lives only in the
@@ -32,10 +33,8 @@ type SessionText = { title: string; started_at: number };
 export function sharedItem(db: SqlDb, sessionId: string, maxBytes = LINK_MAX_BYTES): { item: SharedItem; cut: boolean } | null {
   const session = db.get<SessionText>("SELECT title, started_at FROM sessions WHERE id = ?", [sessionId]);
   if (session === null) return null;
-  const allLines = db.all<{ t: number; text: string }>(
-    "SELECT t_start AS t, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
-    [sessionId],
-  );
+  // The transcript as the person edited it, without hidden lines (studyLines).
+  const allLines = studyLines(db, sessionId).map((line) => ({ t: line.tStart, text: line.text }));
   const allPages = db.all<{ text: string | null }>("SELECT found_text AS text FROM captures WHERE session_id = ? AND kind = 'page' ORDER BY position, id", [
     sessionId,
   ]);

@@ -124,3 +124,14 @@ describe("links", () => {
     expect(expiryFor("month", Date.UTC(2026, 0, 31))).toBe(Date.UTC(2026, 2, 2));
   });
 });
+
+describe("sharedItem with the person's edits (Next 1)", () => {
+  it("shared lines carry the edited text and leave out hidden lines", () => {
+    const { db, session } = setup();
+    saveSegment(db, session.id, { tStart: 0, tEnd: 10, text: "cells divide" });
+    saveSegment(db, session.id, { tStart: 10, tEnd: 20, text: "by mitosis" });
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES (?, ?, 0, 'cells divide in two', 0, NULL, '[]', 1)", [`${session.id}:0`, session.id]);
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES (?, ?, 10, NULL, 1, NULL, '[]', 1)", [`${session.id}:10`, session.id]);
+    expect(sharedItem(db, session.id)?.item).toMatchObject({ transcript: [{ t: 0, text: "cells divide in two" }] });
+  });
+});

@@ -66,3 +66,14 @@ describe("research", () => {
     expect(n).toBe(3);
   });
 });
+
+describe("research with the person's edits (Next 1)", () => {
+  it("notesForResearch has the edited words and not the hidden line", () => {
+    const { db, session } = setup();
+    saveSegment(db, session.id, { tStart: 0, tEnd: 1, text: "alpha beta" });
+    saveSegment(db, session.id, { tStart: 1000, tEnd: 1001, text: "hidden gamma" });
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES (?, ?, 0, 'alpha edited', 0, NULL, '[]', 1)", [`${session.id}:0`, session.id]);
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES (?, ?, 1000, NULL, 1, NULL, '[]', 1)", [`${session.id}:1000`, session.id]);
+    expect(notesForResearch(db, session.id)).toBe("alpha edited");
+  });
+});

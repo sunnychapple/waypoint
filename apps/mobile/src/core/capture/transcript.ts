@@ -68,3 +68,21 @@ export function replacementFor<T extends SegmentSpan>(part: PartSpan, pieces: T[
   const fresh = piecesToKeep(pieces, kept);
   return coveredMs(part.startMs, end, [...fresh, ...kept]) >= coveredMs(part.startMs, end, [...own, ...kept]) + minGainMs ? fresh : null;
 }
+
+// What to write for a re-transcribed part. When the person changed a line that starts in it (its words, a name, a highlight
+// or hiding it), every line there stays and only pieces that fill a hole are added, so their change is never lost.
+// Otherwise the part's lines are replaced as replacementFor says. Null: nothing to write.
+export function partUpdate<T extends SegmentSpan>(
+  part: PartSpan,
+  pieces: T[],
+  existing: SegmentSpan[],
+  marked: number[],
+): { replace: boolean; pieces: T[] } | null {
+  const end = part.startMs + part.durationMs;
+  if (marked.some((t) => t >= part.startMs && t < end)) {
+    const fresh = piecesToKeep(pieces, existing);
+    return fresh.length === 0 ? null : { replace: false, pieces: fresh };
+  }
+  const fresh = replacementFor(part, pieces, existing);
+  return fresh === null ? null : { replace: true, pieces: fresh };
+}
