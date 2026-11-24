@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { shortDay } from "../src/core/format.ts";
 import { DEFAULT_RECORDING_TITLE, nameRecording, recordingTitle, startRecordingSession } from "../src/core/capture/recording.ts";
 import { createSession, getSession, renameSession } from "../src/core/capture/sessions.ts";
+import { setHidden } from "../src/core/capture/marks.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
@@ -64,6 +65,17 @@ describe("nameRecording", () => {
     const session = startRecordingSession(db, deps, spaceId, false);
     nameRecording(db, session.id);
     expect(getSession(db, session.id)?.title).toBe(recordingTitle(null, startedAt));
+  });
+
+  it("does not take a hidden first line into the title", () => {
+    const session = startRecordingSession(db, deps, spaceId, true);
+    addSegment(session.id, 0, "Secret opening words");
+    addSegment(session.id, 4000, "Cells have membranes");
+    setHidden(db, deps, session.id, [0], true);
+    nameRecording(db, session.id);
+    const title = getSession(db, session.id)?.title ?? "";
+    expect(title).toBe("Cells have membranes");
+    expect(title).not.toContain("Secret");
   });
 
   it("does not overwrite a title the person already changed", () => {

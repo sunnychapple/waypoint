@@ -1,3 +1,4 @@
+import { studyLines } from "../capture/segments.ts";
 import type { SqlDb } from "../db/sql.ts";
 import type { Unit } from "./generate.ts";
 
@@ -13,10 +14,7 @@ export function studyUnits(db: SqlDb, sessionId: string): Unit[] {
     )
     .filter((row) => row.found_text.trim() !== "")
     .map((row) => ({ text: row.found_text.trim(), captureId: row.id, t: null }));
-  const segments = db.all<{ t_start: number; text: string }>(
-    "SELECT t_start, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
-    [sessionId],
-  );
+  const segments = studyLines(db, sessionId).map((line) => ({ t_start: line.tStart, text: line.text }));
   const photos = db
     .all<{ id: string; t: number; found_text: string }>(
       "SELECT id, t, found_text FROM captures WHERE session_id = ? AND kind = 'photo' AND found_text IS NOT NULL ORDER BY t, id",

@@ -78,3 +78,24 @@ describe("study units", () => {
     expect(studyUnits(db, "rec").map((u) => u.text)).toEqual(["Spoken words."]);
   });
 });
+
+describe("study units with the person's edits (Next 1)", () => {
+  it("an edited line's words are in the unit, and a hidden line's words are not", () => {
+    addSegment(0, "Spoken words.");
+    addSegment(1000, "Teacher: phones away");
+    addSegment(2000, "Hidden side talk.");
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('rec:0', 'rec', 0, 'Spoken words, edited.', 0, NULL, '[]', 1)");
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('rec:2000', 'rec', 2000, NULL, 1, NULL, '[]', 1)");
+    const text = studyUnits(db, "rec").map((u) => u.text).join(" ");
+    expect(text).toContain("Spoken words, edited.");
+    expect(text).toContain("Teacher: phones away");
+    expect(text).not.toContain("Hidden side talk.");
+    expect(text).not.toContain("Spoken words.");
+  });
+
+  it("a session with only cloud segments is studied from their text", () => {
+    db.run("INSERT INTO sessions (id, space_id, kind, title, state, started_at) VALUES ('cloud', 'space', 'recording', 'Cloud', 'saved', 0)");
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('cloud', 0, 1000, 'Cloud words.', 'cloud')");
+    expect(studyUnits(db, "cloud").map((u) => u.text)).toEqual(["Cloud words."]);
+  });
+});

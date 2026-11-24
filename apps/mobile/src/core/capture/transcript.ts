@@ -68,3 +68,32 @@ export function replacementFor<T extends SegmentSpan>(part: PartSpan, pieces: T[
   const fresh = piecesToKeep(pieces, kept);
   return coveredMs(part.startMs, end, [...fresh, ...kept]) >= coveredMs(part.startMs, end, [...own, ...kept]) + minGainMs ? fresh : null;
 }
+
+// True when the piece overlaps a changed line by more than a quarter of its own length.
+function repeatsChangedLine(piece: SegmentSpan, changed: SegmentSpan[]): boolean {
+  const length = piece.tEnd - piece.tStart;
+  return changed.some((line) => {
+    const overlap = Math.min(piece.tEnd, line.tEnd) - Math.max(piece.tStart, line.tStart);
+    return length <= 0 ? overlap >= 0 && line.tStart <= piece.tStart && line.tEnd >= piece.tEnd : overlap > length / 4;
+  });
+}
+
+// What to write for a re-transcribed part. When the person changed a line that starts in it (its words, a name, a highlight
+// or hiding it), every line there stays and only pieces that fill a hole are added, so their change is never lost.
+// Otherwise the part's lines are replaced as replacementFor says. Null: nothing to write.
+export function partUpdate<T extends SegmentSpan>(
+  part: PartSpan,
+  pieces: T[],
+  existing: SegmentSpan[],
+  marked: number[],
+): { replace: boolean; pieces: T[] } | null {
+  const end = part.startMs + part.durationMs;
+  if (marked.some((t) => t >= part.startMs && t < end)) {
+    // A piece that mostly repeats a changed line would put its words back, so it is left out.
+    const changed = existing.filter((s) => marked.includes(s.tStart));
+    const fresh = piecesToKeep(pieces, existing).filter((piece) => !repeatsChangedLine(piece, changed));
+    return fresh.length === 0 ? null : { replace: false, pieces: fresh };
+  }
+  const fresh = replacementFor(part, pieces, existing);
+  return fresh === null ? null : { replace: true, pieces: fresh };
+}

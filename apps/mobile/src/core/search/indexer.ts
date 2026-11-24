@@ -1,3 +1,4 @@
+import { studyLines } from "../capture/segments.ts";
 import type { SqlDb } from "../db/sql.ts";
 import { chunkCapture, chunkTranscript, type ChunkDraft } from "./chunks.ts";
 import { clearVectorCache } from "./query.ts";
@@ -21,11 +22,9 @@ export function sessionsToIndex(db: SqlDb, limit: number): string[] {
 export async function indexSession(db: SqlDb, embedder: Embedder, sessionId: string, now: number): Promise<number> {
   const before = db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [sessionId]);
   if (!before) return 0;
+  // The transcript as the person edited it, without hidden lines (studyLines). Edits made while the embedder runs are seen too.
   const read = () => ({
-    segments: db.all<{ tStart: number; tEnd: number; text: string }>(
-      "SELECT t_start AS tStart, t_end AS tEnd, text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start",
-      [sessionId],
-    ),
+    segments: studyLines(db, sessionId),
     captures: db.all<{ id: string; kind: "page" | "photo"; t: number; found_text: string | null }>(
       "SELECT id, kind, t, found_text FROM captures WHERE session_id = ? AND kind IN ('page', 'photo') ORDER BY t, position",
       [sessionId],

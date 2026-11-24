@@ -1,4 +1,5 @@
 import { JOB_TEXT_MAX_CHARS, ResearchResultSchema, type ResearchDepth } from "@waypoint/contracts";
+import { studyLines } from "../capture/segments.ts";
 import type { SqlDb } from "../db/sql.ts";
 
 export type ResearchItem = {
@@ -42,9 +43,7 @@ export function researchForSession(db: SqlDb, sessionId: string): ResearchItem[]
 }
 
 function allNotes(db: SqlDb, sessionId: string): string {
-  const transcript = db
-    .all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? AND source = 'device' ORDER BY t_start", [sessionId])
-    .map((r) => r.text);
+  const transcript = studyLines(db, sessionId).map((line) => line.text);
   const pages = db
     .all<{ found_text: string | null }>("SELECT found_text FROM captures WHERE session_id = ? AND kind IN ('page', 'photo') ORDER BY position, t", [sessionId])
     .map((r) => r.found_text ?? "");
@@ -56,7 +55,7 @@ export function notesAreCut(db: SqlDb, sessionId: string, max: number): boolean 
   return allNotes(db, sessionId).length > max;
 }
 
-// The session's own words, for "Include my notes": the transcript made on this iPhone, then page text, cut at a word
+// The session's own words, for "Include my notes": the transcript made on this iPhone as the person edited it, without hidden lines, then page text, cut at a word
 // boundary to the research cap (8,000 characters). Shown in full before it is sent.
 export function notesForResearch(db: SqlDb, sessionId: string, max: number = JOB_TEXT_MAX_CHARS.research): string {
   const text = allNotes(db, sessionId);

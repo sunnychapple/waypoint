@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_LIVE,
   addPiece,
+  partUpdate,
   partsNeedingTranscription,
   piecesToKeep,
   replacementFor,
@@ -162,5 +163,41 @@ describe("replacementFor", () => {
     expect(replacementFor(whole, [{ tStart: 0, tEnd: 11_000 }], existing)).toBeNull();
     const more = [{ tStart: 0, tEnd: 13_000 }];
     expect(replacementFor(whole, more, existing)).toEqual(more);
+  });
+});
+
+describe("partUpdate (Next 1)", () => {
+  const part = { startMs: 60_000, durationMs: 10_000 };
+  const span = (tStart: number, tEnd: number) => ({ tStart, tEnd });
+
+  it("with no marks, it is replacementFor", () => {
+    const pieces = [span(60_000, 62_000)];
+    expect(partUpdate(part, pieces, [], [])).toEqual({ replace: true, pieces: replacementFor(part, pieces, [], 2_000) });
+    expect(partUpdate(part, pieces, [], [])).toEqual({ replace: true, pieces });
+  });
+
+  it("a mark inside the part keeps every line, and adds only pieces that fill a hole", () => {
+    const existing = [span(60_000, 61_000)];
+    const repeat = span(60_000, 61_000);
+    const hole = span(64_000, 66_000);
+    expect(partUpdate(part, [repeat, hole], existing, [60_000])).toEqual({ replace: false, pieces: [hole] });
+  });
+
+  it("a mark inside the part with no hole to fill writes nothing", () => {
+    const existing = [span(60_000, 68_000)];
+    expect(partUpdate(part, [span(60_000, 62_000)], existing, [60_000])).toBeNull();
+  });
+
+  it("a mark inside the part drops new pieces that mostly repeat a changed line", () => {
+    const existing = [span(60_000, 61_000)];
+    const mostlyRepeat = span(60_400, 62_400); // 600 ms of 2000 overlap the changed line: over a quarter
+    const quarter = span(60_500, 62_500); // exactly a quarter: kept
+    const hole = span(64_000, 66_000);
+    expect(partUpdate(part, [mostlyRepeat, quarter, hole], existing, [60_000])).toEqual({ replace: false, pieces: [quarter, hole] });
+  });
+
+  it("a mark in another part does not stop the replacement", () => {
+    const pieces = [span(60_000, 62_000)];
+    expect(partUpdate(part, pieces, [], [0, 120_000])).toEqual({ replace: true, pieces });
   });
 });

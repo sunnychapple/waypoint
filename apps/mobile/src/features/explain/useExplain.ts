@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { randomUUID } from "expo-crypto";
 import type { ExplainRequest, FollowUpRequest, StreamDone } from "@waypoint/contracts";
-import { listSegments } from "../../core/capture/segments.ts";
+import { studyLines } from "../../core/capture/segments.ts";
 import { keepsKey, type CloudFailure } from "../../core/cloud/failure.ts";
 import { excerptAround, pageContext, trimExcerpt } from "../../core/explain/excerpt.ts";
 import {
@@ -60,7 +60,7 @@ export function useExplain(
     return loaded.captureId ?? pageForTerm(getDb(), sessionId, word) ?? undefined;
   });
   const [page] = useState(() => (pageRef === undefined ? null : pageContext(getDb(), sessionId, pageRef)));
-  const [excerpt] = useState(() => (pageRef === undefined ? excerptAround(listSegments(getDb(), sessionId), t) : trimExcerpt(page?.text ?? "")));
+  const [excerpt] = useState(() => (pageRef === undefined ? excerptAround(studyLines(getDb(), sessionId), t) : trimExcerpt(page?.text ?? "")));
   const [phase, setPhase] = useState<ExplainPhase>({ kind: "idle" });
   const [explanation, setExplanation] = useState<Explanation | null>(loaded);
   // An answer that was paid for but could not be saved on the iPhone: shown, not in the thread.

@@ -104,6 +104,7 @@ describe("Get the answer for a flag with no word", () => {
   });
   it("ignores cloud lines", () => {
     const { db } = setup();
+    addLine(db, 0, 1_000, "device line far away");
     addLine(db, 40_000, 44_000, "cloud only", "cloud");
     expect(phraseForFlag(db, plainFlag(db, 42_000))).toBeNull();
   });
@@ -132,5 +133,16 @@ describe("lineAt", () => {
     expect(lineAt(lines, 14_000)?.text).toBe("two");
     expect(lineAt(lines, 14_001)).toBeNull();
     expect(lineAt([], 0)).toBeNull();
+  });
+});
+
+describe("flags use the person's words (Next 1)", () => {
+  it("phraseForFlag returns the edited words of the line", () => {
+    const { db } = setup();
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('s1', 40000, 44000, 'Osmosis moves water', 'device')");
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, hidden, speaker, highlights, updated_at) VALUES ('s1:40000', 's1', 40000, 'Osmosis moves edited words', 0, NULL, '[]', 1)");
+    db.run("INSERT INTO flags (id, session_id, t, question) VALUES ('plain', 's1', 42000, '')");
+    const flag = openFlags(db).find((f) => f.id === "plain")!;
+    expect(phraseForFlag(db, flag)).toBe("Osmosis moves edited words");
   });
 });
