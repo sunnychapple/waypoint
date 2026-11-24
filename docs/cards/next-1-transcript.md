@@ -472,6 +472,15 @@ export function studyLines(db: SqlDb, sessionId: string): SegmentLine[] {
 
 Checks: typecheck, test.
 
+### Review fixes
+
+1. `editLine` sets `hidden` to false for Undo (null) and for any edit that leaves words. A cleared line comes back on Undo, and a retyped line shows.
+2. After an edit, highlight spans are clamped to the shown text's words: spans starting past the last word are dropped, and `to` is capped at the last word. The word split is `text.split(/\s+/)` with empty words removed, since `selection.ts` does not exist yet (T4); T4 should use the same split.
+3. `toggleHighlight` ignores picks whose numbers are not whole numbers >= 0, swaps a reversed `from`/`to`, returns false for no picks, groups picks by line and reads each line's mark once inside the transaction. `parseSpans` drops invalid entries one by one, then sorts and merges like `addSpan`.
+4. `setHidden`, `setSpeaker` and `toggleHighlight` write only for whole-number `tStart`s that are device segments of the session (one `IN` query). A mark equal to the stored one is not written. `setHidden` resets `indexed_at` once after the loop, and only when a line changed.
+5. `notes.ts`: a non-finite `t` is stored as 0; notes are ordered by `t, created_at, id`; text and quote are cut by code points (no split surrogate pair); a comment says viewer checks are done by the screens.
+6. Comments only: `studyLines` gives [] for a session with only cloud segments (T3 decides what to show); `linesToName` expects lines sorted by `tStart`.
+
 ---
 
 ## T3 · Everything that reads the transcript uses the person's version
