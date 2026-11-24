@@ -36,7 +36,9 @@ export default function HelpCloudScreen() {
   const [showSent, setShowSent] = useState(false);
   const [starting, setStarting] = useState(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
-  // The last failed send that may be sent again with the same key (keepsKey).
+  // Set and checked synchronously, before any await: a second tap before the re-render must not send again.
+  const inFlight = useRef(false);
+  // The key of the send in progress, or of the last failed send that may be sent again with it (keepsKey).
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const quote = useQuote(jobId === null && problem !== null ? { task: "problem_help" } : null);
   const signOut = useSignOut();
@@ -49,21 +51,30 @@ export default function HelpCloudScreen() {
   );
 
   async function send(): Promise<void> {
-    if (problem === null || sessionId === null || params.captureId === undefined || price === null || starting) return;
+    if (inFlight.current || problem === null || sessionId === null || params.captureId === undefined || price === null) return;
+    inFlight.current = true;
     setStarting(true);
     setFailure(null);
     const block = params.text === undefined ? Number(params.block) : null;
     const body = JSON.stringify(cloudHelpRequest(problem));
+    // One key per unchanged body, minted before the first await. It is kept until success, or until a failure that
+    // may not reuse it (keepsKey is false).
     const key = keyForRequest(attempt.current, body, () => randomUUID());
-    const result = await startCloudHelp(problem, { sessionId, captureId: params.captureId, block }, key);
-    setStarting(false);
+    attempt.current = { key, body };
+    let result: Awaited<ReturnType<typeof startCloudHelp>>;
+    try {
+      result = await startCloudHelp(problem, { sessionId, captureId: params.captureId, block }, key);
+    } finally {
+      inFlight.current = false;
+      setStarting(false);
+    }
     if (result.ok) {
       attempt.current = null;
       setJobId(result.jobId);
       return;
     }
     setFailure(result.failure);
-    attempt.current = keepsKey(result.failure) ? { key, body } : null;
+    if (!keepsKey(result.failure)) attempt.current = null;
   }
 
   // Another try after a failed job: the price is quoted again and Send is tapped again.
@@ -75,6 +86,13 @@ export default function HelpCloudScreen() {
   const shownProblem = problem?.text ?? saved?.problem ?? null;
   const copy = failure === null ? null : failureCopy(failure, "make");
   const draft = saved === null ? null : cloudHelpDraft(saved.result);
+  // Succeeded and its answer was kept, but the answer cannot be shown now (its page or session was deleted), or the
+  // result is gone. Nothing more can come for it.
+  const missing =
+    job !== null &&
+    job.problem === null &&
+    job.state === "succeeded" &&
+    ((job.savedAt !== null && saved === null) || (job.savedAt === null && job.deletedAt !== null));
   const another = sessionId === null ? null : () => router.dismissTo(`/study/help?sessionId=${encodeURIComponent(sessionId)}`);
 
   return (
@@ -117,7 +135,7 @@ export default function HelpCloudScreen() {
         </>
       ) : null}
 
-      {job !== null && job.problem === null && (job.state === "queued" || job.state === "running" || (job.state === "succeeded" && saved === null)) ? (
+      {job !== null && job.problem === null && (job.state === "queued" || job.state === "running" || (job.state === "succeeded" && job.savedAt === null && job.deletedAt === null)) ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.accent} />
           <Body>Working it out in the cloud…</Body>
@@ -125,6 +143,13 @@ export default function HelpCloudScreen() {
         </View>
       ) : null}
       {job !== null && job.problem === "unreadable" ? <Body>The answer arrived but couldn't be opened on this iPhone.</Body> : null}
+      {missing ? (
+        <>
+          <Body>This answer isn't kept because its page was deleted.</Body>
+          <Caption>{`${creditsLabel(job.spent ?? job.quoted)} used`}</Caption>
+          <PrimaryButton label="Done" onPress={() => router.back()} />
+        </>
+      ) : null}
       {job !== null && job.problem === null && job.state === "failed" ? (
         <>
           <Body>It didn't work. Nothing was charged.</Body>
@@ -138,12 +163,18 @@ export default function HelpCloudScreen() {
         <>
           <Body>The cloud couldn't read this problem.</Body>
           <Caption>{saved.result.reason}</Caption>
-          <Caption>Only 1 credit was used. Try retaking the page, or type the problem in.</Caption>
+          {job !== null ? <Caption>{usedLine(job.spent ?? job.quoted)}</Caption> : null}
+          <Caption>Try retaking the page, or type the problem in.</Caption>
           <PrimaryButton label="Done" onPress={() => router.back()} />
         </>
       ) : null}
     </Screen>
   );
+}
+
+// "Only 1 credit was used." / "Only 5 credits were used.": the credits the job actually spent.
+function usedLine(credits: number): string {
+  return `Only ${creditsLabel(credits)} ${credits === 1 ? "was" : "were"} used.`;
 }
 
 function CloseButton() {
