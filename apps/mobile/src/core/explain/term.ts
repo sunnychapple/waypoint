@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { splitWords } from "./excerpt.ts";
+import { wordsOf } from "../capture/selection.ts";
+import { LINE_TEXT_MAX_CHARS } from "../capture/marks.ts";
 
 // S3: what the model thinks was said where the transcript wrote `heard`. `original` is the term in its own script when
 // that differs from `term`.
@@ -67,3 +69,10 @@ export function replaceWord(text: string, index: number, heard: string, term: st
   }
   return seen >= index ? out : null;
 }
+
+// Fix transcript swaps one word, so only a term of exactly one word (by the shared word count) can be fixed. A longer term
+// gets "Keep as said" only.
+export const isOneWordTerm = (term: string): boolean => wordsOf(term).length === 1;
+
+// A line as the transcript stores it (spaces collapsed, cut to LINE_TEXT_MAX_CHARS). A fix that would be cut is refused.
+export const lineFits = (text: string): boolean => text.replace(/\s+/g, " ").trim().length <= LINE_TEXT_MAX_CHARS;

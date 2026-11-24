@@ -1446,3 +1446,11 @@ export function replaceWord(text: string, word: string, term: string): string | 
 Checks: `npm run typecheck`, `npm test`.
 
 Known limits: only the line the word was tapped in changes; the same word elsewhere is left as it was.
+
+### Review fixes
+
+- Fix is offered only when the suggested term is one word by the shared count (`isOneWordTerm`, from `wordsOf`). A longer term shows the suggestion with "Keep as said" only.
+- One predicate (`mayFix`: a transcript word, a session this person may change, a word with its place in the line, a one-word term, this iPhone not recording the session) decides both the button and the check at press time.
+- The session and role reads in `useLikelyTerm` are memoized on `[sessionId]`.
+- A fix whose new line would exceed `LINE_TEXT_MAX_CHARS` (`lineFits`) is refused, with the existing alert.
+- After a fix, the Explain buttons are hidden (Explain, Show what's sent, More detail, Double-check, Research the web); Save stays. The sheet's word is not changed to the term, so its excerpt is not computed again. The caption reads "Fixed in the transcript. Open the word again to explain it."

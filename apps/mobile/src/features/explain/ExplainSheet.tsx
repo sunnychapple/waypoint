@@ -135,12 +135,12 @@ function ExplainBody({
                 }}
               />
             ) : null}
-            {likely.fixed ? <Caption>Fixed in the transcript. You can undo it there.</Caption> : null}
+            {likely.fixed ? <Caption>Fixed in the transcript. Open the word again to explain it.</Caption> : null}
             {likely.fixed ? null : <SecondaryButton label="Keep as said" onPress={likely.keep} />}
           </View>
         ) : null}
 
-        {phase.kind === "idle" && !explained ? (
+        {phase.kind === "idle" && !explained && !likely.fixed ? (
           model.excerpt === "" ? (
             <Body>{contextCopy(resolvedPageId !== undefined, word.includes(" ")).missing}</Body>
           ) : model.stillComing ? (
@@ -205,7 +205,7 @@ function ExplainBody({
 
         {phase.kind === "idle" && explained ? (
           <View style={styles.block}>
-            {offerResearch ? (
+            {offerResearch && !likely.fixed ? (
               <SecondaryButton
                 label="Research the web"
                 icon="globe"
@@ -216,7 +216,7 @@ function ExplainBody({
               <>
                 {contextGone ? (
                   <Caption>The page this came from is gone, so it can't be explained further.</Caption>
-                ) : (
+                ) : likely.fixed ? null : (
                   <>
                     <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
                     <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />

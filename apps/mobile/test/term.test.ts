@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanTermGuess, guessHeadline, guessLabel, guessSentence, replaceWord } from "../src/core/explain/term.ts";
+import { cleanTermGuess, guessHeadline, guessLabel, guessSentence, isOneWordTerm, lineFits, replaceWord } from "../src/core/explain/term.ts";
 
 const guess = (over: Record<string, unknown> = {}) => ({
   misheard: true,
@@ -82,5 +82,24 @@ describe("replaceWord", () => {
     expect(replaceWord("a+b c", 0, "a+b", "x")).toBe("x c");
     expect(replaceWord("one two", 2, "two", "x")).toBeNull();
     expect(replaceWord("one two", 1, "three", "x")).toBeNull();
+  });
+});
+
+describe("isOneWordTerm", () => {
+  it("allows one word only, by the shared word count", () => {
+    expect(isOneWordTerm("qua")).toBe(true);
+    expect(isOneWordTerm("mochi.")).toBe(true);
+    expect(isOneWordTerm("New York")).toBe(false);
+    expect(isOneWordTerm("in the role of")).toBe(false);
+    expect(isOneWordTerm("  ")).toBe(false);
+  });
+});
+
+describe("lineFits", () => {
+  it("counts the line as stored: spaces collapsed, at most 2000 characters", () => {
+    expect(lineFits("a  b ")).toBe(true);
+    expect(lineFits("a".repeat(2000))).toBe(true);
+    expect(lineFits("a".repeat(2001))).toBe(false);
+    expect(lineFits(`${"a".repeat(1999)}   b`)).toBe(false);
   });
 });
