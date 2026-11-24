@@ -38,6 +38,8 @@ function retryHref(job: LocalJob): string | null {
       return `/made/new?${query.toString()}`;
     case "retranscribe":
       return job.sessionId !== null ? `/second-transcript?${query.toString()}` : null;
+    case "problem_help":
+      return null; // card P3 adds the cloud help screen
   }
 }
 

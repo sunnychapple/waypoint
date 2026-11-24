@@ -331,3 +331,19 @@ describe("decideRoute", () => {
     expect(decision).toMatchObject({ ok: true, unsafe: false });
   });
 });
+
+describe("decideRoute: optional fixed tasks", () => {
+  test("problem_help runs on standard when the table does not list it, with no answers", () => {
+    const d = decideRoute({ task: "problem_help", zeroRetention: false, routes: DEFAULT_ROUTES });
+    expect(d).toMatchObject({ ok: true, tier: "standard", requested_tier: "standard", model: DEFAULT_ROUTES.tiers.standard[0]?.model });
+  });
+
+  test("a table that lists problem_help wins", () => {
+    const routes = { ...DEFAULT_ROUTES, fixed: { ...DEFAULT_ROUTES.fixed, problem_help: "strong" as const } };
+    expect(decideRoute({ task: "problem_help", zeroRetention: false, routes })).toMatchObject({ ok: true, tier: "strong" });
+  });
+
+  test("with zero retention on and no zero route, problem_help gets no_zero_retention_route", () => {
+    expect(decideRoute({ task: "problem_help", zeroRetention: true, routes: DEFAULT_ROUTES })).toEqual({ ok: false, reason: "no_zero_retention_route" });
+  });
+});

@@ -15,6 +15,12 @@ const TierSchema = z.enum(TIERS);
 // explain is not here (the router picks its tier); retranscribe is never routed.
 export const FIXED_TASKS = ["more_detail", "double_check", "read_link", "research", "overview_script", "video_slides", "diagram", "mini_app", "practice"] as const;
 
+// Fixed tasks added after the live route table was published. A table may leave one out; decideRoute then uses the
+// tier here. The next routes version should list them; then they move into FIXED_TASKS.
+export const OPTIONAL_FIXED_TASKS = ["problem_help"] as const;
+export type OptionalFixedTask = (typeof OPTIONAL_FIXED_TASKS)[number];
+export const OPTIONAL_FIXED_TIERS: Readonly<Record<OptionalFixedTask, Tier>> = { problem_help: "standard" };
+
 export const RouteTableSchema = z.strictObject({
   version: z.string().min(1),
   tiers: z.strictObject({
@@ -22,7 +28,7 @@ export const RouteTableSchema = z.strictObject({
     standard: z.array(RouteEntrySchema).min(1),
     strong: z.array(RouteEntrySchema).min(1),
   }),
-  fixed: z.partialRecord(z.enum(FIXED_TASKS), TierSchema).refine(
+  fixed: z.partialRecord(z.enum([...FIXED_TASKS, ...OPTIONAL_FIXED_TASKS]), TierSchema).refine(
     (fixed) => FIXED_TASKS.every((task) => Object.hasOwn(fixed, task)),
     "fixed must list every fixed task",
   ),

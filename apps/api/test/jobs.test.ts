@@ -241,6 +241,21 @@ describe("POST /v1/jobs", () => {
     expect(JobResponseSchema.parse(await res.json()).job.quoted).toBe(40);
   });
 
+  test("problem_help quotes 5 on standard with a 20-minute deadline, and stores the problem as prompt with the page text", async () => {
+    const w = await makeJobsWorld();
+    const body = { type: "problem_help", problem: "Find the missing value.", text: "Exercise 4. Find the missing value." };
+    const res = await postJob(w, body);
+    expect(res.status).toBe(201);
+    const job = JobResponseSchema.parse(await res.json()).job;
+    expect(job.quoted).toBe(5);
+    expect(job.tier).toBe("standard");
+    const params = w.workflow.created[0]!.params;
+    expect(params.deadline).toBe(JOB_NOW + 20 * MINUTE);
+    expect(params.bytes_sent).toBe(utf8(body.text) + utf8(body.problem));
+    expect(await readJobInput(w.bucket, await jobIdFor("u1", KEY), params.input_key!)).toEqual({ text: body.text, prompt: body.problem });
+    expect((await jobRow(w, await jobIdFor("u1", KEY)))!.type).toBe("problem_help");
+  });
+
   test("practice quotes 8", async () => {
     const w = await makeJobsWorld();
     const res = await postJob(w, { type: "practice", text: "Fractions" });

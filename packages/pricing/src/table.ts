@@ -18,11 +18,19 @@ export const PRICE_KEYS = [
 
 export type PriceKey = (typeof PRICE_KEYS)[number];
 
+// Keys added after the live table was published. A table may leave one out; quoteCredits then uses OPTIONAL_PRICES.
+// The next price table version should list them; then they move into PRICE_KEYS.
+export const OPTIONAL_PRICE_KEYS = ["problem_help"] as const;
+export type OptionalPriceKey = (typeof OPTIONAL_PRICE_KEYS)[number];
+// Step-by-step help on one problem (standard tier): about 1,800 tokens in and at most 1,500 out is $0.0023, so 5 credits.
+export const OPTIONAL_PRICES: Readonly<Record<OptionalPriceKey, number>> = { problem_help: 5 };
+
 const credit = z.number().int().min(1);
+const required = Object.fromEntries(PRICE_KEYS.map((key) => [key, credit])) as Record<PriceKey, typeof credit>;
 
 export const PriceTableSchema = z.strictObject({
   version: z.string().min(1),
-  credits: z.record(z.enum(PRICE_KEYS), credit),
+  credits: z.strictObject({ ...required, problem_help: credit.exactOptional() }),
 });
 
 export type PriceTable = z.infer<typeof PriceTableSchema>;

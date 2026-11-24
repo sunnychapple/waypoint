@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { PRICE_TABLE_2026_11_16_2 as table } from "../src/table.ts";
+import { OPTIONAL_PRICES, PRICE_TABLE_2026_11_16_2 as table } from "../src/table.ts";
 import { priceKeyFor, quoteCredits, type QuoteInput } from "../src/quote.ts";
 
 // A quote request body is untyped at runtime, so tests feed bad values through it.
@@ -158,5 +158,24 @@ describe("quoteCredits", () => {
     expect(
       quoteCredits(table, { task: "explain", depth, minutes, fallback_voice: fallbackVoice }),
     ).toBe(1);
+  });
+});
+
+describe("optional price keys", () => {
+  test("problem_help maps to itself", () => {
+    expect(priceKeyFor({ task: "problem_help" })).toBe("problem_help");
+  });
+
+  test("a table without problem_help quotes OPTIONAL_PRICES.problem_help, 5", () => {
+    expect(quoteCredits(table, { task: "problem_help" })).toBe(5);
+    expect(OPTIONAL_PRICES.problem_help).toBe(5);
+  });
+
+  test("a table that lists problem_help wins", () => {
+    expect(quoteCredits({ ...table, credits: { ...table.credits, problem_help: 7 } }, { task: "problem_help" })).toBe(7);
+  });
+
+  test("fallback_voice on problem_help throws", () => {
+    expect(() => quoteCredits(table, { task: "problem_help", fallback_voice: true })).toThrow("fallback_voice is only for overviews");
   });
 });

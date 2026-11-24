@@ -1,4 +1,4 @@
-import { DiagramResultSchema, MiniAppResultSchema, PracticeSetResultSchema, VideoSlidesResultSchema } from "@waypoint/contracts";
+import { DiagramResultSchema, MiniAppResultSchema, PracticeSetResultSchema, ProblemHelpResultSchema, VideoSlidesResultSchema } from "@waypoint/contracts";
 import { openResult } from "@waypoint/crypto";
 import type { z } from "zod";
 import { describe, expect, test } from "vitest";
@@ -69,8 +69,8 @@ function writeDeps(f: Awaited<ReturnType<typeof makeJobFixture>>, ai: AiBinding)
 }
 
 describe("made job Workflows", () => {
-  test("WRITE_SPECS has exactly the keys overview_script, video_slides, diagram, mini_app and practice", () => {
-    expect(Object.keys(WRITE_SPECS).sort()).toEqual(["diagram", "mini_app", "overview_script", "practice", "video_slides"]);
+  test("WRITE_SPECS has exactly the keys overview_script, video_slides, diagram, mini_app, practice and problem_help", () => {
+    expect(Object.keys(WRITE_SPECS).sort()).toEqual(["diagram", "mini_app", "overview_script", "practice", "problem_help", "video_slides"]);
   });
 
   for (const c of CASES) {
@@ -100,4 +100,45 @@ describe("made job Workflows", () => {
       expect(await f.jobRow()).toMatchObject({ state: "failed" });
     });
   }
+});
+
+describe("problem help Workflow", () => {
+  const SENT = { text: "Exercise 4. Find the missing value. Then check it.", prompt: "Find the missing value." };
+  const STEP = { step: "Read what the question asks.", why: "Knowing the goal tells you which facts matter." };
+
+  test("a readable reply is sealed with v: 1 and settles at the quote; the user message holds the problem, then the page text", async () => {
+    const f = await makeJobFixture("problem_help", { credits: 5, input: SENT });
+    const { ai, calls } = fakeAi(JSON.stringify({ readable: true, steps: [STEP, STEP], answer: "The answer." }));
+    expect(await runWriteJob(writeDeps(f, ai), fakeSteps().steps, f.input)).toBe(true);
+    const opened = await openResult(f.objects.get("results/job_1")?.value ?? new Uint8Array(), "job_1", "device_1", f.device.boxPrivate);
+    expect(ProblemHelpResultSchema.parse(JSON.parse(new TextDecoder().decode(opened)))).toEqual({ v: 1, readable: true, steps: [STEP, STEP], answer: "The answer." });
+    expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 5 });
+    expect(calls[0]?.inputs.max_tokens).toBe(1500);
+    const messages = calls[0]?.inputs.messages as ChatMessage[];
+    expect(messages[1]?.content).toBe(`Problem:\n${SENT.prompt}\n\nText around it on the page:\n${SENT.text}`);
+  });
+
+  test("an unreadable reply is sealed and settles at 1 credit; the rest of the hold goes back", async () => {
+    const f = await makeJobFixture("problem_help", { credits: 5, input: SENT });
+    const { ai } = fakeAi(JSON.stringify({ readable: false, reason: "The question is cut off." }));
+    expect(await runWriteJob(writeDeps(f, ai), fakeSteps().steps, f.input)).toBe(true);
+    expect(await f.jobRow()).toMatchObject({ state: "succeeded", spent: 1 });
+    expect(f.store.read().monthly).toBe(99);
+  });
+
+  test("a reply with no steps fails the job, releases the hold and stores no result", async () => {
+    const f = await makeJobFixture("problem_help", { credits: 5, input: SENT });
+    const { ai } = fakeAi(JSON.stringify({ readable: true, steps: [], answer: "The answer." }));
+    expect(await runWriteJob(writeDeps(f, ai), fakeSteps().steps, f.input)).toBe(false);
+    expect(f.store.read().monthly).toBe(100);
+    expect(f.objects.has("results/job_1")).toBe(false);
+    expect(await f.jobRow()).toMatchObject({ state: "failed" });
+  });
+
+  test("the system prompt is generic: any subject, numbered steps with a why, and what to say when the problem can't be read", () => {
+    const system = WRITE_SPECS.problem_help?.system ?? "";
+    expect(system).toContain("any subject, in any language");
+    expect(system).toContain("short why");
+    expect(system).toContain('{"readable":false');
+  });
 });

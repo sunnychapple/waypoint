@@ -75,3 +75,14 @@ describe("price table", () => {
     }
   });
 });
+
+describe("optional price keys", () => {
+  test("a table with problem_help parses; one with problem_help 0 fails", () => {
+    expect(PriceTableSchema.safeParse({ ...PRICE_TABLE_2026_11_16_2, credits: { ...PRICE_TABLE_2026_11_16_2.credits, problem_help: 5 } }).success).toBe(true);
+    expect(PriceTableSchema.safeParse({ ...PRICE_TABLE_2026_11_16_2, credits: { ...PRICE_TABLE_2026_11_16_2.credits, problem_help: 0 } }).success).toBe(false);
+  });
+
+  test("the shipped table has no problem_help, so the live KV table stays valid", () => {
+    expect(Object.hasOwn(PRICE_TABLE_2026_11_16_2.credits, "problem_help")).toBe(false);
+  });
+});

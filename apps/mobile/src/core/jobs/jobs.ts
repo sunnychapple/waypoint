@@ -119,6 +119,7 @@ export const JOB_LABELS: Record<JobType, string> = {
   mini_app: "Mini app",
   practice: "Practice set",
   retranscribe: "Better transcript",
+  problem_help: "Problem help",
 };
 
 // One line for the jobs list and the job screen.
