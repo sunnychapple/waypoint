@@ -2207,6 +2207,13 @@ Typing goes into finished lines only (decision 4). Opening a line stops the list
 
 No unit tests. Checks: typecheck, test, export:ios. By hand, recording on a phone: turn Edit on, open a line from a minute ago, and type for 20 seconds while words keep arriving. The text you type stays, the list does not jump, the grey live words cannot be tapped, and the finished line you open never changes under you. Lock the phone with Edit on and unlock it: the recording kept running.
 
+### Review fixes
+
+- Typing while recording does no per-update work: the editor reads the lines only on save (`linesRef`), and the open line's shown text is a memo on `[lines, editor.open]`. The per-render text map is gone.
+- While a line is open, a drag or fling that ends at the bottom does not turn following back on (`settleFollowing`), so new lines cannot scroll the open line away. Jump to live still brings it back.
+- The open line keeps the text it had when it opened (`openedRef`, applied by `withOpenedText`), so a save on backgrounding does not rewrite what the person sees.
+- `linesRef` is set after `lines` is computed, not at declaration: `timeline` reads `editor.on`, so `lines` cannot exist before the editor.
+
 ---
 
 ## Known limits

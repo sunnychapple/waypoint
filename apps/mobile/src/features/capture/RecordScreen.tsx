@@ -150,6 +150,12 @@ function rowSig(item: Row, view: RowView, edit: number | null | undefined): stri
     .join("\n");
 }
 
+// The open line shows the text it had when it opened (T10), so a row's field is never rewritten under the person.
+function withOpenedText(item: Row, opened: { at: number; text: string } | null, edit: number | null | undefined): Row {
+  if (opened === null || edit !== opened.at || item.kind !== "paragraph" || !item.lines.some((line) => line.at === opened.at)) return item;
+  return { ...item, lines: item.lines.map((line) => (line.at === opened.at ? { ...line, text: opened.text } : line)) };
+}
+
 function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const colors = useColors();
   const scroll = useRef<ScrollViewInstance>(null);
@@ -162,18 +168,23 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
   const extras = useStableQuery((db) => transcriptExtras(db, model.sessionId), model.sessionId ?? "");
-  // Edit (T10): the line texts as shown, for the editor to tell whether anything changed. Set with the lines, below.
-  const shownText = useRef(new Map<number, string>());
-  const editor = useLineEditor(model.sessionId, (at) => shownText.current.get(at) ?? null);
+  // Edit (T10): the lines as shown, read only when the editor saves (to tell whether anything changed). Set with the lines, below.
+  const linesRef = useRef<TimelineLine[]>([]);
+  // The text the open line had when it opened. Its field keeps it, so a re-transcription does not rewrite what the person sees.
+  const openedRef = useRef<{ at: number; text: string } | null>(null);
+  const editor = useLineEditor(model.sessionId, (at) => linesRef.current.find((line) => line.at === at)?.text ?? null);
   const { save: saveOpenLine } = editor;
   const marks = useMemo(() => new Map(extras.marks.map((mark) => [mark.tStart, mark] as const)), [extras.marks]);
   // Edit shows hidden lines too, so a line just cleared keeps its Undo on screen.
   const timeline = useMemo(() => applyMarks(model.timeline, marks, showHidden || editor.on), [model.timeline, marks, showHidden, editor.on]);
   const rows = useMemo(() => groupTimeline(timeline), [timeline]);
   const lines = useMemo(() => timeline.filter((item): item is TimelineLine => item.kind === "line"), [timeline]);
-  shownText.current = new Map(lines.map((line) => [line.at, line.text]));
+  linesRef.current = lines;
   // The open line's shown text changed under it (a re-transcription or a sync): what was typed is saved first.
-  const openShown = editor.open === null ? null : (lines.find((line) => line.at === editor.open)?.text ?? null);
+  const openShown = useMemo(
+    () => (editor.open === null ? null : (lines.find((line) => line.at === editor.open)?.text ?? null)),
+    [lines, editor.open],
+  );
   useEffect(() => saveOpenLine(), [openShown, saveOpenLine]);
   const edit = editor.on ? editor.open : undefined;
   const explained = useMemo(
@@ -203,9 +214,14 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     position.current = { contentHeight: contentSize.height, offsetY: contentOffset.y, viewHeight: layoutMeasurement.height };
   }
 
+  // While a line is open, a drag that ends at the bottom does not turn following back on: new lines must not scroll it away.
+  function settleFollowing(): void {
+    if (editor.open === null) setFollowing(isAtEnd(position.current));
+  }
+
   function readPosition(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     remember(event);
-    setFollowing(isAtEnd(position.current));
+    settleFollowing();
   }
 
   // Rows are memoized, so they call the latest selection model through this ref, and their handlers never change.
@@ -232,6 +248,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     // Opening a line stops the list from following the live end, so new lines do not move it. Jump to live brings it back.
     openLine: (at) => {
       setFollowing(false);
+      openedRef.current = { at, text: linesRef.current.find((line) => line.at === at)?.text ?? "" };
       latestEditor.current.openLine(at);
     },
     typed: (text) => latestEditor.current.typed(text),
@@ -314,14 +331,14 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         automaticallyAdjustKeyboardInsets
         onScroll={(event) => {
           remember(event);
-          if (touching.current) setFollowing(isAtEnd(position.current));
+          if (touching.current) settleFollowing();
         }}
         scrollEventThrottle={100}
         onTouchEnd={() => {
           // A tap that stops a fling can end it with no scroll event, which would leave `touching` set.
           if (!touching.current) return;
           touching.current = false;
-          setFollowing(isAtEnd(position.current));
+          settleFollowing();
         }}
         onLayout={() => {
           // The pause card appearing shrinks the list, and that is not a content change.
@@ -347,7 +364,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         }}
       >
         {rows.map((item, i) => (
-          <TimelineRow key={item.key} item={item} sig={sigs[i] ?? ""} view={view} actions={actions} edit={edit} />
+          <TimelineRow key={item.key} item={withOpenedText(item, openedRef.current, edit)} sig={sigs[i] ?? ""} view={view} actions={actions} edit={edit} />
         ))}
         {model.volatile ? (
           <View style={[styles.volatile, continuesParagraph ? styles.volatileJoined : null]}>
