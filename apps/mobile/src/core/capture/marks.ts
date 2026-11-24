@@ -113,13 +113,19 @@ export function editLine(db: SqlDb, deps: Deps, sessionId: string, tStart: numbe
   if (heard === null) return;
   const mark = markAt(db, sessionId, tStart);
   const clean = text === null ? null : collapse(text).slice(0, LINE_TEXT_MAX_CHARS);
+  let next: LineMark;
   if (clean === "") {
-    // The stored words stay as they are; the line is hidden, so its highlights are checked against those words.
-    writeMark(db, deps, sessionId, { ...mark, hidden: true, highlights: fitSpans(mark.highlights, mark.text ?? heard.text) }, true);
-    return;
+    // Clearing every word keeps the stored words as they are; the line is hidden, so its highlights are checked against those words.
+    next = { ...mark, hidden: true, highlights: fitSpans(mark.highlights, mark.text ?? heard.text) };
+  } else {
+    const edited = clean === null || clean === collapse(heard.text) ? null : clean;
+    next = { ...mark, text: edited, hidden: false, highlights: fitSpans(mark.highlights, edited ?? heard.text) };
   }
-  const edited = clean === null || clean === collapse(heard.text) ? null : clean;
-  writeMark(db, deps, sessionId, { ...mark, text: edited, hidden: false, highlights: fitSpans(mark.highlights, edited ?? heard.text) }, true);
+  db.transaction(() => {
+    writeMark(db, deps, sessionId, next, true);
+    // The app's summary may have come from the words that changed: it is made again (a typed one stays).
+    if (next.text !== mark.text || next.hidden !== mark.hidden) staleSummary(db, sessionId);
+  });
 }
 
 // Hides lines, or shows them again (S10). Only the person does this; nothing is hidden on its own.
