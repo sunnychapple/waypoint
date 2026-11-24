@@ -101,7 +101,7 @@ describe("line marks", () => {
     setSpeaker(db, { now: () => 1 }, "s1", [0], "Ms Lee");
     setSpeaker(db, { now: () => 2 }, "s1", [1000], "Mr Park");
     setSpeaker(db, { now: () => 3 }, "s1", [2000], SEVERAL);
-    setSpeaker(db, { now: () => 4 }, "s1", [0], "Ms Lee");
+    setSpeaker(db, { now: () => 4 }, "s1", [2000], "Ms Lee");
     setSpeaker(db, { now: () => 5 }, "s2", [0], "Elsewhere");
     expect(speakerNames(db, "space-1")).toEqual(["Ms Lee", "Mr Park"]);
   });
@@ -133,6 +133,73 @@ describe("line marks", () => {
     toggleHighlight(db, deps, "s1", [{ at: 0, from: 0, to: 0 }]);
     expect(toggleHighlight(db, deps, "s1", [{ at: 0, from: 0, to: 2 }])).toBe(true);
     expect(lineMarks(db, "s1")[0]?.highlights).toEqual([[0, 2]]);
+  });
+
+  it("clearing a line hides it, and Undo or a retyped line shows it again", () => {
+    editLine(db, deps, "s1", 1000, "");
+    expect(lineMarks(db, "s1")).toEqual([{ tStart: 1000, text: null, hidden: true, speaker: null, highlights: [] }]);
+    expect(studyLines(db, "s1").some((line) => line.tStart === 1000)).toBe(false);
+    editLine(db, deps, "s1", 1000, null);
+    expect(lineMarks(db, "s1")).toEqual([]);
+    expect(studyLines(db, "s1").find((line) => line.tStart === 1000)?.text).toBe("Teacher: phones away");
+    editLine(db, deps, "s1", 1000, "");
+    editLine(db, deps, "s1", 1000, "Phones away now.");
+    expect(lineMarks(db, "s1")).toEqual([{ tStart: 1000, text: "Phones away now.", hidden: false, speaker: null, highlights: [] }]);
+  });
+
+  it("highlights after an edit are clamped to the shown words, and dropped when they start past the last word", () => {
+    toggleHighlight(db, deps, "s1", [{ at: 2000, from: 1, to: 3 }]);
+    editLine(db, deps, "s1", 2000, "Mitosis ends.");
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 2000)?.highlights).toEqual([[1, 1]]);
+    editLine(db, deps, "s1", 2000, "Done");
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 2000)?.highlights).toEqual([]);
+  });
+
+  it("toggleHighlight puts reversed picks in order, and applies every pick on a line", () => {
+    expect(toggleHighlight(db, deps, "s1", [{ at: 2000, from: 3, to: 1 }])).toBe(true);
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 2000)?.highlights).toEqual([[1, 3]]);
+    toggleHighlight(db, deps, "s1", [{ at: 2000, from: 0, to: 0 }, { at: 2000, from: 2, to: 2 }]);
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 2000)?.highlights).toEqual([[0, 3]]);
+    toggleHighlight(db, deps, "s1", [{ at: 1000, from: 0, to: 0 }, { at: 1000, from: 1, to: 1 }]);
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 1000)?.highlights).toEqual([[0, 1]]);
+  });
+
+  it("toggleHighlight ignores picks that are not whole numbers, returns false for no picks, and skips lines that are not in the transcript", () => {
+    expect(toggleHighlight(db, deps, "s1", [{ at: 0, from: -1, to: 2 }, { at: 0, from: 0.5, to: 1 }, { at: 1000, from: 0, to: NaN }])).toBe(false);
+    expect(toggleHighlight(db, deps, "s1", [])).toBe(false);
+    expect(toggleHighlight(db, deps, "s1", [{ at: 5000, from: 0, to: 1 }])).toBe(false);
+    expect(lineMarks(db, "s1")).toEqual([]);
+  });
+
+  it("parseSpans drops only the bad entries, then sorts and merges the rest", () => {
+    db.run("INSERT INTO line_marks (id, session_id, t_start, text, highlights, updated_at) VALUES ('s1:2000', 's1', 2000, NULL, '[[3,1],[\"x\",2],[5,6],[0,2],[1,3]]', 1)");
+    expect(lineMarks(db, "s1").find((m) => m.tStart === 2000)?.highlights).toEqual([
+      [0, 3],
+      [5, 6],
+    ]);
+  });
+
+  it("setHidden, setSpeaker and toggleHighlight write nothing for a line that is not a device line, or a start that is not a whole number", () => {
+    setHidden(db, deps, "s1", [5000, 0.5], true);
+    setSpeaker(db, deps, "s1", [5000], "Ms Lee");
+    toggleHighlight(db, deps, "s1", [{ at: 0.5, from: 0, to: 1 }]);
+    expect(lineMarks(db, "s1")).toEqual([]);
+  });
+
+  it("setting the same speaker or the same hidden state again writes nothing: no new updated_at, no dirty row, no re-index", () => {
+    db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('grp_1', 'shared', 'owner', 1, 0)");
+    db.run("INSERT INTO space_groups (space_id, group_id) VALUES ('space-1', 'grp_1')");
+    setSpeaker(db, { now: () => 1 }, "s1", [0], "Ms Lee");
+    const dirtyBefore = db.get<{ n: number }>("SELECT COUNT(*) AS n FROM dirty")?.n;
+    setSpeaker(db, { now: () => 2 }, "s1", [0], "Ms Lee");
+    expect(db.get<{ updated_at: number }>("SELECT updated_at FROM line_marks WHERE id = 's1:0'")?.updated_at).toBe(1);
+    expect(db.get<{ n: number }>("SELECT COUNT(*) AS n FROM dirty")?.n).toBe(dirtyBefore);
+
+    setHidden(db, { now: () => 3 }, "s1", [1000], true);
+    db.run("UPDATE sessions SET indexed_at = 7 WHERE id = 's1'");
+    setHidden(db, { now: () => 4 }, "s1", [1000], true);
+    expect(indexedAt()).toBe(7);
+    expect(db.get<{ updated_at: number }>("SELECT updated_at FROM line_marks WHERE id = 's1:1000'")?.updated_at).toBe(3);
   });
 
   it("linesToName names the following lines up to the next named line, and speakerRun returns the run with the same name", () => {

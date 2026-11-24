@@ -37,6 +37,23 @@ describe("notes", () => {
     expect(getNote(db, id ?? "")?.t).toBe(0);
   });
 
+  it("addNote stores a t that is not a finite number as 0, and lists notes with equal t and created_at by id", () => {
+    const nan = addNote(db, deps, "s1", Number.NaN, "Not a time");
+    const inf = addNote(db, deps, "s1", Number.POSITIVE_INFINITY, "Forever");
+    expect(getNote(db, nan ?? "")?.t).toBe(0);
+    expect(getNote(db, inf ?? "")?.t).toBe(0);
+    const same = { now: () => 100, newId: (() => { const ids = ["b", "a"]; return () => ids.shift() ?? "c"; })() };
+    addNote(db, same, "s1", 7000, "Second written");
+    addNote(db, same, "s1", 7000, "First by id");
+    expect(notesForSession(db, "s1").filter((note) => note.t === 7000).map((note) => note.id)).toEqual(["a", "b"]);
+  });
+
+  it("text and quote are cut by characters, so a surrogate pair is never split", () => {
+    const id = addNote(db, deps, "s1", 0, `${"x".repeat(1999)}😀 tail`, `${"y".repeat(299)}😀`);
+    expect(getNote(db, id ?? "")?.text).toBe(`${"x".repeat(1999)}😀`);
+    expect(getNote(db, id ?? "")?.quote).toBe(`${"y".repeat(299)}😀`);
+  });
+
   it("updateNote changes the text, and updating to empty deletes the note", () => {
     const id = addNote(db, deps, "s1", 0, "First");
     expect(id).not.toBeNull();

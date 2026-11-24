@@ -12,7 +12,8 @@ export function listSegments(db: SqlDb, sessionId: string): SegmentLine[] {
 
 // The transcript as the person keeps it (Next 1): their words in place of what was heard, with hidden lines and lines
 // left empty taken out. Everything that reads the transcript to make or send something uses this: flashcards, quizzes,
-// search, share links, Explain's excerpt and the cloud tasks.
+// search, share links, Explain's excerpt and the cloud tasks. Only device lines are used, so a session with only cloud
+// segments gives []; T3 decides what to show then.
 export function studyLines(db: SqlDb, sessionId: string): SegmentLine[] {
   return db
     .all<SegmentLine>(

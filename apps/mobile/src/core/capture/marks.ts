@@ -15,15 +15,37 @@ export type LineMark = { tStart: number; text: string | null; hidden: boolean; s
 // One line's part of a selection: its start, and its first and last selected word.
 export type LinePick = { at: number; from: number; to: number };
 
-const SpansSchema = z.array(z.tuple([z.number().int().min(0), z.number().int().min(0)])).max(500);
+const SpanSchema = z.tuple([z.number().int().min(0), z.number().int().min(0)]);
 
+// Words as selection counts them: whitespace-separated. selection.ts does not exist yet (T4), so this is the split for now.
+const wordsOf = (text: string): string[] => text.split(/\s+/).filter((w) => w !== "");
+
+// Spans stay sorted and merged: touching or overlapping spans become one.
+function mergeSpans(spans: Span[]): Span[] {
+  const out: Span[] = [];
+  for (const [from, to] of [...spans].sort((a, b) => a[0] - b[0])) {
+    const last = out.at(-1);
+    if (last !== undefined && from <= last[1] + 1) last[1] = Math.max(last[1], to);
+    else out.push([from, to]);
+  }
+  return out;
+}
+
+// Reads the stored spans one by one: a bad entry is dropped and the valid ones are kept. At most 500 entries are read.
 function parseSpans(raw: string): Span[] {
+  let parsed: unknown;
   try {
-    const parsed = SpansSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data.filter(([from, to]) => from <= to) : [];
+    parsed = JSON.parse(raw);
   } catch {
     return [];
   }
+  if (!Array.isArray(parsed)) return [];
+  const valid: Span[] = [];
+  for (const item of parsed.slice(0, 500)) {
+    const span = SpanSchema.safeParse(item);
+    if (span.success && span.data[0] <= span.data[1]) valid.push(span.data);
+  }
+  return mergeSpans(valid);
 }
 
 type Row = { t_start: number; text: string | null; hidden: number; speaker: string | null; highlights: string };
@@ -40,6 +62,22 @@ export function lineMarks(db: SqlDb, sessionId: string): LineMark[] {
 function markAt(db: SqlDb, sessionId: string, tStart: number): LineMark {
   const row = db.get<Row>(`SELECT ${COLUMNS} FROM line_marks WHERE session_id = ? AND t_start = ?`, [sessionId, tStart]);
   return row === null ? { tStart, text: null, hidden: false, speaker: null, highlights: [] } : fromRow(row);
+}
+
+const sameMark = (a: LineMark, b: LineMark): boolean =>
+  a.text === b.text && a.hidden === b.hidden && a.speaker === b.speaker && JSON.stringify(a.highlights) === JSON.stringify(b.highlights);
+
+// The lines among tStarts that are device lines of this session. Only whole-number starts are looked up, in one query.
+function existingLines(db: SqlDb, sessionId: string, tStarts: number[]): number[] {
+  const wanted = [...new Set(tStarts.filter((t) => Number.isInteger(t)))];
+  if (wanted.length === 0) return [];
+  const slots = wanted.map(() => "?").join(", ");
+  return db
+    .all<{ t_start: number }>(
+      `SELECT t_start FROM segments WHERE session_id = ? AND source = 'device' AND t_start IN (${slots})`,
+      [sessionId, ...wanted],
+    )
+    .map((row) => row.t_start);
 }
 
 // Keeps one line's mark, or removes its row when nothing is left on it. `reread`: the line's words or hidden state changed,
@@ -61,25 +99,42 @@ function writeMark(db: SqlDb, deps: Deps, sessionId: string, mark: LineMark, rer
 
 const collapse = (text: string): string => text.replace(/\s+/g, " ").trim();
 
+// Highlights are word positions in the shown text: spans that start past its last word are dropped, and the others end at
+// its last word at most.
+function fitSpans(spans: Span[], shown: string): Span[] {
+  const last = wordsOf(shown).length - 1;
+  return spans.filter(([from]) => from <= last).map(([from, to]): Span => [from, Math.min(to, last)]);
+}
+
 // The person's words for a line (Edit, note 12). The heard line in segments never changes. null, or the heard words,
 // removes the edit, so Undo brings back what was heard. Clearing every word hides the line instead, so nothing is lost.
-// A line that is not in the transcript is left alone.
+// Any edit that leaves words shows the line again. A line that is not in the transcript is left alone.
 export function editLine(db: SqlDb, deps: Deps, sessionId: string, tStart: number, text: string | null): void {
   const heard = db.get<{ text: string }>("SELECT text FROM segments WHERE session_id = ? AND source = 'device' AND t_start = ?", [sessionId, tStart]);
   if (heard === null) return;
   const mark = markAt(db, sessionId, tStart);
   const clean = text === null ? null : collapse(text).slice(0, LINE_TEXT_MAX_CHARS);
   if (clean === "") {
-    writeMark(db, deps, sessionId, { ...mark, hidden: true }, true);
+    // The stored words stay as they are; the line is hidden, so its highlights are checked against those words.
+    writeMark(db, deps, sessionId, { ...mark, hidden: true, highlights: fitSpans(mark.highlights, mark.text ?? heard.text) }, true);
     return;
   }
-  writeMark(db, deps, sessionId, { ...mark, text: clean === null || clean === collapse(heard.text) ? null : clean }, true);
+  const edited = clean === null || clean === collapse(heard.text) ? null : clean;
+  writeMark(db, deps, sessionId, { ...mark, text: edited, hidden: false, highlights: fitSpans(mark.highlights, edited ?? heard.text) }, true);
 }
 
 // Hides lines, or shows them again (S10). Only the person does this; nothing is hidden on its own.
 export function setHidden(db: SqlDb, deps: Deps, sessionId: string, tStarts: number[], hidden: boolean): void {
   db.transaction(() => {
-    for (const t of tStarts) writeMark(db, deps, sessionId, { ...markAt(db, sessionId, t), hidden }, true);
+    let changed = false;
+    for (const t of existingLines(db, sessionId, tStarts)) {
+      const mark = markAt(db, sessionId, t);
+      const next = { ...mark, hidden };
+      if (sameMark(mark, next)) continue;
+      writeMark(db, deps, sessionId, next, false);
+      changed = true;
+    }
+    if (changed) db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);
   });
 }
 
@@ -94,7 +149,11 @@ export function setSpeaker(db: SqlDb, deps: Deps, sessionId: string, tStarts: nu
   const name = speaker === null || speaker === SEVERAL ? speaker : cleanName(speaker);
   if (speaker !== null && name === null) return;
   db.transaction(() => {
-    for (const t of tStarts) writeMark(db, deps, sessionId, { ...markAt(db, sessionId, t), speaker: name }, false);
+    for (const t of existingLines(db, sessionId, tStarts)) {
+      const mark = markAt(db, sessionId, t);
+      const next = { ...mark, speaker: name };
+      if (!sameMark(mark, next)) writeMark(db, deps, sessionId, next, false);
+    }
   });
 }
 
@@ -114,7 +173,7 @@ export function speakerNames(db: SqlDb, spaceId: string): string[] {
 }
 
 // "Until the next name": the chosen lines, then every line after the last of them, up to the next line that already has
-// a name. `lines` are the session's lines in time order.
+// a name. `lines` must be sorted by tStart (the session's lines in time order).
 export function linesToName(lines: { tStart: number; speaker: string | null }[], chosen: number[]): number[] {
   if (chosen.length === 0) return [];
   const last = Math.max(...chosen);
@@ -141,13 +200,7 @@ export function speakerRun(lines: { tStart: number; speaker: string | null }[], 
 
 // Spans stay sorted and merged: touching or overlapping spans become one.
 export function addSpan(spans: Span[], add: Span): Span[] {
-  const out: Span[] = [];
-  for (const [from, to] of [...spans, add].sort((a, b) => a[0] - b[0])) {
-    const last = out.at(-1);
-    if (last !== undefined && from <= last[1] + 1) last[1] = Math.max(last[1], to);
-    else out.push([from, to]);
-  }
-  return out;
+  return mergeSpans([...spans, add]);
 }
 
 export function removeSpan(spans: Span[], [from, to]: Span): Span[] {
@@ -164,16 +217,36 @@ export function coversSpan(spans: Span[], [from, to]: Span): boolean {
   return spans.some(([a, b]) => a <= from && b >= to);
 }
 
+const isWhole = (n: number): boolean => Number.isInteger(n) && n >= 0;
+
 // Highlight (note 11): the picked words are highlighted, or, when every one of them already is, the highlight is removed.
-// Returns true when they are highlighted now.
+// Picks with a number that is not a whole number >= 0 are ignored, and reversed ones are put in order. Returns true when
+// the picked words are highlighted now.
 export function toggleHighlight(db: SqlDb, deps: Deps, sessionId: string, picks: LinePick[]): boolean {
-  const marks = picks.map((pick) => ({ pick, mark: markAt(db, sessionId, pick.at) }));
-  const remove = marks.length > 0 && marks.every(({ pick, mark }) => coversSpan(mark.highlights, [pick.from, pick.to]));
+  const usable = picks
+    .filter((pick) => isWhole(pick.at) && isWhole(pick.from) && isWhole(pick.to))
+    .map((pick): LinePick => ({ at: pick.at, from: Math.min(pick.from, pick.to), to: Math.max(pick.from, pick.to) }));
+  if (usable.length === 0) return false;
+  let highlighted = false;
   db.transaction(() => {
-    for (const { pick, mark } of marks) {
-      const span: Span = [pick.from, pick.to];
-      writeMark(db, deps, sessionId, { ...mark, highlights: remove ? removeSpan(mark.highlights, span) : addSpan(mark.highlights, span) }, false);
+    const here = new Set(existingLines(db, sessionId, usable.map((pick) => pick.at)));
+    // Picks grouped by line; each line's mark is read once, before any write, so every pick on it applies.
+    const lines = new Map<number, { mark: LineMark; spans: Span[] }>();
+    for (const pick of usable) {
+      if (!here.has(pick.at)) continue;
+      const line = lines.get(pick.at) ?? { mark: markAt(db, sessionId, pick.at), spans: [] };
+      line.spans.push([pick.from, pick.to]);
+      lines.set(pick.at, line);
     }
+    if (lines.size === 0) return;
+    const remove = [...lines.values()].every(({ mark, spans }) => spans.every((span) => coversSpan(mark.highlights, span)));
+    for (const { mark, spans } of lines.values()) {
+      let highlights = mark.highlights;
+      for (const span of spans) highlights = remove ? removeSpan(highlights, span) : addSpan(highlights, span);
+      const next = { ...mark, highlights };
+      if (!sameMark(mark, next)) writeMark(db, deps, sessionId, next, false);
+    }
+    highlighted = !remove;
   });
-  return !remove;
+  return highlighted;
 }
