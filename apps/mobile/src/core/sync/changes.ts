@@ -4,7 +4,7 @@ import { freeSpaceName } from "../db/spaces.ts";
 
 // What one locked change says (M29a). The plaintext is this JSON; it is locked with the group key under
 // context("change", group id, device id, kind) (docs/security.md section 11). kind is in clear for the room.
-export const SYNC_TABLES = ["spaces", "sessions", "captures", "flags", "cards"] as const;
+export const SYNC_TABLES = ["spaces", "sessions", "captures", "flags", "cards", "line_marks", "notes"] as const;
 export type SyncTable = (typeof SYNC_TABLES)[number];
 type ChildTable = Exclude<SyncTable, "spaces">;
 
@@ -16,6 +16,8 @@ export const SYNC_COLUMNS: Record<SyncTable, readonly string[]> = {
   captures: ["id", "session_id", "kind", "t", "position", "duration_ms", "found_text", "found_lines", "blob_id"],
   flags: ["id", "session_id", "t", "question", "state", "capture_id"],
   cards: ["id", "session_id", "kind", "front", "back", "capture_id", "t", "made_by", "created_at", "due_at", "fsrs"],
+  line_marks: ["id", "session_id", "t_start", "text", "hidden", "speaker", "highlights", "updated_at"],
+  notes: ["id", "session_id", "t", "text", "quote", "created_at"],
 };
 
 // A transcript is sent in 10-minute pieces (by t_start), each its own row for last-writer-wins, so no change nears
@@ -141,7 +143,7 @@ export function collectChanges(db: SqlDb, deps: SyncDeps): number {
 export function markMoved(db: SqlDb, sessionId: string, oldGroupId: string | null): void {
   db.transaction(() => {
     db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 0, NULL)", [sessionId]);
-    for (const table of ["captures", "flags", "cards"]) {
+    for (const table of ["captures", "flags", "cards", "line_marks", "notes"]) {
       db.run(`INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT '${table}', id, 0, NULL FROM ${table} WHERE session_id = ?`, [sessionId]);
     }
     db.run(
@@ -292,6 +294,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
       retryPending(db, movedTo, target, key);
       return "applied";
     }
+    // A line's words or hidden state may change what search finds (studyLines), so the session is indexed again.
+    if (change.table === "line_marks") db.run("UPDATE sessions SET indexed_at = NULL WHERE id = (SELECT session_id FROM line_marks WHERE id = ?)", [key]);
     db.run(`DELETE FROM ${change.table} WHERE id = ?`, [key]);
     return "applied";
   }
@@ -354,6 +358,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   const here = spaceOf(db, change.table, key);
   if (here !== null && here !== space) return "rejected";
   const row = { ...change.row };
+  // A line mark is keyed by its session and start time; a row whose id says otherwise is not one this app writes.
+  if (change.table === "line_marks" && row.id !== `${row.session_id}:${row.t_start}`) return "rejected";
   // A flag sent by an app version before capture_id keeps this iPhone's value rather than losing it.
   if (change.table === "flags" && !("capture_id" in row)) row.capture_id = db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags WHERE id = ?", [key])?.capture_id ?? null;
   if ((change.table === "cards" || change.table === "flags") && typeof row.capture_id === "string") {
@@ -364,6 +370,7 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   }
   if (!newer(db, table, key, change.at, deviceId)) return "older";
   upsertRow(db, change.table, row);
+  if (change.table === "line_marks") db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);
   if (change.table === "captures") retryPending(db, groupId, space, key);
   return "applied";
 }

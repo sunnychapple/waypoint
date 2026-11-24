@@ -21,6 +21,7 @@ import {
   sent,
   setLastSeq,
   type SyncChange,
+  SYNC_COLUMNS,
   SyncChangeSchema,
 } from "../src/core/sync/changes.ts";
 import { createMemoryDb } from "./helpers/db.ts";
@@ -719,5 +720,125 @@ describe("flags on a page (card 4)", () => {
     b.db.run("DELETE FROM captures");
     expect(applyChange(b.db, G, flag, "dev_a")).toBe("applied");
     expect(b.db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags")?.capture_id).toBeNull();
+  });
+});
+
+describe("line marks and notes (Next 1)", () => {
+  const indexedAt = (d: Device, id: string) => d.db.get<{ indexed_at: number | null }>("SELECT indexed_at FROM sessions WHERE id = ?", [id])?.indexed_at;
+  function markAndNote(d: Device, sessionId: string): void {
+    d.db.run("INSERT INTO line_marks (id, session_id, t_start, text, updated_at) VALUES (?, ?, 0, 'cells divide', 1)", [`${sessionId}:0`, sessionId]);
+    d.db.run("INSERT INTO notes (id, session_id, t, text, quote, created_at) VALUES ('n_1', ?, 5, 'check this', 'cells', 1)", [sessionId]);
+  }
+
+  it("a mark and a note are queued after their session, with every shared column; deleting a mark is queued", () => {
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    markAndNote(a, s.id);
+    const changes = send(a);
+    expect(changes[0]).toMatchObject({ op: "upsert", table: "sessions" });
+    const mark = one(changes, "upsert", "line_marks");
+    expect(Object.keys(mark.row).sort()).toEqual([...SYNC_COLUMNS.line_marks].sort());
+    const note = one(changes, "upsert", "notes");
+    expect(Object.keys(note.row).sort()).toEqual([...SYNC_COLUMNS.notes].sort());
+    a.db.run("DELETE FROM line_marks");
+    expect(one(send(a), "delete", "line_marks").table).toBe("line_marks");
+  });
+
+  it("applied on b, a mark clears b's search index and a note does not", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "cells" });
+    markAndNote(a, s.id);
+    const changes = send(a);
+    expect(applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(applyChange(b.db, G, one(changes, "segments"), "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET indexed_at = 5 WHERE id = ?", [s.id]);
+    expect(applyChange(b.db, G, one(changes, "upsert", "notes"), "dev_a")).toBe("applied");
+    expect(indexedAt(b, s.id)).toBe(5);
+    expect(applyChange(b.db, G, one(changes, "upsert", "line_marks"), "dev_a")).toBe("applied");
+    expect(indexedAt(b, s.id)).toBeNull();
+    expect(count(b, "notes")).toBe(1);
+    expect(count(b, "line_marks")).toBe(1);
+
+    b.db.run("UPDATE sessions SET indexed_at = 5 WHERE id = ?", [s.id]);
+    a.db.run("DELETE FROM line_marks");
+    expect(applyChange(b.db, G, one(send(a), "delete", "line_marks"), "dev_a")).toBe("applied");
+    expect(indexedAt(b, s.id)).toBeNull();
+    expect(count(b, "line_marks")).toBe(0);
+  });
+
+  it("a mark that arrives before its session waits in sync_pending and lands with the session", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    expect(applyChange(b.db, G, one(changes, "upsert", "line_marks"), "dev_a")).toBe("deferred");
+    expect(count(b, "sync_pending")).toBe(1);
+    expect(applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(count(b, "line_marks")).toBe(1);
+    expect(count(b, "sync_pending")).toBe(0);
+  });
+
+  it("markMoved queues the session's marks and notes again", () => {
+    const a = device("a");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    send(a);
+    markMoved(a.db, s.id, null);
+    const again = send(a);
+    expect(again.some((c) => c.op === "upsert" && c.table === "line_marks")).toBe(true);
+    expect(again.some((c) => c.op === "upsert" && c.table === "notes")).toBe(true);
+  });
+
+  it("a received mark is applied only when its id is its session and start time", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a");
+    const mark = one(changes, "upsert", "line_marks");
+    expect(applyChange(b.db, G, { ...mark, at: mark.at + 1, row: { ...mark.row, id: "other:0" } }, "dev_a")).toBe("rejected");
+    expect(count(b, "line_marks")).toBe(0);
+    expect(applyChange(b.db, G, mark, "dev_a")).toBe("applied");
+    expect(count(b, "line_marks")).toBe(1);
+  });
+
+  it("applying a received mark and its session queues nothing in dirty", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    expect(applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(applyChange(b.db, G, one(changes, "upsert", "line_marks"), "dev_a")).toBe("applied");
+    expect(count(b, "line_marks")).toBe(1);
+    expect(count(b, "dirty")).toBe(0);
+  });
+
+  it("a delete for a mark whose session is in another space is rejected and keeps the row", () => {
+    const b = device("b");
+    const other = createSpace(b.db, b.deps, "Chemistry");
+    const s = startRecordingSession(b.db, b.deps, other.id, true);
+    b.db.run("INSERT INTO line_marks (id, session_id, t_start, text, updated_at) VALUES (?, ?, 0, 'acid', 1)", [`${s.id}:0`, s.id]);
+    const deletion = SyncChangeSchema.parse({ v: 1, id: "chg_0123456789abcdef", at: 9_000, op: "delete", table: "line_marks", row_id: `${s.id}:0` });
+    expect(applyChange(b.db, G, deletion, "dev_a")).toBe("rejected");
+    expect(count(b, "line_marks")).toBe(1);
+  });
+
+  it("a mark with hidden 3 is rejected and leaves nothing behind", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a");
+    const mark = one(changes, "upsert", "line_marks");
+    expect(applyChange(b.db, G, { ...mark, at: mark.at + 1, row: { ...mark.row, hidden: 3 } }, "dev_a")).toBe("rejected");
+    expect(count(b, "line_marks")).toBe(0);
+    expect(b.db.get<{ n: number }>("SELECT count(*) AS n FROM row_versions WHERE table_name = 'line_marks'")?.n).toBe(0);
   });
 });
