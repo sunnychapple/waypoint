@@ -115,6 +115,8 @@ export function nameRecording(db: SqlDb, sessionId: string): void {
     .map((line) => line.text)
     .join(" ");
   renameSession(db, sessionId, recordingTitle(words.trim() === "" ? null : words, session.startedAt));
+  // Named by the app, so the title the model writes later may replace it (see applySummary).
+  db.run("UPDATE sessions SET title_auto = 1 WHERE id = ?", [sessionId]);
 }
 
 // A finished text piece from the live transcriber. A repeat of the same piece is ignored.

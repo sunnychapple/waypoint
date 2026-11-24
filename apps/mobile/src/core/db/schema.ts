@@ -511,4 +511,19 @@ CREATE TABLE help_answers (
 CREATE INDEX help_answers_session ON help_answers (session_id, created_at);
 `,
   },
+  {
+    // Card S1. title_auto: the title is one the app made (1) or the person typed (0). summary and summary_auto: the
+    // summary, and whether the app wrote it (1) or the person did (0). The sync trigger is rebuilt with the same columns
+    // as before (11 and 12 did not change it) plus the three new ones.
+    version: 13,
+    sql: `
+ALTER TABLE sessions ADD COLUMN title_auto INTEGER NOT NULL DEFAULT 0 CHECK (title_auto IN (0, 1));
+ALTER TABLE sessions ADD COLUMN summary TEXT;
+ALTER TABLE sessions ADD COLUMN summary_auto INTEGER NOT NULL DEFAULT 1 CHECK (summary_auto IN (0, 1));
+DROP TRIGGER sync_sessions_update;
+CREATE TRIGGER sync_sessions_update AFTER UPDATE OF space_id, kind, title, state, transcript, started_at, ended_at, recorded_ms, title_auto, summary, summary_auto ON sessions WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', new.id, 0, NULL);
+END;
+`,
+  },
 ];
