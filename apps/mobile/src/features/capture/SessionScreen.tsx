@@ -8,6 +8,7 @@ import { momentFromParam, nearestSegmentIndex } from "../../core/capture/moment.
 import { listPages } from "../../core/capture/pages.ts";
 import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capture/second.ts";
 import { isLiveSession } from "../../core/capture/recording.ts";
+import { notesForSession } from "../../core/capture/notes.ts";
 import { listSegments } from "../../core/capture/segments.ts";
 import { buildTimeline, groupTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import type { Piece } from "../../core/capture/transcript.ts";
@@ -292,7 +293,7 @@ export default function SessionScreen() {
                 onWord={(word, at) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(at), word } })}
               />
             ) : (
-              <TimeMarkRow key={row.key} item={row} interactive />
+              <TimeMarkRow key={row.key} item={row} interactive canChange={role !== "viewer"} />
             ),
           )
         )}
@@ -370,7 +371,7 @@ function recordingTimeline(db: SqlDb, sessionId: string): TimelineItem[] {
   );
   // A part whose length was never measured (0) would make the whole part look like a gap, so its resume is skipped.
   const resumes = parts.slice(1).filter((part, i) => parts[i]!.durationMs > 0).map((part) => part.startMs);
-  return buildTimeline(lines, parts, resumes, flags, photos);
+  return buildTimeline(lines, parts, resumes, flags, photos, notesForSession(db, sessionId));
 }
 
 const OVERVIEW_STATE: Record<OverviewState, string> = {

@@ -95,6 +95,33 @@ describe("groupTimeline", () => {
   it("gives an empty list for no items", () => {
     expect(groupTimeline([])).toEqual([]);
   });
+
+  it("splits two close lines when a note sits between them, as a flag does", () => {
+    const note: TimelineItem = { kind: "note", key: "note-a", at: 1500, id: "a", text: "check this", quote: "" };
+    const rows = groupTimeline([line(0, 1000), note, line(1600, 2000)]);
+    expect(rows.map((row) => row.kind)).toEqual(["paragraph", "note", "paragraph"]);
+  });
+});
+
+describe("buildTimeline notes", () => {
+  it("puts notes in time order with their text and quote", () => {
+    const items = buildTimeline(
+      [],
+      [],
+      [],
+      [5_000],
+      [],
+      [
+        { id: "late", t: 9_000, text: "second", quote: "" },
+        { id: "early", t: 2_000, text: "first", quote: "cells divide" },
+      ],
+    );
+    expect(items).toEqual([
+      { kind: "note", key: "note-early", at: 2_000, id: "early", text: "first", quote: "cells divide" },
+      { kind: "flag", key: "flag-0", at: 5_000 },
+      { kind: "note", key: "note-late", at: 9_000, id: "late", text: "second", quote: "" },
+    ]);
+  });
 });
 
 describe("applyMarks", () => {

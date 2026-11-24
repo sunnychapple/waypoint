@@ -5,7 +5,8 @@ export type TimelineItem =
   | { kind: "line"; key: string; at: number; end: number; text: string }
   | { kind: "gap"; key: string; at: number; gapMs: number }
   | { kind: "flag"; key: string; at: number }
-  | { kind: "photo"; key: string; at: number; file: string };
+  | { kind: "photo"; key: string; at: number; file: string }
+  | { kind: "note"; key: string; at: number; id: string; text: string; quote: string };
 
 export type PartSpan = { index: number; startMs: number; durationMs: number };
 
@@ -13,7 +14,7 @@ const GAP_MIN_MS = 1000;
 // The screen hears about a resume slightly after native started the new part, so a part starting this close is that part.
 const RESUME_SKEW_MS = 250;
 
-// Finals, gaps, flags and photos, in time order. All times are ms since the session started.
+// Finals, gaps, flags, photos and notes, in time order. All times are ms since the session started.
 // A gap is drawn as soon as recording resumes: from the end of the last part that had ended by the resume
 // to the resume time. Parts close (and are reported) on pause, so that part is known by then.
 export function buildTimeline(
@@ -22,6 +23,7 @@ export function buildTimeline(
   resumes: number[],
   flags: number[],
   photos: { id: string; t: number; file: string }[],
+  notes: { id: string; t: number; text: string; quote: string }[] = [],
 ): TimelineItem[] {
   const items: TimelineItem[] = finals.map((piece) => ({ kind: "line", key: `line-${piece.tStart}`, at: piece.tStart, end: piece.tEnd, text: piece.text }));
   for (const resumedAt of resumes) {
@@ -33,6 +35,7 @@ export function buildTimeline(
   }
   flags.forEach((t, i) => items.push({ kind: "flag", key: `flag-${i}`, at: t }));
   photos.forEach((p) => items.push({ kind: "photo", key: `photo-${p.id}`, at: p.t, file: p.file }));
+  notes.forEach((n) => items.push({ kind: "note", key: `note-${n.id}`, at: n.t, id: n.id, text: n.text, quote: n.quote }));
   return items.sort((a, b) => a.at - b.at);
 }
 
