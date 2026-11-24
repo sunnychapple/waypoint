@@ -115,6 +115,12 @@ describe("problem_help requests", () => {
     expect(CreateJobRequestSchema.safeParse({ ...HELP, text: "a".repeat(JOB_TEXT_MAX_CHARS.problem_help + 1) }).success).toBe(false);
   });
 
+  test("an empty page text is allowed, and a missing one is not", () => {
+    expect(CreateJobRequestSchema.parse({ ...HELP, text: "" })).toEqual({ ...HELP, text: "" });
+    expect(CreateJobRequestSchema.parse({ ...HELP, text: "   " })).toEqual({ ...HELP, text: "" });
+    expect(CreateJobRequestSchema.safeParse({ type: "problem_help", problem: "Find it." }).success).toBe(false);
+  });
+
   test("a blank problem, a missing text, a prompt and an extra key are rejected", () => {
     for (const body of [{ ...HELP, problem: "   " }, { type: "problem_help", problem: "Find it." }, { ...HELP, prompt: "short" }, { ...HELP, extra: 1 }]) {
       expect(CreateJobRequestSchema.safeParse(body).success, JSON.stringify(body)).toBe(false);

@@ -84,6 +84,11 @@ describe("problem help", () => {
     expect(ProblemHelpDraftSchema.parse({ readable: false, reason: "The question is cut off." })).toEqual({ readable: false, reason: "The question is cut off." });
   });
 
+  test("an unreadable reason is at most 120 characters", () => {
+    expect(ProblemHelpDraftSchema.safeParse({ readable: false, reason: "a".repeat(120) }).success).toBe(true);
+    expect(ProblemHelpDraftSchema.safeParse({ readable: false, reason: "a".repeat(121) }).success).toBe(false);
+  });
+
   test("no steps, nine steps, an empty answer, a step without why, and readable missing are rejected", () => {
     for (const body of [
       { readable: true, steps: [], answer: "A" },

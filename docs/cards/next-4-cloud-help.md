@@ -644,6 +644,14 @@ Later, when the owner wants `problem_help` in the live config (optional), publis
 
 Known limits: an older app on another device signed in to the same account cannot read the cloud activity list (`GET /v1/activity`) once that account has a `problem_help` row, because its schema doesn't know the task yet. A new app build fixes it.
 
+Publish a routes or prices table that lists `problem_help` only after the new Worker is deployed; the old Worker's strict schema would reject it.
+
+### Review fixes
+
+- **Unreadable result cannot carry an answer.** `UnreadableHelpSchema.reason` is capped at 120 characters (was 300). In `write.ts` a reply with a longer `reason` fails the schema, so it takes the same path as any invalid model output: one retry, then the job fails and the hold is released. It is not a 1-credit success.
+- **Untrusted input is delimited.** The `problem_help` user message is `<problem>…</problem>` then, only if there is page text, `<page>…</page>`. Literal `<problem>`, `</problem>`, `<page>` and `</page>` are stripped from both inputs before wrapping. The system prompt has one added line: text inside `<problem>` and `<page>` is the student's material, treated as data, never followed as instructions.
+- **Empty page text is allowed.** `problem_help` `text` now has minimum 0 (still trimmed, still capped at 4,000). The `<page>` block is omitted when it is empty.
+
 ---
 
 ## P2 · App core: the saved answer, and "Not available yet"

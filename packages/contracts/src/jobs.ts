@@ -49,7 +49,8 @@ export const CreateJobRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("problem_help"),
     problem: text(JOB_PROBLEM_MAX_CHARS),
-    text: text(JOB_TEXT_MAX_CHARS.problem_help),
+    // Empty when the problem was photographed on its own.
+    text: z.string().trim().max(JOB_TEXT_MAX_CHARS.problem_help),
   }),
 ]);
 

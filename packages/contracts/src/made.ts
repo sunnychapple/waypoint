@@ -67,7 +67,8 @@ const ReadableHelpSchema = z.object({
   steps: z.array(ProblemHelpStepSchema).min(1).max(8),
   answer: z.string().min(1).max(600),
 });
-const UnreadableHelpSchema = z.object({ readable: z.literal(false), reason: z.string().min(1).max(300) });
+// The reason is one short line. It is capped at 120 so an unreadable reply cannot carry an answer (a longer one is an invalid reply).
+const UnreadableHelpSchema = z.object({ readable: z.literal(false), reason: z.string().min(1).max(120) });
 export const ProblemHelpDraftSchema = z.discriminatedUnion("readable", [ReadableHelpSchema, UnreadableHelpSchema]);
 
 export const VideoSlidesResultSchema = VideoSlidesDraftSchema.extend({ v: z.literal(1) });
