@@ -37,12 +37,14 @@ import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { PageTextEditor } from "./PageTextEditor.tsx";
-import { ParagraphRow, paragraphSlice } from "./ParagraphRow.tsx";
+import { EditingBar, EditSwitch } from "./EditingBar.tsx";
+import { ParagraphRow, paragraphSlice, type LineEditing } from "./ParagraphRow.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 import { SummaryCard } from "./SummaryCard.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { liveSelection, selectionModel, type SelectionModel } from "./selectionModel.ts";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
+import { useLineEditor } from "./useLineEditor.ts";
 
 // Saved explanations of a recording (none while it is live, or for pages): a constant, so its identity is stable.
 const NO_EXPLANATIONS: ExplainedTerm[] = [];
@@ -84,6 +86,14 @@ export default function SessionScreen() {
   const [lit, setLit] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showHidden, setShowHidden] = useState(false);
+  // Edit (S13): the line texts as shown, for the editor to tell whether anything changed.
+  const shownText = useRef(new Map<number, string>());
+  const editor = useLineEditor(id, (at) => shownText.current.get(at) ?? null);
+  // The same object for every paragraph, so memo keeps the paragraphs a keystroke or a tap does not touch.
+  const lineEditing: LineEditing = useMemo(
+    () => ({ onOpen: editor.openLine, onType: editor.typed, onBlur: editor.blurLine, onUndo: editor.undoLine }),
+    [editor.openLine, editor.typed, editor.blurLine, editor.undoLine],
+  );
   const scroll = useRef<ScrollViewInstance>(null);
   const landed = useRef<string | null>(null);
   // A push to ?view=second while this screen is already open moves the switch too.
@@ -108,6 +118,7 @@ export default function SessionScreen() {
   const marks = useMemo(() => new Map((data?.marks ?? []).map((mark) => [mark.tStart, mark] as const)), [data]);
   const shown = useMemo(() => (data ? applyMarks(data.timeline, marks, showHidden) : []), [data, marks, showHidden]);
   const lines = useMemo(() => shown.filter((item): item is TimelineLine => item.kind === "line"), [shown]);
+  shownText.current = new Map(lines.map((line) => [line.at, line.text] as const));
   const explanations = useMemo(() => data?.explanations ?? NO_EXPLANATIONS, [data]);
   const explained = useMemo(
     () => explainedWords(lines.map((line) => ({ at: line.at, text: line.text })), explanations),
@@ -228,7 +239,7 @@ export default function SessionScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={styles.topRow}>
           <CircleButton label="Back" icon="chevron.left" onPress={() => router.back()} />
           <View style={styles.topRight}>
@@ -320,6 +331,7 @@ export default function SessionScreen() {
                   accessibilityState={{ selected: active }}
                   onPress={() => {
                     setSelection(null);
+                    if (index === 1) editor.setOn(false);
                     setShowSecond(index === 1);
                   }}
                   style={[styles.switchItem, { backgroundColor: active ? colors.accentSoft : colors.surface2 }]}
@@ -346,6 +358,20 @@ export default function SessionScreen() {
             </Text>
           </Pressable>
         ) : null}
+
+        {session.kind === "recording" && lines.length > 0 && !showSecond && canChange ? (
+          <View style={styles.transcriptHead}>
+            <Caption>TRANSCRIPT</Caption>
+            <EditSwitch
+              on={editor.on}
+              onChange={(on) => {
+                setSelection(null);
+                editor.setOn(on);
+              }}
+            />
+          </View>
+        ) : null}
+        {editor.on && !showSecond ? <EditingBar hint="Tap a line to type. Undo brings back what was heard." onDone={() => editor.setOn(false)} /> : null}
 
         {second !== null && showSecond ? (
           <>
@@ -383,6 +409,8 @@ export default function SessionScreen() {
                 onWord={onWord}
                 onSpeaker={canChange ? onSpeaker : undefined}
                 onSelectParagraph={canChange ? selectParagraph : undefined}
+                editing={canChange && editor.on ? lineEditing : undefined}
+                editOpen={editor.on && row.lines.some((line) => line.at === editor.open) ? editor.open : null}
               />
             ) : (
               <TimeMarkRow key={row.key} item={row} interactive canChange={canChange} />
@@ -447,7 +475,7 @@ export default function SessionScreen() {
         ) : null}
       </ScrollView>
 
-      {canChange && selected.picked !== null && !showSecond ? (
+      {canChange && selected.picked !== null && !showSecond && !editor.on ? (
         <SelectionBar
           text={selected.picked.text}
           single={selected.single}
@@ -655,6 +683,7 @@ const styles = StyleSheet.create({
   actions: { gap: 12 },
   content: { padding: 20, paddingBottom: 40, gap: 16 },
   studyHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  transcriptHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   litLine: { borderRadius: 10, paddingHorizontal: 6, marginHorizontal: -6 },
   lineText: { flex: 1, fontSize: 17, lineHeight: 25 },
   changed: { fontWeight: "700" },

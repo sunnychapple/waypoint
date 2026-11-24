@@ -1,5 +1,5 @@
 import { Fragment, memo } from "react";
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { AccessibilityInfo, Pressable, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import { speakerLabel, type LineMark } from "../../core/capture/marks.ts";
 import { isSelected, refKey, type Selection, type WordRef } from "../../core/capture/selection.ts";
 import type { TimelineLine } from "../../core/capture/timeline.ts";
@@ -31,6 +31,24 @@ export function paragraphSlice(
   return { marks: ownMarks, explained: ownExplained };
 }
 
+// Edit mode (T9): what tapping, typing, leaving and Undo do. The screen passes one object to every paragraph; the open line
+// goes in `editOpen` per paragraph, so a paragraph without it keeps the same props and is not redrawn.
+export type LineEditing = {
+  onOpen: (at: number) => void;
+  onType: (text: string) => void;
+  onBlur: (at: number) => void;
+  onUndo: (at: number) => void;
+};
+
+// The name shown before line `index`: its speaker, unless the line before has the same one (T6).
+function shownName(lines: TimelineLine[], marks: ReadonlyMap<number, LineMark>, index: number): string | null {
+  const line = lines[index];
+  const speaker = line === undefined ? null : (marks.get(line.at)?.speaker ?? null);
+  const previous = lines[index - 1];
+  const before = previous === undefined ? null : (marks.get(previous.at)?.speaker ?? null);
+  return speaker !== null && (index === 0 || speaker !== before) ? speakerLabel(speaker) : null;
+}
+
 // Whether a line holds part of the selection (by its start, which is what the selection's ends are compared with).
 function touchesLine(selection: Selection | null, line: TimelineLine): boolean {
   return selection !== null && selection.from.at <= line.at && line.at <= selection.to.at;
@@ -54,6 +72,8 @@ export const ParagraphRow = memo(function ParagraphRow({
   canChange = true,
   onSpeaker,
   onSelectParagraph,
+  editing,
+  editOpen = null,
 }: {
   at: number;
   lines: TimelineLine[];
@@ -68,6 +88,10 @@ export const ParagraphRow = memo(function ParagraphRow({
   canChange?: boolean | undefined;
   onSpeaker?: ((at: number) => void) | undefined;
   onSelectParagraph?: ((lines: TimelineLine[]) => void) | undefined;
+  // Edit mode (T9): present only while Edit is on for a person who can change the transcript.
+  editing?: LineEditing | undefined;
+  // The line open for typing, when it is in this paragraph (null otherwise).
+  editOpen?: number | null | undefined;
 }) {
   const colors = useColors();
   const time = <Text style={[styles.time, { color: onPlay ? colors.accent : colors.ink3 }]}>{formatOffset(at)}</Text>;
@@ -78,6 +102,24 @@ export const ParagraphRow = memo(function ParagraphRow({
   ) : (
     time
   );
+  if (editing !== undefined) {
+    return (
+      <View onLayout={onLayout} style={styles.paragraph}>
+        {timeRow}
+        {lines.map((line, index) => (
+          <EditableLine
+            key={line.key}
+            line={line}
+            named={shownName(lines, marks, index)}
+            mark={marks.get(line.at)}
+            open={editOpen === line.at}
+            editing={editing}
+            colors={colors}
+          />
+        ))}
+      </View>
+    );
+  }
   return (
     <View onLayout={onLayout} style={[styles.paragraph, lit ? [styles.lit, { backgroundColor: colors.accentSoft }] : null]}>
       {timeRow}
@@ -93,11 +135,7 @@ export const ParagraphRow = memo(function ParagraphRow({
       >
         {lines.map((line, index) => {
           const mark = marks.get(line.at);
-          const speaker = mark?.speaker ?? null;
-          const previous = lines[index - 1];
-          const before = previous === undefined ? null : (marks.get(previous.at)?.speaker ?? null);
-          const label = speaker !== null && (index === 0 || speaker !== before) ? speaker : null;
-          const named = label === null ? null : speakerLabel(label);
+          const named = shownName(lines, marks, index);
           return (
             <Fragment key={line.key}>
               {index > 0 ? " " : null}
@@ -126,6 +164,64 @@ export const ParagraphRow = memo(function ParagraphRow({
     </View>
   );
 });
+
+// One line in Edit mode (T9): tap it to type in it. A line with the person's words, or a hidden one, shows Undo, which brings
+// back what was heard. Only one line is open at a time; it is a field, with the cursor at its end.
+function EditableLine({
+  line,
+  named,
+  mark,
+  open,
+  editing,
+  colors,
+}: {
+  line: TimelineLine;
+  named: string | null;
+  mark: LineMark | undefined;
+  open: boolean;
+  editing: LineEditing;
+  colors: Colors;
+}) {
+  return (
+    <View style={styles.editLine}>
+      {open ? (
+        <TextInput
+          autoFocus
+          multiline
+          scrollEnabled={false}
+          submitBehavior="blurAndSubmit"
+          returnKeyType="done"
+          defaultValue={line.text}
+          onChangeText={editing.onType}
+          onBlur={() => editing.onBlur(line.at)}
+          accessibilityLabel={`Line at ${formatOffset(line.at)}`}
+          style={[styles.text, styles.input, { color: colors.ink, borderColor: colors.accent, backgroundColor: colors.surface }]}
+        />
+      ) : (
+        <Text
+          accessibilityRole="button"
+          accessibilityHint="Opens this line for typing"
+          onPress={() => editing.onOpen(line.at)}
+          style={[styles.text, { color: mark?.hidden === true ? colors.ink4 : colors.ink }]}
+        >
+          {named !== null ? <Text style={styles.speaker}>{`${named}: `}</Text> : null}
+          {line.text}
+        </Text>
+      )}
+      {!open && mark !== undefined && (mark.text !== null || mark.hidden) ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Undo. Brings back what was heard"
+          hitSlop={12}
+          onPress={() => editing.onUndo(line.at)}
+          style={styles.undo}
+        >
+          <Text style={[styles.undoText, { color: colors.accent }]}>{mark.text !== null ? "Edited · Undo" : "Undo"}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 // One line's words. Selected words are tinted, highlighted words are yellow, explained words are underlined, and a hidden
 // line (shown with Show hidden lines) is faint. Words are counted with wordsOf's split (selection.ts), so a position here
@@ -182,4 +278,8 @@ const styles = StyleSheet.create({
   text: { fontSize: 17, lineHeight: 26 },
   speaker: { fontWeight: "700" },
   explained: { textDecorationLine: "underline", textDecorationStyle: "dotted" },
+  editLine: { gap: 2 },
+  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4 },
+  undo: { alignSelf: "flex-start" },
+  undoText: { fontSize: 13, fontWeight: "600" },
 });
