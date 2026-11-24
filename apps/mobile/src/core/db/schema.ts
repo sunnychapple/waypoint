@@ -407,4 +407,53 @@ ALTER TABLE flags ADD COLUMN capture_id TEXT REFERENCES captures (id) ON DELETE 
 ALTER TABLE explanations ADD COLUMN capture_id TEXT REFERENCES captures (id) ON DELETE SET NULL;
 `,
   },
+  {
+    version: 11,
+    sql: `
+-- A transcript line the person changed (Next 1): their words (NULL shows what was heard), hidden, who said it, and
+-- highlighted words as [[first, last], ...] word positions. The heard line in segments is never changed. id is
+-- "<session id>:<t_start>", so two phones marking the same line write the same row.
+CREATE TABLE line_marks (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  t_start INTEGER NOT NULL CHECK (t_start >= 0),
+  text TEXT CHECK (text IS NULL OR length(text) <= 2000),
+  hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+  speaker TEXT CHECK (speaker IS NULL OR length(speaker) BETWEEN 1 AND 40),
+  highlights TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  UNIQUE (session_id, t_start)
+);
+
+-- A note the person typed, placed in the recording's timeline at t; quote holds the words it was made from, or ''.
+CREATE TABLE notes (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+  t INTEGER NOT NULL CHECK (t >= 0),
+  text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 2000),
+  quote TEXT NOT NULL DEFAULT '' CHECK (length(quote) <= 300),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX notes_session ON notes (session_id, t);
+
+CREATE TRIGGER sync_line_marks_insert AFTER INSERT ON line_marks WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('line_marks', new.id, 0, NULL);
+END;
+CREATE TRIGGER sync_line_marks_update AFTER UPDATE OF session_id, t_start, text, hidden, speaker, highlights, updated_at ON line_marks WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('line_marks', new.id, 0, NULL);
+END;
+CREATE TRIGGER sync_line_marks_delete AFTER DELETE ON line_marks WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('line_marks', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
+END;
+CREATE TRIGGER sync_notes_insert AFTER INSERT ON notes WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('notes', new.id, 0, NULL);
+END;
+CREATE TRIGGER sync_notes_update AFTER UPDATE OF session_id, t, text, quote ON notes WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('notes', new.id, 0, NULL);
+END;
+CREATE TRIGGER sync_notes_delete AFTER DELETE ON notes WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
+  INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('notes', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
+END;
+`,
+  },
 ];

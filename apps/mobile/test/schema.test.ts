@@ -178,4 +178,33 @@ describe("schema", () => {
     const hits = db.all<{ rowid: number }>("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'cafe'");
     expect(hits.map((h) => h.rowid)).toEqual([1]);
   });
+
+  it("creates line_marks, notes and notes_session (Next 1)", () => {
+    const names = db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')").map((r) => r.name);
+    expect(names).toEqual(expect.arrayContaining(["line_marks", "notes", "notes_session"]));
+  });
+
+  it("refuses a line mark with hidden = 2, and a second mark for the same line", () => {
+    addSpace();
+    addSession();
+    expect(() => db.run("INSERT INTO line_marks (id, session_id, t_start, hidden, updated_at) VALUES ('x1:0', 'x1', 0, 2, 1)")).toThrow();
+    db.run("INSERT INTO line_marks (id, session_id, t_start, updated_at) VALUES ('x1:0', 'x1', 0, 1)");
+    expect(() => db.run("INSERT INTO line_marks (id, session_id, t_start, updated_at) VALUES ('x1:0b', 'x1', 0, 1)")).toThrow();
+  });
+
+  it("refuses a note with empty text", () => {
+    addSpace();
+    addSession();
+    expect(() => db.run("INSERT INTO notes (id, session_id, t, text, created_at) VALUES ('n1', 'x1', 0, '', 1)")).toThrow();
+  });
+
+  it("deleting a session deletes its line marks and notes", () => {
+    addSpace();
+    addSession();
+    db.run("INSERT INTO line_marks (id, session_id, t_start, updated_at) VALUES ('x1:0', 'x1', 0, 1)");
+    db.run("INSERT INTO notes (id, session_id, t, text, created_at) VALUES ('n1', 'x1', 0, 'check', 1)");
+    db.run("DELETE FROM sessions WHERE id = 'x1'");
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM line_marks")?.n).toBe(0);
+    expect(db.get<{ n: number }>("SELECT count(*) AS n FROM notes")?.n).toBe(0);
+  });
 });

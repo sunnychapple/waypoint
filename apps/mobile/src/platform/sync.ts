@@ -93,7 +93,7 @@ export function isSpaceSynced(db: SqlDb, spaceId: string): boolean {
 function markExisting(db: SqlDb, spaceId: string): void {
   db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT 'spaces', id, 0, NULL FROM spaces WHERE id = ?", [spaceId]);
   db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT 'sessions', id, 0, NULL FROM sessions WHERE space_id = ?", [spaceId]);
-  for (const table of ["captures", "flags", "cards"]) {
+  for (const table of ["captures", "flags", "cards", "line_marks", "notes"]) {
     db.run(
       `INSERT INTO dirty (table_name, row_id, deleted, group_id) SELECT '${table}', x.id, 0, NULL FROM ${table} x JOIN sessions s ON s.id = x.session_id WHERE s.space_id = ?`,
       [spaceId],
