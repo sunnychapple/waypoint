@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { splitWords } from "./excerpt.ts";
+import { wordsOf } from "../capture/selection.ts";
+import { LINE_TEXT_MAX_CHARS } from "../capture/marks.ts";
 
 // S3: what the model thinks was said where the transcript wrote `heard`. `original` is the term in its own script when
 // that differs from `term`.
@@ -44,3 +47,32 @@ export function guessLabel(guess: TermGuess): string {
 export function guessSentence(guess: TermGuess): string {
   return `The transcript wrote "${guess.heard}". ${upper(guess.term)} is the ${upper(guess.language)} word for ${guess.meaning}.`;
 }
+
+// The line with its `index`-th word (counted as wordsOf counts, from 0) swapped for `term`, the punctuation around it kept.
+// Null when the line has no such word or that word is not `heard`.
+export function replaceWord(text: string, index: number, heard: string, term: string): string | null {
+  let seen = -1;
+  let out = "";
+  for (const token of splitWords(text)) {
+    if (token.word === null) {
+      out += token.text;
+      continue;
+    }
+    seen += 1;
+    if (seen !== index) {
+      out += token.text;
+      continue;
+    }
+    if (token.word !== heard) return null;
+    const start = token.text.indexOf(token.word);
+    out += token.text.slice(0, start) + term + token.text.slice(start + token.word.length);
+  }
+  return seen >= index ? out : null;
+}
+
+// Fix transcript swaps one word, so only a term of exactly one word (by the shared word count) can be fixed. A longer term
+// gets "Keep as said" only.
+export const isOneWordTerm = (term: string): boolean => wordsOf(term).length === 1;
+
+// A line as the transcript stores it (spaces collapsed, cut to LINE_TEXT_MAX_CHARS). A fix that would be cut is refused.
+export const lineFits = (text: string): boolean => text.replace(/\s+/g, " ").trim().length <= LINE_TEXT_MAX_CHARS;

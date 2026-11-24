@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
@@ -20,15 +20,18 @@ import { useLikelyTerm } from "./useLikelyTerm.ts";
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
 // recording or the session.
 export default function ExplainSheet() {
-  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; flagId?: string; explanationId?: string; page?: string }>();
+  const params = useLocalSearchParams<{ sessionId: string; t: string; word: string; index?: string; flagId?: string; explanationId?: string; page?: string }>();
   const t = Number(params.t);
   const timed = typeof params.t === "string" && params.t !== "" && Number.isFinite(t);
+  // The word's place in its line (S6), when it was tapped or picked alone.
+  const index = typeof params.index === "string" && /^\d+$/.test(params.index) ? Number(params.index) : undefined;
   return (
     <ExplainBody
       sessionId={params.sessionId}
       t={timed ? t : 0}
       timed={timed}
       word={params.word.slice(0, 100)}
+      index={index}
       flagId={typeof params.flagId === "string" && params.flagId !== "" ? params.flagId : undefined}
       explanationId={typeof params.explanationId === "string" && params.explanationId !== "" ? params.explanationId : undefined}
       pageId={typeof params.page === "string" && params.page !== "" ? params.page : undefined}
@@ -46,6 +49,7 @@ function ExplainBody({
   t,
   timed,
   word,
+  index,
   flagId,
   explanationId,
   pageId,
@@ -54,6 +58,7 @@ function ExplainBody({
   t: number;
   timed: boolean;
   word: string;
+  index?: number | undefined;
   flagId?: string | undefined;
   explanationId?: string | undefined;
   pageId?: string | undefined;
@@ -65,7 +70,7 @@ function ExplainBody({
   const model = useExplain(sessionId, t, word, flagId, explanationId, pageId);
   const [showSent, setShowSent] = useState(false);
   const { phase, explanation, unsavedItem, offerResearch, pageNumber, pageId: resolvedPageId } = model;
-  const likely = useLikelyTerm(sessionId, word, model.excerpt, timed && resolvedPageId === undefined);
+  const likely = useLikelyTerm(sessionId, t, word, index, model.excerpt, timed && resolvedPageId === undefined);
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
@@ -122,11 +127,20 @@ function ExplainBody({
             </Text>
             <Body>{guessSentence(likely.guess)}</Body>
             <Caption>A guess from this iPhone. It might be wrong.</Caption>
-            <SecondaryButton label="Keep as said" onPress={likely.keep} />
+            {likely.canFix ? (
+              <PrimaryButton
+                label="Fix transcript"
+                onPress={() => {
+                  if (!likely.fix()) Alert.alert("Couldn't fix this line", "The word isn't in it any more.");
+                }}
+              />
+            ) : null}
+            {likely.fixed ? <Caption>Fixed in the transcript. Open the word again to explain it.</Caption> : null}
+            {likely.fixed ? null : <SecondaryButton label="Keep as said" onPress={likely.keep} />}
           </View>
         ) : null}
 
-        {phase.kind === "idle" && !explained ? (
+        {phase.kind === "idle" && !explained && !likely.fixed ? (
           model.excerpt === "" ? (
             <Body>{contextCopy(resolvedPageId !== undefined, word.includes(" ")).missing}</Body>
           ) : model.stillComing ? (
@@ -191,7 +205,7 @@ function ExplainBody({
 
         {phase.kind === "idle" && explained ? (
           <View style={styles.block}>
-            {offerResearch ? (
+            {offerResearch && !likely.fixed ? (
               <SecondaryButton
                 label="Research the web"
                 icon="globe"
@@ -202,7 +216,7 @@ function ExplainBody({
               <>
                 {contextGone ? (
                   <Caption>The page this came from is gone, so it can't be explained further.</Caption>
-                ) : (
+                ) : likely.fixed ? null : (
                   <>
                     <SecondaryButton label={`More detail · ${cost("more_detail")}`} icon="text.append" onPress={() => void model.run("more_detail")} />
                     <SecondaryButton label={`Double-check · ${cost("double_check")}`} icon="checkmark.seal" onPress={() => void model.run("double_check")} />
