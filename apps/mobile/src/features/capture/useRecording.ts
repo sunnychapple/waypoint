@@ -206,7 +206,7 @@ export function useRecording(): RecordingModel {
         setSpaceName(created.spaceName);
         setPack(speech.pack);
         setPhase("recording");
-        await startRecording(created.session.id, created.continued?.from);
+        await startRecording(created.session.id, created.continued?.from, { title: created.session.title, place: created.spaceName });
         if (sessionRef.current?.id !== created.session.id) {
           // Discarded while the recorder was starting: the session is already gone, so only the microphone is left.
           stopRecording()

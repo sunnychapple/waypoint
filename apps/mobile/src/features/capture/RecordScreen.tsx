@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
+import { setRecordingLabel } from "../../../modules/waypoint-audio/index.ts";
 import { formatClock, formatOffset } from "../../core/format.ts";
 import { groupTimeline, PARAGRAPH_PAUSE_MS, type TimelineRow as Row } from "../../core/capture/timeline.ts";
 import { getSession } from "../../core/capture/sessions.ts";
@@ -139,7 +140,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     <View style={styles.transcriptArea}>
       <View style={styles.topRow}>
         <CircleButton label="Close" icon="chevron.down" onPress={onClose} />
-        <FolderPill sessionId={model.sessionId} fallback={model.spaceName} />
+        <FolderPill sessionId={model.sessionId} fallback={model.spaceName} title={model.title} />
         <View style={styles.spacer} />
       </View>
       <Title>{model.title}</Title>
@@ -252,12 +253,16 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
 }
 
 // Where this recording is being saved. Tapping it moves the recording; the microphone keeps running under the sheet.
-function FolderPill({ sessionId, fallback }: { sessionId: string | null; fallback: string }) {
+function FolderPill({ sessionId, fallback, title }: { sessionId: string | null; fallback: string; title: string }) {
   const colors = useColors();
   const name = useQuery((db) => {
     const session = sessionId === null ? null : getSession(db, sessionId);
     return session === null ? fallback : (getSpace(db, session.spaceId)?.name ?? fallback);
   }, `${sessionId ?? ""}|${fallback}`);
+  // The Lock Screen shows the folder too. The native side sends nothing when the words did not change.
+  useEffect(() => {
+    if (sessionId !== null) setRecordingLabel({ title, place: name });
+  }, [sessionId, title, name]);
   return (
     <Pressable
       accessibilityRole="button"

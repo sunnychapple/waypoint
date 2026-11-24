@@ -24,6 +24,7 @@ final class AudioRecorder {
   private static let alertDelay: TimeInterval = 3   // a pause shorter than this never shows an alert
   var onEvent: ((String, [String: Any]) -> Void)?
   weak var sink: AudioBufferSink?
+  private let lockScreen = LockScreenActivity()   // control
 
   private let control = DispatchQueue(label: "waypoint.audio.control")
   private let io = DispatchQueue(label: "waypoint.audio.io")
@@ -62,7 +63,9 @@ final class AudioRecorder {
     return micPermission()
   }
 
-  func start(sessionId: String, elapsedMs: Int64 = 0, firstIndex: Int = 0, priorRecordedMs: Int64 = 0) throws {
+  func start(
+    sessionId: String, elapsedMs: Int64 = 0, firstIndex: Int = 0, priorRecordedMs: Int64 = 0, title: String = "", place: String = ""
+  ) throws {
     try control.sync {
       guard self.sessionId == nil else { throw RecorderError.busy }
       guard AVAudioApplication.shared.recordPermission == .granted else { throw RecorderError.micDenied }
@@ -85,7 +88,13 @@ final class AudioRecorder {
       }
       addObservers()
       do { try startRun() } catch { finish(); throw error }
+      lockScreen.begin(title: title, place: place, recordedMs: priorRecordedMs)
     }
+  }
+
+  /// The recording's title or folder changed: the Lock Screen shows the new one.
+  func rename(title: String, place: String) {
+    control.async { self.lockScreen.rename(title: title, place: place) }
   }
 
   func pause(reason: String) throws {
@@ -304,6 +313,7 @@ final class AudioRecorder {
     retry = nil
     wantsResume = false
     clearAlert()
+    lockScreen.end()
     removeObservers()
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     io.sync { timeline = nil; ioSessionId = nil; file = nil }
@@ -367,6 +377,7 @@ final class AudioRecorder {
 
   private func emitState(_ state: String, reason: String, recordedMs: Double?) {
     let recorded = recordedMs ?? io.sync { Double(timeline?.recordedMs(now: Self.now()) ?? 0) }
+    if state != "idle" { lockScreen.show(paused: state == "paused", recordedMs: Int64(recorded)) }
     onEvent?("onState", ["sessionId": sessionId ?? "", "state": state, "reason": reason, "recordedMs": recorded])
   }
 

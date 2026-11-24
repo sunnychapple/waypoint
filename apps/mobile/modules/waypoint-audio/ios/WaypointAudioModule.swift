@@ -11,6 +11,7 @@ public class WaypointAudioModule: Module {
     Events("onState", "onPart", "onLevel", "onTranscript", "onSpeechError", "onSpeechPack")
 
     OnCreate {
+      LockScreenActivity.endLeftovers()
       self.recorder.onEvent = { [weak self] name, body in self?.sendEvent(name, body) }
       self.recorder.sink = self.transcriber
       self.transcriber.onEvent = { [weak self] name, body in self?.sendEvent(name, body) }
@@ -19,10 +20,13 @@ public class WaypointAudioModule: Module {
 
     AsyncFunction("getMicPermission") { () -> String in AudioRecorder.micPermission() }
     AsyncFunction("requestMicPermission") { () async -> String in await AudioRecorder.requestMicPermission() }
-    AsyncFunction("start") { (sessionId: String, elapsedMs: Double, firstIndex: Int, priorRecordedMs: Double) throws in
+    AsyncFunction("start") {
+      (sessionId: String, elapsedMs: Double, firstIndex: Int, priorRecordedMs: Double, title: String, place: String) throws in
       try self.recorder.start(
-        sessionId: sessionId, elapsedMs: Int64(elapsedMs), firstIndex: firstIndex, priorRecordedMs: Int64(priorRecordedMs))
+        sessionId: sessionId, elapsedMs: Int64(elapsedMs), firstIndex: firstIndex, priorRecordedMs: Int64(priorRecordedMs),
+        title: title, place: place)
     }
+    Function("setRecordingLabel") { (title: String, place: String) in self.recorder.rename(title: title, place: place) }
     AsyncFunction("pause") { () throws in try self.recorder.pause(reason: "user") }
     AsyncFunction("resume") { () throws in try self.recorder.resume() }
     AsyncFunction("stop") { () async throws -> Double in
