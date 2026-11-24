@@ -358,6 +358,8 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   const here = spaceOf(db, change.table, key);
   if (here !== null && here !== space) return "rejected";
   const row = { ...change.row };
+  // A line mark is keyed by its session and start time; a row whose id says otherwise is not one this app writes.
+  if (change.table === "line_marks" && row.id !== `${row.session_id}:${row.t_start}`) return "rejected";
   // A flag sent by an app version before capture_id keeps this iPhone's value rather than losing it.
   if (change.table === "flags" && !("capture_id" in row)) row.capture_id = db.get<{ capture_id: string | null }>("SELECT capture_id FROM flags WHERE id = ?", [key])?.capture_id ?? null;
   if ((change.table === "cards" || change.table === "flags") && typeof row.capture_id === "string") {

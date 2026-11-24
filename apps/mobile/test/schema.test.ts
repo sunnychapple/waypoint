@@ -192,6 +192,14 @@ describe("schema", () => {
     expect(() => db.run("INSERT INTO line_marks (id, session_id, t_start, updated_at) VALUES ('x1:0b', 'x1', 0, 1)")).toThrow();
   });
 
+  it("refuses line mark highlights that are not JSON, or longer than 20000 characters", () => {
+    addSpace();
+    addSession();
+    expect(() => db.run("INSERT INTO line_marks (id, session_id, t_start, highlights, updated_at) VALUES ('x1:0', 'x1', 0, '[1', 1)")).toThrow();
+    expect(() => db.run("INSERT INTO line_marks (id, session_id, t_start, highlights, updated_at) VALUES ('x1:0', 'x1', 0, ?, 1)", ["[" + "1,".repeat(10_000) + "1]"])).toThrow();
+    db.run("INSERT INTO line_marks (id, session_id, t_start, highlights, updated_at) VALUES ('x1:0', 'x1', 0, '[[0,1]]', 1)");
+  });
+
   it("refuses a note with empty text", () => {
     addSpace();
     addSession();

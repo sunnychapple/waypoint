@@ -793,6 +793,42 @@ describe("line marks and notes (Next 1)", () => {
     expect(again.some((c) => c.op === "upsert" && c.table === "notes")).toBe(true);
   });
 
+  it("a received mark is applied only when its id is its session and start time", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a");
+    const mark = one(changes, "upsert", "line_marks");
+    expect(applyChange(b.db, G, { ...mark, at: mark.at + 1, row: { ...mark.row, id: "other:0" } }, "dev_a")).toBe("rejected");
+    expect(count(b, "line_marks")).toBe(0);
+    expect(applyChange(b.db, G, mark, "dev_a")).toBe("applied");
+    expect(count(b, "line_marks")).toBe(1);
+  });
+
+  it("applying a received mark and its session queues nothing in dirty", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    markAndNote(a, s.id);
+    const changes = send(a);
+    expect(applyChange(b.db, G, one(changes, "upsert", "sessions"), "dev_a")).toBe("applied");
+    expect(applyChange(b.db, G, one(changes, "upsert", "line_marks"), "dev_a")).toBe("applied");
+    expect(count(b, "line_marks")).toBe(1);
+    expect(count(b, "dirty")).toBe(0);
+  });
+
+  it("a delete for a mark whose session is in another space is rejected and keeps the row", () => {
+    const b = device("b");
+    const other = createSpace(b.db, b.deps, "Chemistry");
+    const s = startRecordingSession(b.db, b.deps, other.id, true);
+    b.db.run("INSERT INTO line_marks (id, session_id, t_start, text, updated_at) VALUES (?, ?, 0, 'acid', 1)", [`${s.id}:0`, s.id]);
+    const deletion = SyncChangeSchema.parse({ v: 1, id: "chg_0123456789abcdef", at: 9_000, op: "delete", table: "line_marks", row_id: `${s.id}:0` });
+    expect(applyChange(b.db, G, deletion, "dev_a")).toBe("rejected");
+    expect(count(b, "line_marks")).toBe(1);
+  });
+
   it("a mark with hidden 3 is rejected and leaves nothing behind", () => {
     const a = device("a");
     const b = device("b");

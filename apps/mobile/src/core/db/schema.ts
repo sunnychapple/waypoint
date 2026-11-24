@@ -420,7 +420,7 @@ CREATE TABLE line_marks (
   text TEXT CHECK (text IS NULL OR length(text) <= 2000),
   hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
   speaker TEXT CHECK (speaker IS NULL OR length(speaker) BETWEEN 1 AND 40),
-  highlights TEXT NOT NULL DEFAULT '[]',
+  highlights TEXT NOT NULL DEFAULT '[]' CHECK (length(highlights) <= 20000) CHECK (json_valid(highlights)),
   updated_at INTEGER NOT NULL,
   UNIQUE (session_id, t_start)
 );

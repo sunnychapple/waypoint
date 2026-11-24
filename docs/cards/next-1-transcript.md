@@ -165,6 +165,18 @@ In `markExisting`, change the loop to `for (const table of ["captures", "flags",
 
 Checks: typecheck, test.
 
+### Review fixes
+
+- changes.ts: a received `line_marks` row is `"rejected"` unless `row.id === \`${row.session_id}:${row.t_start}\``. Test: a mismatched id is rejected and not stored; a matching one is applied.
+- schema.ts (migration 11, not released, so edited in place): `highlights` has `CHECK (length(highlights) <= 20000)` and `CHECK (json_valid(highlights))`. The test SQLite (node:sqlite, SQLite 3.53) and expo-sqlite both support `json_valid`. Test: invalid JSON, and an over-long value, throw.
+- Tests added: applying a received mark queues nothing in `dirty`; a delete for a mark whose session is in another space is `"rejected"` and keeps the row.
+
+Notes for later cards:
+
+- T2: a mark that is back to all defaults (text NULL, hidden 0, speaker NULL, highlights `[]`) is deleted, not kept as an empty row.
+- T2 and T4: parse `highlights` through the zod schema, with a fallback to `[]`.
+- T3: handle sessions that have only cloud segments. The marks key only appears on device lines.
+
 ---
 
 ## T2 · Line marks, notes, and the transcript as the person keeps it
