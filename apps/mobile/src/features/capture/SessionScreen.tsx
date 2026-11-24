@@ -86,7 +86,7 @@ export default function SessionScreen() {
   const [lit, setLit] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showHidden, setShowHidden] = useState(false);
-  // Edit (S13): the line texts as shown, for the editor to tell whether anything changed.
+  // Edit (S13): the line texts as shown, for the editor to tell whether anything changed. Set with the lines, below.
   const shownText = useRef(new Map<number, string>());
   const editor = useLineEditor(id, (at) => shownText.current.get(at) ?? null);
   // The same object for every paragraph, so memo keeps the paragraphs a keystroke or a tap does not touch.
@@ -116,9 +116,22 @@ export default function SessionScreen() {
   // The transcript as the person keeps it (Next 1): their words, highlights and names, with hidden lines left out unless
   // shown. Memoized: explainedWords rebuilds the word list on every call, so it runs only when the lines change.
   const marks = useMemo(() => new Map((data?.marks ?? []).map((mark) => [mark.tStart, mark] as const)), [data]);
-  const shown = useMemo(() => (data ? applyMarks(data.timeline, marks, showHidden) : []), [data, marks, showHidden]);
-  const lines = useMemo(() => shown.filter((item): item is TimelineLine => item.kind === "line"), [shown]);
-  shownText.current = new Map(lines.map((line) => [line.at, line.text] as const));
+  // Edit shows hidden lines too, so a line just cleared keeps its Undo on screen.
+  const shown = useMemo(() => (data ? applyMarks(data.timeline, marks, showHidden || editor.on) : []), [data, marks, showHidden, editor.on]);
+  const { lines, shownLines } = useMemo(() => {
+    const items = shown.filter((item): item is TimelineLine => item.kind === "line");
+    return { lines: items, shownLines: new Map(items.map((line) => [line.at, line.text] as const)) };
+  }, [shown]);
+  shownText.current = shownLines;
+  // The open line's shown text changed under it (a sync, or a hidden line shown or cleared): what was typed is saved first.
+  const openShown = editor.open === null ? null : (lines.find((line) => line.at === editor.open)?.text ?? null);
+  const { save: saveOpenLine } = editor;
+  useEffect(() => saveOpenLine(), [openShown, saveOpenLine]);
+  // Edit is for a transcript the person can change, and only for the recording's own transcript (not the better one).
+  const viewerRole = data?.role === "viewer";
+  useEffect(() => {
+    if (viewerRole || showSecond) editor.setOn(false);
+  }, [viewerRole, showSecond, editor.setOn]);
   const explanations = useMemo(() => data?.explanations ?? NO_EXPLANATIONS, [data]);
   const explained = useMemo(
     () => explainedWords(lines.map((line) => ({ at: line.at, text: line.text })), explanations),
@@ -331,7 +344,6 @@ export default function SessionScreen() {
                   accessibilityState={{ selected: active }}
                   onPress={() => {
                     setSelection(null);
-                    if (index === 1) editor.setOn(false);
                     setShowSecond(index === 1);
                   }}
                   style={[styles.switchItem, { backgroundColor: active ? colors.accentSoft : colors.surface2 }]}
@@ -371,7 +383,7 @@ export default function SessionScreen() {
             />
           </View>
         ) : null}
-        {editor.on && !showSecond ? <EditingBar hint="Tap a line to type. Undo brings back what was heard." onDone={() => editor.setOn(false)} /> : null}
+        {canChange && editor.on && !showSecond ? <EditingBar hint="Tap a line to type. Undo brings back what was heard." onDone={() => editor.setOn(false)} /> : null}
 
         {second !== null && showSecond ? (
           <>

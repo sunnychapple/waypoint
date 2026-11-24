@@ -2125,6 +2125,15 @@ function EditableLine({ line, mark, editing, colors }: { line: TimelineLine; mar
 
 No unit tests: `editLine` is tested in T2. Checks: typecheck, test, export:ios. By hand: turn Edit on, change a line, tap another line (the first one is saved), use Undo, and clear a line (it becomes hidden). Then search for the new word once the session is indexed again. A viewer has no Edit switch.
 
+### Review fixes
+
+- The app leaving the front (`AppState` not "active") saves the open line and keeps it open, with what was typed still in `typedRef`, so iOS closing the app loses nothing.
+- `editLine` clears an app-made summary (`staleSummary`) when a line's text or hidden state changes, in a transaction, as `setHidden` does. A typed summary stays. Tests in `test/marks.test.ts`.
+- Edit shows hidden lines (`applyMarks(..., showHidden || editor.on)`), so a just-cleared line keeps its Undo on screen.
+- Editable lines are at least 44 points tall; Undo's `hitSlop` is 16.
+- If the open line's shown text changes under it (a sync), the typed text is saved first. The TextInput is keyed by `line.at`.
+- Edit turns off when the role becomes viewer or the better transcript is shown. The EditingBar shows only when the person can change the transcript. `shownText` is set with the `lines` memo, and `undoLine` writes through the same try/catch as `save`.
+
 ---
 
 ## T10 · The Edit switch while recording

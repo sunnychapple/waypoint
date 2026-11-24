@@ -241,6 +241,21 @@ describe("hiding a line and the summary", () => {
     expect(db.get<{ summary: string | null }>("SELECT summary FROM sessions WHERE id = 's1'")?.summary).toBeNull();
   });
 
+  it("clearing a line or editing its words clears a summary the app made, but not one the person typed", () => {
+    const summary = () => db.get<{ summary: string | null }>("SELECT summary FROM sessions WHERE id = 's1'")?.summary;
+    db.run("UPDATE sessions SET summary = 'Cells divide and mitosis has phases.', summary_auto = 1 WHERE id = 's1'");
+    editLine(db, deps, "s1", 1000, "");
+    expect(summary()).toBeNull();
+    db.run("UPDATE sessions SET summary = 'Cells divide and mitosis has phases.', summary_auto = 1 WHERE id = 's1'");
+    editLine(db, deps, "s1", 2000, "Mitosis has four stages.");
+    expect(summary()).toBeNull();
+    db.run("UPDATE sessions SET summary = 'My own words.', summary_auto = 0 WHERE id = 's1'");
+    editLine(db, deps, "s1", 2000, "Mitosis has five stages.");
+    expect(summary()).toBe("My own words.");
+    editLine(db, deps, "s1", 1000, "");
+    expect(summary()).toBe("My own words.");
+  });
+
   it("hiding a line keeps a summary the person typed", () => {
     db.run("UPDATE sessions SET summary = 'My own words.', summary_auto = 0 WHERE id = 's1'");
     setHidden(db, deps, "s1", [2000], true);

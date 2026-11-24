@@ -186,6 +186,7 @@ function EditableLine({
     <View style={styles.editLine}>
       {open ? (
         <TextInput
+          key={line.at}
           autoFocus
           multiline
           scrollEnabled={false}
@@ -212,7 +213,7 @@ function EditableLine({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Undo. Brings back what was heard"
-          hitSlop={12}
+          hitSlop={16}
           onPress={() => editing.onUndo(line.at)}
           style={styles.undo}
         >
@@ -278,7 +279,7 @@ const styles = StyleSheet.create({
   text: { fontSize: 17, lineHeight: 26 },
   speaker: { fontWeight: "700" },
   explained: { textDecorationLine: "underline", textDecorationStyle: "dotted" },
-  editLine: { gap: 2 },
+  editLine: { gap: 2, minHeight: 44, justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4 },
   undo: { alignSelf: "flex-start" },
   undoText: { fontSize: 13, fontWeight: "600" },
