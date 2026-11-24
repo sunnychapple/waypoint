@@ -459,8 +459,10 @@ Known limits: no cloud backup (needs a new job type on the server, a separate de
 
 ### Review fixes
 
-- A run that the model could not start or finish is tried again, not kept as tried. `busy`, `failed`, `context_too_long` that survived halving, and a run that stopped (the app left the front, the recorder started, or the recorded length moved) release the session's key, and the same session runs again when the app returns to `active`. A `declined` or `unsupported_language` answer, or nothing usable, stays tried. One AppState listener, no timers.
+- A run that the model could not start or finish is tried again, not kept as tried. `busy`, `failed`, and a run that stopped (the app left the front, the recorder started, or the recorded length moved) release the session's key, and the same session runs again when the app returns to `active`. A `declined` or `unsupported_language` answer, or nothing usable, stays tried. One AppState listener, no timers.
 - `summarizeUnits` halves a chunk on `context_too_long` (the `halve` helper from `generate.ts`, now exported) and asks each half. A half that is still too long is skipped; the summary is made from the chunks that worked, and is null only when none did. Busy, declined and unsupported-language errors in a half are thrown, not skipped, so the run is retried or stays final as above.
+- A chunk still too long after halving is skipped, so that case is final, not retried.
+- Second round: pending retries are kept per session (one failing session no longer drops another's); a sign-out during a run counts as a stop; and after a summary is written the key is released, with `needsSummary` as the gate, so a summary cleared by hiding a line is made again in the same run of the app.
 - Before each model call and before `applySummary`, the run checks the recorder, the app's foreground state and the session's `recorded_ms`. When it says stop, nothing is written and the key is released.
 - `applySummary` writes the summary only when the summary is still empty, so one synced from another phone during generation is kept. The title rule is unchanged.
 - Hiding a line (`setHidden`) clears an app-made summary (`summary_auto = 1`) so it is made again without the hidden words. A typed summary stays.

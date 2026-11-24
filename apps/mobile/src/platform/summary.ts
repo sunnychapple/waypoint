@@ -1,20 +1,19 @@
 import { AppState } from "react-native";
 import { getRecorderStatus } from "../../modules/waypoint-audio/index.ts";
 import { getAvailability, getContextSize, summarize } from "../../modules/waypoint-model/index.ts";
-import { applySummary, summarizeUnits, type MadeSummary } from "../core/capture/summary.ts";
+import { applySummary, needsSummary, summarizeUnits, type MadeSummary } from "../core/capture/summary.ts";
 import { getSession } from "../core/capture/sessions.ts";
 import { studyUnits } from "../core/study/units.ts";
 import { dbGeneration, getDb, writeDbIf } from "./db.ts";
 
 // Tried in this run of the app, by notes, session and recorded length. Recording more makes a new key.
 const tried = new Set<string>();
-// The last run that stopped or failed for a reason that may pass: the app runs it again when it comes to the front.
-let retry: { sessionId: string; recordedMs: number } | null = null;
+// Runs that stopped or failed for a reason that may pass, by session: the app runs them again when it comes to the front.
+const retry = new Map<string, number>();
 
 AppState.addEventListener("change", (state) => {
-  if (state !== "active" || retry === null) return;
-  const { sessionId, recordedMs } = retry;
-  void summarizeSession(sessionId, recordedMs);
+  if (state !== "active") return;
+  for (const [sessionId, recordedMs] of [...retry]) void summarizeSession(sessionId, recordedMs);
 });
 
 // Thrown before a model call once the run should stop. Its code is not one of the final outcomes, so the key is released.
@@ -33,23 +32,37 @@ export async function summarizeSession(sessionId: string, recordedMs: number): P
   const generation = dbGeneration();
   const key = `${generation}\n${sessionId}\n${recordedMs}`;
   if (tried.has(key)) return;
+  // Nothing to make: already summarized (here or synced), or the person wrote their own.
+  try {
+    if (!needsSummary(getDb(), sessionId)) return;
+  } catch {
+    return;
+  }
   if (getAvailability() !== "available") return;
   // Only a recorder or a background that comes back can change the answer, so those runs are retried in the front.
   if (getRecorderStatus().state !== "idle" || AppState.currentState !== "active") {
-    retry = { sessionId, recordedMs };
+    retry.set(sessionId, recordedMs);
     return;
   }
   tried.add(key);
-  retry = null;
+  retry.delete(sessionId);
   const release = (): void => {
     tried.delete(key);
-    retry = { sessionId, recordedMs };
+    retry.set(sessionId, recordedMs);
   };
   // Stops when the recorder starts, the app leaves the front, or the session's recorded length moves on.
-  const shouldStop = (): boolean =>
-    getRecorderStatus().state !== "idle" ||
-    AppState.currentState !== "active" ||
-    getSession(getDb(), sessionId)?.recordedMs !== recordedMs;
+  // A throw (someone signed out) counts as a stop.
+  const shouldStop = (): boolean => {
+    try {
+      return (
+        getRecorderStatus().state !== "idle" ||
+        AppState.currentState !== "active" ||
+        getSession(getDb(), sessionId)?.recordedMs !== recordedMs
+      );
+    } catch {
+      return true;
+    }
+  };
   let made: MadeSummary | null;
   try {
     made = await summarizeUnits(
@@ -75,4 +88,6 @@ export async function summarizeSession(sessionId: string, recordedMs: number): P
     return;
   }
   writeDbIf(generation, (db) => applySummary(db, sessionId, made));
+  // Written: needsSummary is now the gate, so a summary cleared later (a hidden line) is made again in this run of the app.
+  tried.delete(key);
 }

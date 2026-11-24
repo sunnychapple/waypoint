@@ -102,7 +102,8 @@ describe("summarizeSession", () => {
     await summarizeSession(id, 60_000);
     await summarizeSession(id, 60_000);
     expect(state.summarize).toHaveBeenCalledTimes(1);
-    state.db.run("UPDATE sessions SET recorded_ms = 120000 WHERE id = ?", [id]);
+    // Recording more clears the app's summary (staleSummary), so it is made again for the new length.
+    state.db.run("UPDATE sessions SET recorded_ms = 120000, summary = NULL WHERE id = ?", [id]);
     await summarizeSession(id, 120_000);
     expect(state.summarize).toHaveBeenCalledTimes(2);
   });
@@ -113,6 +114,16 @@ describe("summarizeSession", () => {
     await expect(summarizeSession(id, 60_000)).resolves.toBeUndefined();
     expect(getSession(state.db, id)?.title).not.toBe("Cell parts");
     expect(getSummary(state.db, id)?.summary).toBeNull();
+  });
+
+  it("makes the summary again in the same run after a hidden line clears it", async () => {
+    const id = savedRecording(["Cells have parts", "Side comment"]);
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).not.toBeNull();
+    state.db.run("UPDATE sessions SET summary = NULL WHERE id = ?", [id]);
+    await summarizeSession(id, 60_000);
+    expect(state.summarize).toHaveBeenCalledTimes(2);
+    expect(getSummary(state.db, id)?.summary).not.toBeNull();
   });
 
   it("never sends a hidden line to the model", async () => {
