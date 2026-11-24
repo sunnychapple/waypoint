@@ -16,6 +16,8 @@ describe("classifyFailure", () => {
     expect(classifyFailure(api(200, "internal", "model failed"))).toEqual({ kind: "model_failed" });
     expect(classifyFailure(api(500, "internal", "config unavailable"))).toEqual({ kind: "failed" });
     expect(classifyFailure(api(400, "bad_request", "invalid request"))).toEqual({ kind: "failed" });
+    expect(classifyFailure(api(400, "bad_request", "job type not available"))).toEqual({ kind: "not_available" });
+    expect(classifyFailure(api(400, "bad_request", "fallback voice not available"))).toEqual({ kind: "failed" });
     expect(classifyFailure({ kind: "network" })).toEqual({ kind: "offline" });
     expect(classifyFailure({ kind: "not_registered" })).toEqual({ kind: "device" });
     expect(classifyFailure({ kind: "bad_reply" })).toEqual({ kind: "failed" });
@@ -25,7 +27,7 @@ describe("classifyFailure", () => {
 describe("keys and copy", () => {
   const all: CloudFailure[] = [
     { kind: "out_of_credits", shortfall: 1 }, { kind: "zero_retention" }, { kind: "model_failed" }, { kind: "already_finished" },
-    { kind: "busy" }, { kind: "offline" }, { kind: "device" }, { kind: "signed_out" }, { kind: "failed" },
+    { kind: "busy" }, { kind: "offline" }, { kind: "device" }, { kind: "signed_out" }, { kind: "not_available" }, { kind: "failed" },
   ];
   it("only a request that did not run keeps its key", () => {
     expect(all.filter(keepsKey).map((f) => f.kind)).toEqual(["out_of_credits", "busy", "offline", "device", "signed_out"]);
@@ -34,6 +36,7 @@ describe("keys and copy", () => {
     for (const f of all) expect(failureCopy(f).actions.length).toBeGreaterThan(0);
     expect(failureCopy({ kind: "out_of_credits", shortfall: 1 }).body).toBe("You need 1 more credit for this. Get credits, then try again.");
     expect(failureCopy({ kind: "model_failed" }).actions).toEqual(["try_again", "ask_later"]);
+    expect(failureCopy({ kind: "not_available" })).toEqual({ title: "Not available yet", body: "NotePath's cloud can't do this yet. Nothing was charged.", actions: ["close"] });
   });
 });
 

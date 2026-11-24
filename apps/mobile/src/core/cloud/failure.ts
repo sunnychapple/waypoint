@@ -15,6 +15,7 @@ export type CloudFailure =
   | { kind: "offline" }
   | { kind: "device" }
   | { kind: "signed_out" }
+  | { kind: "not_available" }
   | { kind: "failed" };
 
 export function classifyFailure(input: FailureInput): CloudFailure {
@@ -28,6 +29,9 @@ export function classifyFailure(input: FailureInput): CloudFailure {
   if (status === 409 && message === "request already finished") return { kind: "already_finished" };
   if (status === 409 || status === 429) return { kind: "busy" };
   if (status === 200 || message === "model unavailable") return { kind: "model_failed" }; // 200: an "error" event in the stream
+  // The server does not know this job type: it is older than the app (for example problem_help before it is deployed).
+  // Trying again can't help. Any other 400 is a generic failure.
+  if (status === 400 && message === "job type not available") return { kind: "not_available" };
   return { kind: "failed" };
 }
 
@@ -76,6 +80,8 @@ export function failureCopy(failure: CloudFailure, context: CopyContext = "expla
       return { title: "Approve this iPhone", body: "Approve it from your other iPhone or iPad before it can use credits.", actions: ["approve_device"] };
     case "signed_out":
       return { title: "Sign in again", body: "Your sign-in has ended. Sign in again to use the cloud.", actions: ["close"], signIn: true };
+    case "not_available":
+      return { title: "Not available yet", body: "NotePath's cloud can't do this yet. Nothing was charged.", actions: ["close"] };
     case "failed":
       return { title: "Something went wrong", body: "Try again in a moment.", actions: ["try_again"] };
   }

@@ -1005,11 +1005,19 @@ describe("cloudHelpDraft", () => {
 
 From `apps/mobile`: `npm run typecheck`, `npm test`. Not needed: `npm run test:swift`, `npm run export:ios` (no screen changes).
 
+### Review fixes
+
+- `cloud/failure.ts`: a 400 maps to "Not available yet" only when the message is "job type not available". A 400 "invalid request" is the generic "Something went wrong" failure again. `test/failure.test.ts` updated.
+- Migration 12 (`db/schema.ts`, unreleased, edited in place): `help_answers.capture_id` is `ON DELETE CASCADE` instead of `SET NULL`. Deleting a page deletes the help answer made from it. Test added in `test/cloud-help.test.ts`.
+- `study/cloudHelp.ts` `saveCloudHelp`: when the job's session or its page no longer exists, it inserts nothing and returns without throwing. It used to keep the answer with no page. Tests updated and added in `test/cloud-help.test.ts`.
+
 ---
 
 ## P3 · "Help with the cloud" on the help screens
 
-Branch `feat/p3-cloud-help-screens`. From `origin/main` **after P2 is merged**. Files, and no others:
+Branch `feat/p3-cloud-help-screens`. From `origin/main` **after P2 is merged**. P3 must register `RESULT_SAVERS.problem_help` and a `RESULT_ROUTES` entry; without them a finished problem_help job has no saver or route.
+
+Files, and no others:
 
 - `src/features/study/StepByStep.tsx` (new)
 - `src/features/study/HelpStepsScreen.tsx`
