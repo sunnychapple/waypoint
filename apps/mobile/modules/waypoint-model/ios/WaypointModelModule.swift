@@ -97,12 +97,7 @@ public class WaypointModelModule: Module {
     // A background suggestion. It yields to every other request: those cancel it first (see runAfterTerm).
     AsyncFunction("likelyTerm") { (word: String, context: String) async throws -> [String: Any] in
       await self.stopLikelyTerm()
-      self.markTermStarted()
-      let task = Task { () async throws -> [String: Any] in
-        defer { self.markTermEnded() }
-        return try await self.runTerm(word: word, context: context)
-      }
-      self.setTermTask(task)
+      let task = self.startTermTask(word: word, context: context)
       return try await task.value
     }
 
@@ -166,6 +161,8 @@ public class WaypointModelModule: Module {
       if Task.isCancelled { return [:] }
       return ["misheard": guess.misheard, "term": guess.term, "original": guess.original, "language": guess.language, "meaning": guess.meaning]
     } catch {
+      // A cancelled suggestion is "no guess", whatever error the model threw while it was stopped.
+      if Task.isCancelled { return [:] }
       throw Exception(name: "Model", description: String(describing: error), code: modelErrorCode(error))
     }
   }
@@ -176,22 +173,24 @@ public class WaypointModelModule: Module {
     return termTask
   }
 
-  private func setTermTask(_ task: Task<[String: Any], Error>) {
+  // The count and the stored Task are set under one lock acquisition. A stop that runs next therefore never sees an
+  // active suggestion without its Task to cancel, which would leave it waiting on a count that nothing lowers.
+  private func startTermTask(word: String, context: String) -> Task<[String: Any], Error> {
     lock.lock()
     defer { lock.unlock() }
+    termActive += 1
+    let task = Task { () async throws -> [String: Any] in
+      defer { self.markTermEnded() }
+      return try await self.runTerm(word: word, context: context)
+    }
     termTask = task
+    return task
   }
 
   private func activeTerms() -> Int {
     lock.lock()
     defer { lock.unlock() }
     return termActive
-  }
-
-  private func markTermStarted() {
-    lock.lock()
-    defer { lock.unlock() }
-    termActive += 1
   }
 
   private func markTermEnded() {

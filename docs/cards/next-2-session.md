@@ -662,6 +662,7 @@ Known limits: Apple's small model will sometimes miss a term or suggest a wrong 
 - The hook cancels the suggestion when the sheet closes or the word changes, drops the previous word's guess at once, and drops a result that arrives while this iPhone records the session.
 - The word goes into the prompt with `"` replaced by `'` and line breaks removed.
 - The headline's accessibility label names the language and the original script, e.g. "Probably mochi, Japanese, written もち", leaving out what is null. The original script sits between Unicode isolates wherever it is placed in other text. A caption under the suggestion says "A guess from this iPhone. It might be wrong."
+- A cancel during generation resolves as no suggestion, not a failure: the Task's catch returns an empty object when it is cancelled. The Task and its active count are created and stored under one lock acquisition, so a stop that follows always finds the Task to cancel.
 
 ---
 

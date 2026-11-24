@@ -78,6 +78,7 @@ const matchKey = (word: string): string => word.replace(EDGE, "").toLowerCase();
 // Case and punctuation are ignored. Not found (the line was changed) means not marked. Returns refKey → explanation id.
 // Callers must memoize the result on [lines, explanations]: each call rebuilds the word list.
 export function explainedWords(lines: { at: number; text: string }[], explanations: { id: string; t: number; term: string }[]): Map<string, string> {
+  if (explanations.length === 0) return new Map();
   const words: { ref: WordRef; key: string }[] = [];
   // Line start → position in words of that line's first word. A line with no words has no entry.
   const firstWordOf = new Map<number, number>();
