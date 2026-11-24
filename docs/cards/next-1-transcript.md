@@ -572,6 +572,12 @@ Insert `line_marks` rows with SQL in each test (id `${session}:${t}`, `updated_a
 
 Checks: typecheck, test.
 
+### Review fixes
+
+- `nameRecording` takes its first words from `studyLines` (first five lines), so a hidden line never becomes the title, which share links carry. Test: `recording-titles.test.ts`.
+- `partUpdate`, the branch that keeps every line because a line has a mark: new pieces that overlap a changed line by more than 25% of their length are dropped, so the second pass does not repeat words still in an edited line. Unmarked overlap rules are unchanged. Test: `transcript.test.ts`.
+- Accepted limit: marks from another phone that arrive after this phone has replaced the part point at old line times and are not shown. The replacement does not keep the old lines, so their marks have no line to attach to.
+
 ---
 
 ## T4 · Selecting words, and which words were explained
