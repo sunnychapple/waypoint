@@ -109,12 +109,12 @@ export function sessionsInSpace(db: SqlDb, spaceId: string): SessionSummary[] {
     .map(toSummary);
 }
 
-// The title is trimmed and must be 1 to 80 characters.
+// The title is trimmed and must be 1 to 80 characters. A renamed title is the person's: the app never replaces it (title_auto 0).
 export function renameSession(db: SqlDb, id: string, title: string): void {
   const trimmed = title.trim();
   const length = [...trimmed].length;
   if (length < 1 || length > 80) throw new RangeError("title must be 1 to 80 characters");
-  db.run("UPDATE sessions SET title = ? WHERE id = ?", [trimmed, id]);
+  db.run("UPDATE sessions SET title = ?, title_auto = 0 WHERE id = ?", [trimmed, id]);
 }
 
 // Moves a session and marks the new space as used now. Both changes happen in one transaction.

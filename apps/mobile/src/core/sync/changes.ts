@@ -12,7 +12,7 @@ type ChildTable = Exclude<SyncTable, "spaces">;
 // the search index). A capture's file is shared as a locked blob on paid plans (blob_id), never as a path.
 export const SYNC_COLUMNS: Record<SyncTable, readonly string[]> = {
   spaces: ["id", "name", "created_at"],
-  sessions: ["id", "space_id", "kind", "title", "state", "transcript", "started_at", "ended_at", "recorded_ms"],
+  sessions: ["id", "space_id", "kind", "title", "state", "transcript", "started_at", "ended_at", "recorded_ms", "title_auto", "summary", "summary_auto"],
   captures: ["id", "session_id", "kind", "t", "position", "duration_ms", "found_text", "found_lines", "blob_id"],
   flags: ["id", "session_id", "t", "question", "state", "capture_id"],
   cards: ["id", "session_id", "kind", "front", "back", "capture_id", "t", "made_by", "created_at", "due_at", "fsrs"],
@@ -315,7 +315,7 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     // A note started before this member joined "from now" (open question 56) is not theirs to see.
     if (here === null && typeof change.row.started_at === "number" && change.row.started_at < historyFrom(db, groupId) - HISTORY_FROM_SLACK_MS) return "older";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
-    upsertRow(db, "sessions", { ...change.row, space_id: space });
+    upsertRow(db, "sessions", { ...withSessionDefaults(db, key, change.row), space_id: space });
     retryPending(db, groupId, space, key);
     return "applied";
   }
@@ -387,6 +387,22 @@ function upsertRow(db: SqlDb, table: ChildTable, source: Record<string, string |
     .map((c) => `${c} = excluded.${c}`)
     .join(", ");
   db.run(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) ON CONFLICT (id) DO UPDATE SET ${updates}`, values);
+}
+
+// A session sent by an app version before migration 13 has no title_auto, summary or summary_auto: this iPhone's values
+// stay. A title that changed on that phone was typed by a person, so it is no longer the app's.
+function withSessionDefaults(db: SqlDb, id: string, row: Record<string, string | number | null>): Record<string, string | number | null> {
+  if ("title_auto" in row && "summary" in row && "summary_auto" in row) return row;
+  const here = db.get<{ title: string; title_auto: number; summary: string | null; summary_auto: number }>(
+    "SELECT title, title_auto, summary, summary_auto FROM sessions WHERE id = ?",
+    [id],
+  );
+  return {
+    ...row,
+    title_auto: "title_auto" in row ? (row.title_auto ?? 0) : here !== null && here.title === row.title ? here.title_auto : 0,
+    summary: "summary" in row ? (row.summary ?? null) : (here?.summary ?? null),
+    summary_auto: "summary_auto" in row ? (row.summary_auto ?? 1) : (here?.summary_auto ?? 1),
+  };
 }
 
 // Keeps the newest waiting version of a row; nothing is marked seen, so it is compared again when it is applied.

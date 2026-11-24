@@ -3,6 +3,7 @@ import { shortDay } from "../src/core/format.ts";
 import { DEFAULT_RECORDING_TITLE, nameRecording, recordingTitle, startRecordingSession } from "../src/core/capture/recording.ts";
 import { createSession, getSession, renameSession } from "../src/core/capture/sessions.ts";
 import { setHidden } from "../src/core/capture/marks.ts";
+import { getSummary } from "../src/core/capture/summary.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
@@ -59,6 +60,7 @@ describe("nameRecording", () => {
     addSegment(session.id, 4000, "Cells have membranes");
     nameRecording(db, session.id);
     expect(getSession(db, session.id)?.title).toBe("Welcome to biology Cells have membranes");
+    expect(getSummary(db, session.id)?.titleAuto).toBe(true);
   });
 
   it("uses the date and time when nothing was transcribed", () => {
@@ -84,6 +86,7 @@ describe("nameRecording", () => {
     renameSession(db, session.id, "Bio class");
     nameRecording(db, session.id);
     expect(getSession(db, session.id)?.title).toBe("Bio class");
+    expect(getSummary(db, session.id)?.titleAuto).toBe(false);
   });
 
   it("leaves a session that is not on the default title alone even without words", () => {

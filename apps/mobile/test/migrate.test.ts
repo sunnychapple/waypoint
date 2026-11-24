@@ -7,11 +7,11 @@ const version = (db: ReturnType<typeof createMemoryDb>) =>
   db.get<{ user_version: number }>("PRAGMA user_version")?.user_version;
 
 describe("migrate", () => {
-  it("a new database ends at version 12, and a second run changes nothing", () => {
+  it("a new database ends at version 13, and a second run changes nothing", () => {
     const db = createMemoryDb();
-    expect(migrate(db)).toBe(12);
-    expect(migrate(db)).toBe(12);
-    expect(version(db)).toBe(12);
+    expect(migrate(db)).toBe(13);
+    expect(migrate(db)).toBe(13);
+    expect(version(db)).toBe(13);
   });
 
   it("version 12 keeps every jobs and sent_log row and index, and accepts problem_help", () => {
@@ -26,7 +26,7 @@ describe("migrate", () => {
     db.run("INSERT INTO sent_log (id, task, session_id, sent, bytes, credits, retention, at) VALUES ('k1', 'practice', 'x1', '{}', 2, 8, 'standard', 3)");
     const jobs = db.all("SELECT * FROM jobs");
     const sent = db.all("SELECT * FROM sent_log");
-    expect(migrate(db)).toBe(12);
+    expect(migrate(db)).toBe(13);
     expect(db.all("SELECT * FROM jobs")).toEqual(jobs);
     expect(db.all("SELECT * FROM sent_log")).toEqual(sent);
     const indexes = db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('jobs', 'sent_log') AND sql IS NOT NULL ORDER BY name");

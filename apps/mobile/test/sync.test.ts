@@ -111,6 +111,9 @@ describe("collecting changes", () => {
     expect(one(send(a), "segments").rows).toEqual([]);
     a.db.run("UPDATE sessions SET indexed_at = 5");
     expect(send(a)).toEqual([]);
+    a.db.run("UPDATE sessions SET summary = 'S'");
+    const summary = one(send(a), "upsert", "sessions");
+    expect(summary.row).toMatchObject({ summary: "S", summary_auto: 1, title_auto: 0 });
   });
   it("a deleted session keeps its group; sent entries leave the outbox", () => {
     const a = device("a");
@@ -386,6 +389,25 @@ describe("applying changes", () => {
     expect(applyChange(b.db, G, { ...session, at: session.at + 5, row: { ...session.row, title: "Mitosis" } }, "dev_a")).toBe("applied");
     expect(title(b, s.id)).toBe("Mitosis");
     expect(applyChange(b.db, "grp_unknown_0000000", session, "dev_a")).toBe("rejected");
+  });
+  it("a summary and which title the app made travel with a session; a change without them keeps this phone's", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET summary = 'Kept', summary_auto = 0, title_auto = 1 WHERE id = ?", [s.id]);
+    // An app version before migration 13 sends no summary or title_auto: this phone keeps its own.
+    const without = (at: number, title: string) => {
+      const row = Object.fromEntries(Object.entries(session.row).filter(([k]) => k !== "title_auto" && k !== "summary" && k !== "summary_auto"));
+      return { ...session, at, row: { ...row, title } };
+    };
+    const kept = "SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?";
+    expect(applyChange(b.db, G, without(session.at + 5, "New recording"), "dev_a")).toBe("applied");
+    expect(b.db.get(kept, [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 1 });
+    expect(applyChange(b.db, G, without(session.at + 10, "Mitosis"), "dev_a")).toBe("applied");
+    expect(b.db.get(kept, [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 0 });
+    expect(title(b, s.id)).toBe("Mitosis");
   });
   it("children that arrive before their session (or a card before its photo) wait, then land", () => {
     const a = device("a", { random: true });
