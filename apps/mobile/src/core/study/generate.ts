@@ -82,7 +82,7 @@ export function packUnits(units: Unit[], budgetTokens: number): Unit[][] {
 }
 
 // Splits a group in half: by unit when it has several, by sentence when it is one long unit.
-function halve(units: Unit[]): Unit[][] {
+export function halve(units: Unit[]): Unit[][] {
   if (units.length > 1) {
     const mid = Math.ceil(units.length / 2);
     return [units.slice(0, mid), units.slice(mid)];

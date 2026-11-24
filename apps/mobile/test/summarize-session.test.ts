@@ -7,9 +7,15 @@ const state = vi.hoisted(() => ({
   recorder: "idle",
   availability: "available",
   summarize: vi.fn(),
+  listeners: [] as ((s: string) => void)[],
 }));
 
-vi.mock("react-native", () => ({ AppState: { get currentState() { return state.appState; } } }));
+vi.mock("react-native", () => ({
+  AppState: {
+    get currentState() { return state.appState; },
+    addEventListener: (_event: string, listener: (s: string) => void) => { state.listeners.push(listener); return { remove() {} }; },
+  },
+}));
 vi.mock("../modules/waypoint-audio/index.ts", () => ({ getRecorderStatus: () => ({ sessionId: "", state: state.recorder, recordedMs: 0 }) }));
 vi.mock("../modules/waypoint-model/index.ts", () => ({
   getAvailability: () => state.availability,
@@ -55,7 +61,7 @@ describe("summarizeSession", () => {
   function savedRecording(lines: string[]): string {
     const session = startRecordingSession(state.db, deps, spaceId, true);
     lines.forEach((text, i) => saveSegment(state.db, session.id, { tStart: i * 1000, tEnd: i * 1000 + 900, text }));
-    state.db.run("UPDATE sessions SET state = 'saved', transcript = 'done', ended_at = ? WHERE id = ?", [startedAt + 60_000, session.id]);
+    state.db.run("UPDATE sessions SET state = 'saved', transcript = 'done', ended_at = ?, recorded_ms = 60000 WHERE id = ?", [startedAt + 60_000, session.id]);
     nameRecording(state.db, session.id);
     return session.id;
   }
@@ -96,6 +102,7 @@ describe("summarizeSession", () => {
     await summarizeSession(id, 60_000);
     await summarizeSession(id, 60_000);
     expect(state.summarize).toHaveBeenCalledTimes(1);
+    state.db.run("UPDATE sessions SET recorded_ms = 120000 WHERE id = ?", [id]);
     await summarizeSession(id, 120_000);
     expect(state.summarize).toHaveBeenCalledTimes(2);
   });
@@ -115,5 +122,49 @@ describe("summarizeSession", () => {
     const input = String(state.summarize.mock.calls[0]?.[0]);
     expect(input).toContain("Cells have parts");
     expect(input).not.toContain("Secret password");
+  });
+
+  it("runs again after a busy reject, and writes the summary on the retry", async () => {
+    const id = savedRecording(["Cells have parts"]);
+    state.summarize.mockRejectedValueOnce({ code: "busy" });
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).toBeNull();
+    await summarizeSession(id, 60_000);
+    expect(state.summarize).toHaveBeenCalledTimes(2);
+    expect(getSummary(state.db, id)?.summary).toBe("Cells have parts.");
+  });
+
+  it("runs again when the app comes back to the front after a run that stopped", async () => {
+    const id = savedRecording(["Cells have parts"]);
+    state.summarize.mockRejectedValueOnce({ code: "busy" });
+    await summarizeSession(id, 60_000);
+    for (const listener of state.listeners) listener("active");
+    await vi.waitFor(() => expect(getSummary(state.db, id)?.summary).toBe("Cells have parts."));
+    expect(state.summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("halves a chunk that is too long, and makes the summary from the halves that worked", async () => {
+    const id = savedRecording(["Alpha cells", "Beta organs"]);
+    state.summarize.mockImplementation(async (text: string) => {
+      if (text.includes("Alpha") && text.includes("Beta")) throw { code: "context_too_long" };
+      return { title: "Cell parts", summary: "Cells and organs." };
+    });
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).toBe("Cells and organs.");
+    expect(getSession(state.db, id)?.title).toBe("Cell parts");
+  });
+
+  it("writes nothing when the recorder becomes busy during the run, and releases the run", async () => {
+    const id = savedRecording(["Cells have parts"]);
+    state.summarize.mockImplementationOnce(async () => {
+      state.recorder = "recording";
+      return { title: "Cell parts", summary: "Cells have parts." };
+    });
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).toBeNull();
+    expect(getSession(state.db, id)?.title).not.toBe("Cell parts");
+    state.recorder = "idle";
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).toBe("Cells have parts.");
   });
 });

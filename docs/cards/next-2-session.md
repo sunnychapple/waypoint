@@ -457,6 +457,15 @@ Checks: `npm run typecheck`, `npm test`, `npm run export:ios`. The native change
 
 Known limits: no cloud backup (needs a new job type on the server, a separate decision). A long recording takes several model requests, about one per 2,500 tokens; Flashcards or Quiz started meanwhile can get "busy" from the model once. A summary is written only in the language Apple's model supports.
 
+### Review fixes
+
+- A run that the model could not start or finish is tried again, not kept as tried. `busy`, `failed`, `context_too_long` that survived halving, and a run that stopped (the app left the front, the recorder started, or the recorded length moved) release the session's key, and the same session runs again when the app returns to `active`. A `declined` or `unsupported_language` answer, or nothing usable, stays tried. One AppState listener, no timers.
+- `summarizeUnits` halves a chunk on `context_too_long` (the `halve` helper from `generate.ts`, now exported) and asks each half. A half that is still too long is skipped; the summary is made from the chunks that worked, and is null only when none did. Busy, declined and unsupported-language errors in a half are thrown, not skipped, so the run is retried or stays final as above.
+- Before each model call and before `applySummary`, the run checks the recorder, the app's foreground state and the session's `recorded_ms`. When it says stop, nothing is written and the key is released.
+- `applySummary` writes the summary only when the summary is still empty, so one synced from another phone during generation is kept. The title rule is unchanged.
+- Hiding a line (`setHidden`) clears an app-made summary (`summary_auto = 1`) so it is made again without the hidden words. A typed summary stays.
+- Known limit: an app-made title that is already shown keeps its words when a line is hidden. Only the summary is made again.
+
 ---
 
 ## S3 · Explain suggests the likely term

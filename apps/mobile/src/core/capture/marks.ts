@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SqlDb } from "../db/sql.ts";
+import { staleSummary } from "./summary.ts";
 import { wordsOf } from "./selection.ts";
 
 type Deps = { now: () => number };
@@ -132,7 +133,11 @@ export function setHidden(db: SqlDb, deps: Deps, sessionId: string, tStarts: num
       writeMark(db, deps, sessionId, next, false);
       changed = true;
     }
-    if (changed) db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);
+    if (changed) {
+      db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);
+      // The app's summary may have come from the hidden words: it is made again without them (a typed one stays).
+      staleSummary(db, sessionId);
+    }
   });
 }
 

@@ -233,3 +233,17 @@ describe("line marks", () => {
     expect(studyLines(db, "s1")).toEqual([{ tStart: 0, tEnd: 900, text: "Cells divide in two." }]);
   });
 });
+
+describe("hiding a line and the summary", () => {
+  it("hiding a line clears the summary the app made, so it is made again without the line", () => {
+    db.run("UPDATE sessions SET summary = 'Cells divide and mitosis has phases.', summary_auto = 1 WHERE id = 's1'");
+    setHidden(db, deps, "s1", [2000], true);
+    expect(db.get<{ summary: string | null }>("SELECT summary FROM sessions WHERE id = 's1'")?.summary).toBeNull();
+  });
+
+  it("hiding a line keeps a summary the person typed", () => {
+    db.run("UPDATE sessions SET summary = 'My own words.', summary_auto = 0 WHERE id = 's1'");
+    setHidden(db, deps, "s1", [2000], true);
+    expect(db.get<{ summary: string | null }>("SELECT summary FROM sessions WHERE id = 's1'")?.summary).toBe("My own words.");
+  });
+});
