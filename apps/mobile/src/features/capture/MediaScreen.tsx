@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { Alert, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Image, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { sessionLinks, sessionMedia, type MediaItem, type SessionLink } from "../../core/capture/media.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { formatOffset } from "../../core/format.ts";
-import { openableUrl } from "../../core/research/answer.ts";
-import { useQuery } from "../../platform/db.ts";
+import { useStableQuery } from "../../platform/db.ts";
 import { fileUri } from "../../platform/files.ts";
-import { BackButton, Caption, Row, Screen, Title } from "../../ui/kit.tsx";
+import { BackButton, Caption, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 
 type Filter = "all" | "photos" | "pages" | "links";
@@ -17,31 +17,37 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "pages", label: "Pages" },
   { key: "links", label: "Links" },
 ];
+const COLUMNS = 3;
+const GAP = 8;
+const PADDING = 20;
 
 // S9: everything from one session, like details in Messages. A photo or page goes back to its moment in the session; a link
 // opens in the browser only when tapped.
 export default function MediaScreen() {
   const colors = useColors();
+  const { width } = useWindowDimensions();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const data = useQuery((db) => ({ title: getSession(db, id)?.title ?? "", media: sessionMedia(db, id), links: sessionLinks(db, id) }), id);
+  // Stable: a write during a recording (a new line) does not redraw this grid unless the photos, pages or links change.
+  const data = useStableQuery((db) => ({ title: getSession(db, id)?.title ?? "", media: sessionMedia(db, id), links: sessionLinks(db, id) }), id);
   const [filter, setFilter] = useState<Filter>("all");
   const media = data.media.filter((item) => filter === "all" || (filter === "photos" ? item.kind === "photo" : filter === "pages" && item.kind === "page"));
   const links = filter === "all" || filter === "links" ? data.links : [];
+  // A fixed thumbnail size from the screen width: the grid never decodes a photo at full size.
+  const thumb = Math.floor((width - PADDING * 2 - GAP * (COLUMNS - 1)) / COLUMNS);
 
-  // Back to the session screen under this one, at the moment (see SessionScreen's t and page params).
-  function jump(where: { t: number | null; captureId: string | null; kind: "photo" | "page" | "link" }): void {
-    const query = where.kind === "page" && where.captureId !== null ? `page=${encodeURIComponent(where.captureId)}` : `t=${where.t ?? 0}`;
-    router.dismissTo(`/session/${encodeURIComponent(id)}?${query}`);
+  // Back to the session screen under this one, at the moment (see SessionScreen's t and page params). The changing n makes
+  // each jump new, so the same photo or page lands again.
+  function jump(item: MediaItem): void {
+    const query = item.kind === "page" ? `page=${encodeURIComponent(item.id)}` : `t=${item.t}`;
+    router.dismissTo(`/session/${encodeURIComponent(id)}?${query}&n=${Date.now()}`);
   }
 
   function open(link: SessionLink): void {
-    const url = openableUrl(link.url);
-    if (url === null) return;
-    Linking.openURL(url).catch(() => Alert.alert("Couldn't open that link"));
+    Linking.openURL(link.url).catch(() => Alert.alert("Couldn't open that link"));
   }
 
-  return (
-    <Screen>
+  const header = (
+    <View style={styles.header}>
       <View style={styles.topRow}>
         <BackButton />
       </View>
@@ -60,58 +66,75 @@ export default function MediaScreen() {
           </Pressable>
         ))}
       </View>
+      {media.length > 0 ? <Caption>Photos and pages</Caption> : null}
+    </View>
+  );
 
-      {media.length === 0 && links.length === 0 ? <Caption>Nothing here yet. Photos, pages and links from this session show up here.</Caption> : null}
-
-      {media.length > 0 ? (
-        <>
-          <Caption>Photos and pages</Caption>
-          <View style={styles.grid}>
-            {media.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${mediaLabel(item)}, go to this moment`}
-                onPress={() => jump({ t: item.t, captureId: item.id, kind: item.kind })}
-                style={styles.tile}
-              >
-                {item.file === "" ? (
-                  <View style={[styles.thumb, { backgroundColor: colors.surface2 }]} />
-                ) : (
-                  <Image source={{ uri: fileUri(item.file) }} resizeMode="cover" style={[styles.thumb, { backgroundColor: colors.surface2 }]} />
-                )}
-                <Text style={[styles.tileText, { color: colors.ink3 }]}>{mediaLabel(item)}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </>
+  const footer = (
+    <View style={styles.footer}>
+      {media.length === 0 && links.length === 0 ? (
+        <Caption>Nothing here yet. Photos, pages and links from this session show up here.</Caption>
       ) : null}
-
       {links.length > 0 ? (
         <>
           <Caption>Links</Caption>
           {links.map((link) => (
-            <Row
+            <Pressable
               key={link.url}
-              title={link.host}
-              {...(link.shown === link.host ? {} : { subtitle: link.shown })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${link.host} in the browser`}
               onPress={() => open(link)}
-              right={
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Go to ${whereLabel(link)}`}
-                  onPress={() => jump({ t: link.t, captureId: link.captureId, kind: link.page !== null ? "page" : "link" })}
-                  style={styles.when}
-                >
-                  <Text style={[styles.whenText, { color: colors.accent }]}>{whereLabel(link)}</Text>
-                </Pressable>
-              }
-            />
+              style={[styles.link, { backgroundColor: colors.surface, borderColor: colors.line }]}
+            >
+              <Text style={[styles.linkHost, { color: colors.ink }]} numberOfLines={1}>
+                {link.host}
+              </Text>
+              <Text style={[styles.linkWhere, { color: colors.ink3 }]}>{whereLabel(link)}</Text>
+            </Pressable>
           ))}
           <Caption>Links come from your pages and transcript. Nothing opens until you tap it.</Caption>
         </>
       ) : null}
-    </Screen>
+    </View>
+  );
+
+  return (
+    <SafeAreaView edges={["top"]} style={[styles.screen, { backgroundColor: colors.bg }]}>
+      <FlatList
+        data={media}
+        numColumns={COLUMNS}
+        keyExtractor={(item) => item.id}
+        columnWrapperStyle={{ gap: GAP }}
+        contentContainerStyle={styles.content}
+        ListHeaderComponent={header}
+        ListFooterComponent={footer}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={12}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item }) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${mediaLabel(item)}, go to this moment`}
+            onPress={() => jump(item)}
+            style={[styles.tile, { width: thumb }]}
+          >
+            {item.file === "" ? (
+              <View style={[styles.thumb, { width: thumb, height: thumb, backgroundColor: colors.surface2 }]} />
+            ) : (
+              <Image
+                source={{ uri: fileUri(item.file) }}
+                resizeMode="cover"
+                resizeMethod="resize"
+                style={[styles.thumb, { width: thumb, height: thumb, backgroundColor: colors.surface2 }]}
+              />
+            )}
+            <Text style={[styles.tileText, { color: colors.ink3 }]}>{mediaLabel(item)}</Text>
+          </Pressable>
+        )}
+        style={styles.list}
+      />
+    </SafeAreaView>
   );
 }
 
@@ -125,14 +148,29 @@ function whereLabel(link: SessionLink): string {
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  list: { flex: 1 },
+  content: { padding: PADDING, paddingBottom: 40, gap: GAP },
+  header: { gap: 16, paddingBottom: 8 },
+  footer: { gap: 12, paddingTop: 8 },
   topRow: { flexDirection: "row", justifyContent: "space-between" },
   filters: { flexDirection: "row", gap: 8 },
   filter: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   filterText: { fontSize: 15, fontWeight: "600" },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  tile: { width: "31%", gap: 4 },
-  thumb: { width: "100%", aspectRatio: 1, borderRadius: 10 },
+  tile: { gap: 4, marginBottom: GAP },
+  thumb: { borderRadius: 10 },
   tileText: { fontSize: 12, fontVariant: ["tabular-nums"] },
-  when: { minHeight: 44, minWidth: 44, alignItems: "flex-end", justifyContent: "center" },
-  whenText: { fontSize: 15, fontWeight: "600", fontVariant: ["tabular-nums"] },
+  link: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  linkHost: { flex: 1, fontSize: 16, fontWeight: "600" },
+  linkWhere: { fontSize: 15, fontVariant: ["tabular-nums"] },
 });

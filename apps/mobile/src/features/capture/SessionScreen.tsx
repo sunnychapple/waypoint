@@ -52,7 +52,7 @@ const NO_EXPLANATIONS: ExplainedTerm[] = [];
 // recording from there (open question 54).
 export default function SessionScreen() {
   const colors = useColors();
-  const { id, view, t, page: pageId } = useLocalSearchParams<{ id: string; view?: string; t?: string; page?: string }>();
+  const { id, view, t, page: pageId, n: jumpNonce } = useLocalSearchParams<{ id: string; view?: string; t?: string; page?: string; n?: string }>();
   const data = useQuery((db) => {
     const session = getSession(db, id);
     if (!session) return null;
@@ -150,7 +150,8 @@ export default function SessionScreen() {
   const moment = momentFromParam(t);
   // A search hit on a page lands on that page (its capture id); any other hit lands on its transcript line.
   const landPage = targetPageId(pages, pageId);
-  const jumpKey = `${id}|${t ?? ""}|${pageId ?? ""}`;
+  // A new n (from the Media panel) makes every jump a new one, even to the photo or page it already landed on.
+  const jumpKey = `${id}|${t ?? ""}|${pageId ?? ""}|${jumpNonce ?? ""}`;
   const targetKey =
     landPage ?? (moment === null || lines.length === 0 ? null : (lines[nearestSegmentIndex(lines.map((line) => line.at), moment)]?.key ?? null));
 

@@ -3,7 +3,8 @@ import { studyLines } from "./segments.ts";
 
 // A photo (from a recording, at time t) or a page (from a pages session, by number).
 export type MediaItem = { id: string; kind: "photo" | "page"; file: string; t: number; page: number | null };
-export type FoundLink = { url: string; shown: string; host: string };
+// url is the absolute http(s) address (new URL(...).href); host is what the row shows (new URL(...).hostname).
+export type FoundLink = { url: string; host: string };
 // Where a link was written: a transcript line or a photo (t), or a page (captureId and page).
 export type SessionLink = FoundLink & { t: number | null; captureId: string | null; page: number | null };
 
@@ -17,23 +18,58 @@ export function sessionMedia(db: SqlDb, sessionId: string): MediaItem[] {
   return [...pages, ...photos];
 }
 
-// A web address: with http:// or https://, or a name with dots ending in 2 to 24 lower-case letters (example.org,
-// www.example.org/lesson-12). Not part of a longer word or an email address.
-const LINK = /(?<![\p{L}\p{N}@._/-])(?:https?:\/\/[^\s<>"'“”‘’]+|(?:[\p{L}\p{N}-]+\.)+[a-z]{2,24}(?:\/[^\s<>"'“”‘’]*)?)(?![\p{L}\p{N}@])/gu;
-const TRAILING = /[.,;:!?)\]}'"”’]+$/;
+// A web address: text with an explicit http:// or https:// scheme (any letter case), or one starting with www. Nothing
+// else counts, so a file name such as index.html or main.py is not a link. Not part of a longer word, or an email address.
+const CANDIDATE = /(?<![\p{L}\p{N}@./_-])(?:https?:\/\/|www\.)[^\s<>"'“”‘’]+/giu;
+const MAX_LINK = 2000;
+const TRAILING_PUNCTUATION = ".,;:!?'\"。、…";
+const PAIRS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 
-// Every distinct web address in the text, in order, made openable (https:// added when it has no scheme).
+function count(text: string, char: string): number {
+  return text.split(char).length - 1;
+}
+
+// Drops trailing punctuation, and a closing bracket only when it has no opening one in the address (Wikipedia's Foo_(bar) keeps its ")").
+function trimCandidate(text: string): string {
+  let out = text;
+  for (;;) {
+    const last = out.slice(-1);
+    if (last === "") return out;
+    if (TRAILING_PUNCTUATION.includes(last)) {
+      out = out.slice(0, -1);
+      continue;
+    }
+    const opener = PAIRS[last];
+    if (opener !== undefined && count(out, last) > count(out, opener)) {
+      out = out.slice(0, -1);
+      continue;
+    }
+    return out;
+  }
+}
+
+// Every distinct web address in the text, in order, as an absolute http(s) URL (WHATWG href, so the scheme is lower-case and
+// the host is punycode) with the host name to show. An address over 2000 characters is not a link. Each address once: an
+// address that differs only by a trailing "/" or the case of its host is the same one.
 export function findLinks(text: string): FoundLink[] {
   const seen = new Set<string>();
   const out: FoundLink[] = [];
-  for (const match of text.matchAll(LINK)) {
-    const raw = match[0].replace(TRAILING, "");
-    if (raw === "") continue;
-    const url = /^https?:\/\//.test(raw) ? raw : `https://${raw}`;
-    if (seen.has(url)) continue;
-    seen.add(url);
-    const shown = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
-    out.push({ url, shown, host: (shown.split("/")[0] ?? shown).replace(/^www\./, "") });
+  for (const match of text.matchAll(CANDIDATE)) {
+    const raw = trimCandidate(match[0]);
+    if (raw.length > MAX_LINK) continue;
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    let url: URL;
+    try {
+      url = new URL(withScheme);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    if (url.hostname === "" || url.hostname.endsWith(".")) continue;
+    const key = url.href.replace(/\/$/, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ url: url.href, host: url.hostname });
   }
   return out;
 }
