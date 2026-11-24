@@ -280,7 +280,7 @@ function FolderPill({ sessionId, fallback, title }: { sessionId: string | null; 
 
 const TimelineRow = memo(
   function TimelineRow({ item, sessionId }: { item: Row; sessionId: string | null }) {
-    if (item.kind !== "paragraph") return <TimeMarkRow item={item} interactive={item.kind === "photo"} />;
+    if (item.kind !== "paragraph") return <TimeMarkRow item={item} interactive={item.kind === "photo"} canChange />;
     return (
       <ParagraphRow
         at={item.at}
@@ -296,6 +296,7 @@ const TimelineRow = memo(
     a.sessionId === b.sessionId &&
     (a.item === b.item ||
       (a.item.key === b.item.key &&
+        (a.item.kind !== "note" || b.item.kind !== "note" || a.item.text === b.item.text) &&
         (a.item.kind !== "paragraph" ||
           b.item.kind !== "paragraph" ||
           a.item.lines.map((line) => line.key).join() === b.item.lines.map((line) => line.key).join()))),
@@ -365,6 +366,7 @@ function Dock({ model }: { model: Model }) {
       <View style={styles.actions}>
         <ActionButton label="Photo" icon="camera.fill" onPress={model.photo} />
         <ActionButton label="Ask later" icon="questionmark.bubble" onPress={model.flag} />
+        <ActionButton label="Note" icon="note.text" onPress={model.note} />
       </View>
     </View>
   );

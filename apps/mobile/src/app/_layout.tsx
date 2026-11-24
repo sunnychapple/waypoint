@@ -68,6 +68,7 @@ function RootStack() {
         />
         <Stack.Screen name="speaker" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="second-transcript" options={{ presentation: "formSheet" }} />
+        <Stack.Screen name="note" options={{ presentation: "formSheet" }} />
         <Stack.Screen name="study/make" />
         <Stack.Screen name="study/review" />
         <Stack.Screen name="study/quiz" />

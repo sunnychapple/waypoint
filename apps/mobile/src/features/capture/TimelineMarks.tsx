@@ -14,10 +14,19 @@ export function flagLabel(at: number): string {
   return `Ask later at ${formatOffset(at)}, opens Questions for later`;
 }
 
-// A gap, flag or photo in a recording's timeline. The live recording screen and the saved session draw them the same way.
+// A gap, flag, photo or note in a recording's timeline. The live recording screen and the saved session draw them the same way.
 // A photo opens the full-screen viewer; a flag opens Questions for later.
 // Taps only work where `interactive` is set: the live recorder opens photos, but does not leave for Questions for later.
-export function TimeMarkRow({ item, interactive = false }: { item: Exclude<TimelineItem, { kind: "line" }>; interactive?: boolean }) {
+// A note opens for changing where `canChange` is set (not for a viewer of a shared space).
+export function TimeMarkRow({
+  item,
+  interactive = false,
+  canChange = false,
+}: {
+  item: Exclude<TimelineItem, { kind: "line" }>;
+  interactive?: boolean;
+  canChange?: boolean;
+}) {
   const colors = useColors();
   switch (item.kind) {
     case "gap":
@@ -58,6 +67,24 @@ export function TimeMarkRow({ item, interactive = false }: { item: Exclude<Timel
           </Pressable>
         </View>
       );
+    case "note":
+      return (
+        <View style={styles.line}>
+          <Text style={[styles.time, { color: colors.ink3 }]}>{formatOffset(item.at)}</Text>
+          <Pressable
+            disabled={!canChange}
+            accessibilityRole={canChange ? "button" : undefined}
+            accessibilityLabel={canChange ? `Your note: ${item.text}. Opens the note` : `Note: ${item.text}`}
+            onPress={() => router.push({ pathname: "/note", params: { id: item.id } })}
+            style={[styles.note, { backgroundColor: colors.surface2, borderLeftColor: colors.accent }]}
+          >
+            {item.quote !== "" ? (
+              <Text numberOfLines={2} style={[styles.quote, { color: colors.ink2 }]}>{`“${item.quote}”`}</Text>
+            ) : null}
+            <Text style={[styles.noteText, { color: colors.ink }]}>{item.text}</Text>
+          </Pressable>
+        </View>
+      );
   }
 }
 
@@ -68,4 +95,7 @@ const styles = StyleSheet.create({
   flagChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   flagText: { fontSize: 14, fontWeight: "600" },
   thumb: { width: 96, height: 72, borderRadius: 10 },
+  note: { flex: 1, padding: 10, borderRadius: 12, borderLeftWidth: 3, gap: 4 },
+  quote: { fontSize: 14, fontStyle: "italic" },
+  noteText: { fontSize: 16, lineHeight: 22 },
 });

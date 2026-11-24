@@ -2,7 +2,7 @@ import { randomUUID } from "expo-crypto";
 import { File, Paths } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 import { openDatabaseSync } from "expo-sqlite";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { migrate } from "../core/db/migrate.ts";
 import { ensureDefaultSpace } from "../core/db/spaces.ts";
 import type { SqlDb, SqlValue } from "../core/db/sql.ts";
@@ -248,6 +248,13 @@ export function useQuery<T>(read: (db: SqlDb) => T, key = ""): T {
     return cache.current.value;
   };
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+// useQuery for a value that is built again on every read. The same content keeps the same object, so a screen that gets
+// a write for every recorded line does not redraw for this. The value must survive JSON (arrays and plain objects).
+export function useStableQuery<T>(read: (db: SqlDb) => T, key = ""): T {
+  const json = useQuery((db) => JSON.stringify(read(db)), key);
+  return useMemo(() => JSON.parse(json) as T, [json]);
 }
 
 export function writeDb<T>(write: (db: SqlDb) => T): T {

@@ -40,9 +40,10 @@ import {
   type ContinuedRecording,
 } from "../../core/capture/recording.ts";
 import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.ts";
+import { notesForSession } from "../../core/capture/notes.ts";
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import { getSavingTo, getSpace } from "../../core/db/spaces.ts";
-import { writeDb } from "../../platform/db.ts";
+import { useStableQuery, writeDb } from "../../platform/db.ts";
 import { deleteFile, deleteSessionFiles } from "../../platform/files.ts";
 import { askForPush } from "../../platform/push.ts";
 
@@ -70,6 +71,7 @@ export type RecordingModel = {
   pause: () => void;
   resume: () => void;
   flag: () => void;
+  note: () => void;
   photo: () => void;
   stop: () => void;
   discard: () => void;
@@ -275,6 +277,9 @@ export function useRecording(): RecordingModel {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // The session's notes, read from SQLite: a note is written by its sheet, and can be changed there later.
+  const notes = useStableQuery((db) => (sessionRef.current === null ? [] : notesForSession(db, sessionRef.current.id)), sessionRef.current?.id ?? "");
+
   function attempt(promise: Promise<void>): void {
     promise.catch((error: unknown) => Alert.alert("Couldn't change the recording.", messageOf(error)));
   }
@@ -286,6 +291,14 @@ export function useRecording(): RecordingModel {
     writeDb((db) => addFlag(db, deps, current.id, t));
     setFlags((previous) => [...previous, t]);
     setToast({ t });
+  }
+
+  // Note (note 13): a sheet over the recording, at this moment in the timeline. The recording keeps running.
+  function note(): void {
+    const current = sessionRef.current;
+    if (!current) return;
+    const t = Date.now() - current.startedAt + clockOffsetRef.current;
+    router.push({ pathname: "/note", params: { sessionId: current.id, t: String(t) } });
   }
 
   // Photo for a board or a demonstration; Page in the camera opens the page scanner instead.
@@ -380,7 +393,7 @@ export function useRecording(): RecordingModel {
   }
 
   const clockMs = anchor.ms + (recorder === "recording" ? Math.max(0, now - anchor.at) : 0);
-  const timeline = useMemo(() => buildTimeline(live.finals, parts, resumes, flags, photos), [live.finals, parts, resumes, flags, photos]);
+  const timeline = useMemo(() => buildTimeline(live.finals, parts, resumes, flags, photos, notes), [live.finals, parts, resumes, flags, photos, notes]);
 
   let banner: Banner = null;
   if (pack === "unsupported") banner = { kind: "unsupported" };
@@ -408,6 +421,7 @@ export function useRecording(): RecordingModel {
       });
     },
     flag,
+    note,
     photo: () => void photo(),
     stop: () => void stop(),
     discard: () => void discard(),
