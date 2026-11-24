@@ -15,7 +15,9 @@ let packMissing = false;
 const doneHere = new Set<string>();
 // The session whose line is being typed in (Edit): its words are not rewritten while someone types in it.
 let editingSession: string | null = null;
-export function setEditingSession(id: string | null): void {
+// `owner`: when clearing, only clear if this session set it, so one screen closing never clears another's.
+export function setEditingSession(id: string | null, owner?: string): void {
+  if (id === null && owner !== undefined && editingSession !== owner) return;
   editingSession = id;
 }
 

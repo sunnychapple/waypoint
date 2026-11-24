@@ -6,17 +6,21 @@ import { getSession } from "../core/capture/sessions.ts";
 import { studyUnits } from "../core/study/units.ts";
 import type { Unit } from "../core/study/generate.ts";
 import { dbGeneration, getDb, writeDbIf } from "./db.ts";
-import { personWaiting } from "./modelTurn.ts";
+import { onModelFree, personWaiting } from "./modelTurn.ts";
 
 // Tried in this run of the app, by notes, session and recorded length. Recording more makes a new key.
 const tried = new Set<string>();
 // Runs that stopped or failed for a reason that may pass, by session: the app runs them again when it comes to the front.
 const retry = new Map<string, number>();
 
-AppState.addEventListener("change", (state) => {
-  if (state !== "active") return;
+function runRetries(): void {
   for (const [sessionId, recordedMs] of [...retry]) void summarizeSession(sessionId, recordedMs);
+}
+AppState.addEventListener("change", (state) => {
+  if (state === "active") runRetries();
 });
+// A summary that stopped for the person's own request runs again once that request ends.
+onModelFree(runRetries);
 
 // Thrown before a model call once the run should stop. Its code is not one of the final outcomes, so the key is released.
 const STOPPED = Object.assign(new Error("summary stopped"), { code: "stopped" });

@@ -157,11 +157,11 @@ describe("summarizeSession", () => {
     await summarizeSession(id, 60_000);
     expect(state.summarize).not.toHaveBeenCalled();
     expect(getSummary(state.db, id)?.summary).toBeNull();
+    // When the person's request ends, the stopped summary runs again by itself.
     finish();
     await person;
-    await summarizeSession(id, 60_000);
+    await vi.waitFor(() => expect(getSummary(state.db, id)?.summary).toBe("Cells have parts."));
     expect(state.summarize).toHaveBeenCalledOnce();
-    expect(getSummary(state.db, id)?.summary).toBe("Cells have parts.");
   });
 
   it("runs again after a busy reject, and writes the summary on the retry", async () => {

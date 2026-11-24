@@ -92,3 +92,9 @@ Check:
 ### Checks
 
 From `apps/mobile`, run `npm run typecheck`, `npm test` and `npm run export:ios`. If any Swift changed, also run `npm run test:swift` and the native compile.
+
+### Review fixes
+
+- A summary that stopped for the person's own request runs again as soon as that request ends (`onModelFree` in `modelTurn.ts`), not only on the next return to the front.
+- `asPerson` retries `busy` for up to 30 seconds, since one summary step can take a while on an older iPhone. Nothing waits unless the model answered busy.
+- The "editing this session" flag is cleared only by the screen that set it, so one screen closing never clears another's.

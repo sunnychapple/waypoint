@@ -20,7 +20,7 @@ describe("asPerson", () => {
   it("gives up after the deadline", async () => {
     const run = vi.fn().mockRejectedValue({ code: "busy" });
     const result = asPerson(run).catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(9_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await expect(result).resolves.toEqual({ code: "busy" });
     expect(run.mock.calls.length).toBeGreaterThan(1);
   });

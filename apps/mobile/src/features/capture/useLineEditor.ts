@@ -52,13 +52,14 @@ export function useLineEditor(sessionId: string | null, textOf: (at: number) => 
     openRef.current = at;
     typedRef.current = null;
     // While a line is open, the session's words are not rewritten under the person's typing (see tick).
-    setEditingSession(at === null ? null : sessionRef.current);
+    if (at === null) setEditingSession(null, sessionRef.current ?? undefined);
+    else setEditingSession(sessionRef.current);
     setOpen(at);
   }, []);
   // Leaving the screen with a line open keeps what was typed.
   useEffect(() => save, [save]);
   // Leaving the screen closes the line, so the session's words can be written again.
-  useEffect(() => () => setEditingSession(null), []);
+  useEffect(() => () => setEditingSession(null, sessionRef.current ?? undefined), []);
   // The app leaving the front (iOS may close it next) keeps what was typed.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
