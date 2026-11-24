@@ -15,6 +15,7 @@ import {
 } from "../src/core/capture/recording.ts";
 import { deleteSessionRow, getSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
+import { getSetting, setSetting } from "../src/core/db/settings.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import { createMemoryDb } from "./helpers/db.ts";
@@ -139,8 +140,35 @@ describe("recording", () => {
     savePart(db, deps(), live.id, { index: 0, startMs: 0, durationMs: 20_000, file: "live.m4a" });
 
     expect(pendingTranscriptions(db)).toEqual([
-      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
+      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }], elsewhere: false },
     ]);
+  });
+
+  it("pendingTranscriptions skips a waiting session whose only needed part is on another phone", () => {
+    const waiting = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, waiting.id, 9000, 0);
+    savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
+    expect(pendingTranscriptions(db)).toEqual([]);
+  });
+
+  it("pendingTranscriptions returns a session with one needed part here and one on another phone, with only the part here", () => {
+    const waiting = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, waiting.id, 9000, 0);
+    savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
+    savePart(db, deps(), waiting.id, { index: 1, startMs: 20_000, durationMs: 20_000, file: "p1.m4a" });
+    expect(pendingTranscriptions(db)).toEqual([
+      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }], elsewhere: true },
+    ]);
+  });
+
+  it("recoverSessions forgets this phone's marker for a session no longer recording, and keeps the one still recording", () => {
+    insertSession("closed", "interrupted", "waiting");
+    insertSession("active", "recording", "live");
+    setSetting(db, "recording_here:closed", "1");
+    setSetting(db, "recording_here:active", "1");
+    recoverSessions(db, { sessionId: "active", state: "recording" });
+    expect(getSetting(db, "recording_here:closed")).toBeNull();
+    expect(getSetting(db, "recording_here:active")).not.toBeNull();
   });
 
   it("pendingTranscriptions does not count cloud words as on-device words", () => {
@@ -148,7 +176,7 @@ describe("recording", () => {
     finishRecording(db, waiting.id, 9000, 0);
     savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "p0.m4a" });
     db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES (?, 0, 20000, 'cloud words', 'cloud')", [waiting.id]);
-    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }], elsewhere: false }]);
   });
 
   it("recoverSessions sets the length and end time from the saved audio parts", () => {
@@ -171,7 +199,7 @@ describe("recording", () => {
     insertSession("crashed", "recording", "live");
     savePart(db, deps(), "crashed", { index: 0, startMs: 0, durationMs: 20_000, file: "c0.m4a" });
     recoverSessions(db, { sessionId: "", state: "idle" });
-    expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: "crashed", parts: [{ file: "c0.m4a", startMs: 0, durationMs: 20_000 }], elsewhere: false }]);
   });
 
   it("leaves another member's recording in a shared space alone when this phone holds none of it", () => {

@@ -15,6 +15,11 @@ final class LiveTranscriber: AudioBufferSink {
   private var continuation: AsyncStream<AnalyzerInput>.Continuation? // lock
   private var results: Task<Void, Never>?           // lock: the running run's results loop
   private var finishing: Task<Void, Never>?         // lock: the last ended run, until its final words are sent
+  private var partialsOn = true                     // lock: in-progress words are sent only while someone can see them
+
+  func setPartialsEnabled(_ on: Bool) {
+    lock.withLock { partialsOn = on }
+  }
 
   /// Stores the locale and the analyzer format for it. A nil locale means no speech pack, so nothing runs live.
   func configure(locale: Locale?) async {
@@ -114,6 +119,7 @@ final class LiveTranscriber: AudioBufferSink {
   }
 
   private func emit(_ sessionId: String, _ runStartMs: Int64, _ text: AttributedString, _ range: CMTimeRange, _ isFinal: Bool) {
+    if !isFinal && !lock.withLock({ partialsOn }) { return }
     guard let piece = TranscriptPiece.make(
       text: String(text.characters),
       startSeconds: range.start.seconds,

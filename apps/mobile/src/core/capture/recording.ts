@@ -199,6 +199,11 @@ function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now:
 // another phone may still be recording, become interrupted and wait for transcription. Their length is what the saved
 // audio parts add up to, and they end where the last saved part ends. Returns their ids.
 export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }, now = Date.now()): string[] {
+  // A marker for a session that another phone has since closed would let this phone close that phone's next recording.
+  db.run(
+    `DELETE FROM settings WHERE key LIKE ? AND substr(key, ?) NOT IN (SELECT id FROM sessions WHERE state IN ('recording', 'paused'))`,
+    [`${RECORDING_HERE_PREFIX}%`, RECORDING_HERE_PREFIX.length + 1],
+  );
   const nativeActive = nativeStatus.state !== "idle";
   const ids = db
     .all<{ id: string; started_at: number }>("SELECT id, started_at FROM sessions WHERE state IN ('recording', 'paused')")
@@ -223,13 +228,16 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
 }
 
 // Waiting sessions that are saved or interrupted, each with the audio parts that have a hole in their on-device words.
+// A session is skipped only when every part that needs writing down is on another phone (file = ''): that phone writes
+// them down, and marking it failed here would sync "failed" back to it. Otherwise the parts here are written down, and
+// `elsewhere` says whether some still wait for another phone, so this one must not mark the session done.
 export function pendingTranscriptions(
   db: SqlDb,
-): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[] }[] {
+): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[]; elsewhere: boolean }[] {
   const sessions = db.all<{ id: string }>(
     "SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted') ORDER BY started_at",
   );
-  return sessions.map((session) => {
+  const result = sessions.map((session) => {
     const pairs = db
       .all<{ file: string; t: number; duration_ms: number | null }>(
         "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY t, position, id",
@@ -240,11 +248,16 @@ export function pendingTranscriptions(
       .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ? AND source = 'device'", [session.id])
       .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
     const needed = new Set(partsNeedingTranscription(pairs.map((p) => p.span), segments));
+    const parts = pairs.filter((p) => needed.has(p.span));
+    // Parts recorded on another phone have no file here; that phone writes them down.
+    const here = parts.filter((p) => p.file !== "");
+    const skip = parts.length > 0 && here.length === 0;
     return {
       sessionId: session.id,
-      parts: pairs
-        .filter((p) => needed.has(p.span))
-        .map((p) => ({ file: p.file, startMs: p.span.startMs, durationMs: p.span.durationMs })),
+      parts: here.map((p) => ({ file: p.file, startMs: p.span.startMs, durationMs: p.span.durationMs })),
+      skip,
+      elsewhere: here.length < parts.length,
     };
   });
+  return result.filter((session) => !session.skip).map(({ sessionId, parts, elsewhere }) => ({ sessionId, parts, elsewhere }));
 }
