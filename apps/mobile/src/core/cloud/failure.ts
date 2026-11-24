@@ -29,9 +29,9 @@ export function classifyFailure(input: FailureInput): CloudFailure {
   if (status === 409 && message === "request already finished") return { kind: "already_finished" };
   if (status === 409 || status === 429) return { kind: "busy" };
   if (status === 200 || message === "model unavailable") return { kind: "model_failed" }; // 200: an "error" event in the stream
-  // A request the app made correctly that the server does not understand: the server is older than the app (for
-  // example problem_help before it is deployed). Trying again can't help.
-  if (status === 400 && (message === "invalid request" || message === "job type not available")) return { kind: "not_available" };
+  // The server does not know this job type: it is older than the app (for example problem_help before it is deployed).
+  // Trying again can't help. Any other 400 is a generic failure.
+  if (status === 400 && message === "job type not available") return { kind: "not_available" };
   return { kind: "failed" };
 }
 

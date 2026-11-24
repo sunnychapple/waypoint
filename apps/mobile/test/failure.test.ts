@@ -15,7 +15,7 @@ describe("classifyFailure", () => {
     expect(classifyFailure(api(500, "internal", "model unavailable"))).toEqual({ kind: "model_failed" });
     expect(classifyFailure(api(200, "internal", "model failed"))).toEqual({ kind: "model_failed" });
     expect(classifyFailure(api(500, "internal", "config unavailable"))).toEqual({ kind: "failed" });
-    expect(classifyFailure(api(400, "bad_request", "invalid request"))).toEqual({ kind: "not_available" });
+    expect(classifyFailure(api(400, "bad_request", "invalid request"))).toEqual({ kind: "failed" });
     expect(classifyFailure(api(400, "bad_request", "job type not available"))).toEqual({ kind: "not_available" });
     expect(classifyFailure(api(400, "bad_request", "fallback voice not available"))).toEqual({ kind: "failed" });
     expect(classifyFailure({ kind: "network" })).toEqual({ kind: "offline" });

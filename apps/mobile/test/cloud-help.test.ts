@@ -67,10 +67,16 @@ describe("saving and reading cloud help", () => {
     expect(getCloudHelp(db, "job1")?.result).toEqual(UNREADABLE);
   });
 
-  it("keeps the answer without its page when the page is gone", () => {
+  it("saves nothing, and does not throw, when its page was deleted while the job ran", () => {
     const db = setup();
-    saveCloudHelp(db, job({ captureId: "gone", block: 0, problem: "Exercise 4." }), JSON.stringify(READABLE), 50);
-    expect(getCloudHelp(db, "job1")?.captureId).toBeNull();
+    expect(() => saveCloudHelp(db, job({ captureId: "gone", block: 0, problem: "Exercise 4." }), JSON.stringify(READABLE), 50)).not.toThrow();
+    expect(getCloudHelp(db, "job1")).toBeNull();
+  });
+
+  it("saves nothing, and does not throw, when its session was deleted while the job ran", () => {
+    const db = setup();
+    expect(() => saveCloudHelp(db, { id: "job1", sessionId: "gone", detail: JSON.stringify({ captureId: "p1", block: 0, problem: "Exercise 4." }) }, JSON.stringify(READABLE), 50)).not.toThrow();
+    expect(getCloudHelp(db, "job1")).toBeNull();
   });
 
   it("throws for a result that is not the contract, and saves nothing", () => {
@@ -84,6 +90,13 @@ describe("saving and reading cloud help", () => {
     const db = setup();
     saveCloudHelp(db, job({ captureId: "p1", block: 0, problem: "Exercise 4." }), JSON.stringify(READABLE), 50);
     db.run("DELETE FROM sessions WHERE id = 's1'");
+    expect(getCloudHelp(db, "job1")).toBeNull();
+  });
+
+  it("deleting the page deletes the answer made from it", () => {
+    const db = setup();
+    saveCloudHelp(db, job({ captureId: "p1", block: 0, problem: "Exercise 4." }), JSON.stringify(READABLE), 50);
+    db.run("DELETE FROM captures WHERE id = 'p1'");
     expect(getCloudHelp(db, "job1")).toBeNull();
   });
 });

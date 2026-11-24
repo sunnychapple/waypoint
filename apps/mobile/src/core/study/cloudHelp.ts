@@ -40,15 +40,18 @@ export type CloudHelp = { id: string; sessionId: string | null; captureId: strin
 type Row = { id: string; session_id: string | null; capture_id: string | null; problem: string; body: string; created_at: number };
 
 // The opened result of a problem_help job (RESULT_SAVERS). Throws when it is not the contract, so the job is marked unreadable.
+// Saves nothing, without throwing, when the job's session or its page was deleted while the job ran.
 export function saveCloudHelp(db: SqlDb, job: { id: string; sessionId: string | null; detail: string }, text: string, now: number): void {
   const result = ProblemHelpResultSchema.parse(JSON.parse(text));
   const where = helpWhere(job.detail);
-  // The page may have been deleted while the job ran: the answer is kept without it.
-  const page = where === null ? null : db.get<{ id: string }>("SELECT id FROM captures WHERE id = ?", [where.captureId]);
+  // The session or the page may have been deleted while the job ran. The answer is made from them, so it is not kept
+  // without them: nothing is inserted, and this returns without throwing.
+  if (job.sessionId !== null && db.get("SELECT id FROM sessions WHERE id = ?", [job.sessionId]) === null) return;
+  if (where !== null && db.get("SELECT id FROM captures WHERE id = ?", [where.captureId]) === null) return;
   db.run("INSERT OR REPLACE INTO help_answers (id, session_id, capture_id, problem, body, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
     job.id,
     job.sessionId,
-    page?.id ?? null,
+    where?.captureId ?? null,
     where?.problem ?? "",
     JSON.stringify(result),
     now,

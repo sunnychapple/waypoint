@@ -503,7 +503,7 @@ CREATE INDEX sent_log_at ON sent_log (at);
 CREATE TABLE help_answers (
   id TEXT PRIMARY KEY,
   session_id TEXT REFERENCES sessions (id) ON DELETE CASCADE,
-  capture_id TEXT REFERENCES captures (id) ON DELETE SET NULL,
+  capture_id TEXT REFERENCES captures (id) ON DELETE CASCADE,
   problem TEXT NOT NULL,
   body TEXT NOT NULL,
   created_at INTEGER NOT NULL
