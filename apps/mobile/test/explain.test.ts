@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { listSegments } from "../src/core/capture/segments.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
-import { addToThread, discardIfUnsaved, getExplanation, pageForTerm, startExplanation, type ThreadItem } from "../src/core/explain/explanations.ts";
+import {
+  addToThread,
+  discardIfUnsaved,
+  explainedInTranscript,
+  getExplanation,
+  pageForTerm,
+  startExplanation,
+  type ThreadItem,
+} from "../src/core/explain/explanations.ts";
 import { cleanWord, contextCopy, excerptAround, pageContext, splitWords, trimExcerpt } from "../src/core/explain/excerpt.ts";
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { failureCopy } from "../src/core/cloud/failure.ts";
@@ -307,5 +315,18 @@ describe("questions and saved answers from a page", () => {
     db.run("UPDATE explanations SET thread = ? WHERE id = ?", [JSON.stringify([{ kind: "explain", text: "Water.", at: 1, retention: "standard", sentId: "k" }]), page.id]);
     saveExplanation(db, d, page.id);
     expect(savedExplanations(db).map((e) => [e.term, e.captureId])).toEqual([["osmosis", third]]);
+  });
+});
+
+describe("explainedInTranscript", () => {
+  it("lists saved explanations of the session's transcript words only", () => {
+    const { db, deps } = setup();
+    const saved = startExplanation(db, deps, "s1", 12_000, "mitosis");
+    db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [saved.id]);
+    startExplanation(db, deps, "s1", 13_000, "unsaved");
+    db.run("INSERT INTO captures (id, session_id, kind, t, position, file) VALUES ('c1', 's1', 'page', 0, 0, 'p.jpg')");
+    const page = startExplanation(db, deps, "s1", 14_000, "page word", "c1");
+    db.run("UPDATE explanations SET saved = 1 WHERE id = ?", [page.id]);
+    expect(explainedInTranscript(db, "s1")).toEqual([{ id: saved.id, t: 12_000, term: "mitosis" }]);
   });
 });

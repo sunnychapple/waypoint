@@ -1,3 +1,4 @@
+import type { LineMark } from "./marks.ts";
 import type { Piece } from "./transcript.ts";
 
 export type TimelineItem =
@@ -59,4 +60,16 @@ export function groupTimeline(items: TimelineItem[]): TimelineRow[] {
     }
   }
   return rows;
+}
+
+// The lines as the person keeps them (Next 1): their words in place of what was heard, and hidden lines left out unless
+// showHidden. Gaps, flags, photos and notes pass through.
+export function applyMarks(items: TimelineItem[], marks: ReadonlyMap<number, LineMark>, showHidden: boolean): TimelineItem[] {
+  return items.flatMap((item): TimelineItem[] => {
+    if (item.kind !== "line") return [item];
+    const mark = marks.get(item.at);
+    if (mark === undefined) return [item];
+    if (mark.hidden && !showHidden) return [];
+    return [mark.text === null ? item : { ...item, text: mark.text }];
+  });
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SqlDb } from "../db/sql.ts";
+import { wordsOf } from "./selection.ts";
 
 type Deps = { now: () => number };
 
@@ -16,9 +17,6 @@ export type LineMark = { tStart: number; text: string | null; hidden: boolean; s
 export type LinePick = { at: number; from: number; to: number };
 
 const SpanSchema = z.tuple([z.number().int().min(0), z.number().int().min(0)]);
-
-// Words as selection counts them: whitespace-separated. selection.ts does not exist yet (T4), so this is the split for now.
-const wordsOf = (text: string): string[] => text.split(/\s+/).filter((w) => w !== "");
 
 // Spans stay sorted and merged: touching or overlapping spans become one.
 function mergeSpans(spans: Span[]): Span[] {

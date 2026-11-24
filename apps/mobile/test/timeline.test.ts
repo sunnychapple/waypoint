@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildTimeline, groupTimeline, type TimelineItem } from "../src/core/capture/timeline.ts";
+import type { LineMark } from "../src/core/capture/marks.ts";
+import { applyMarks, buildTimeline, groupTimeline, type TimelineItem } from "../src/core/capture/timeline.ts";
 
 const part = (index: number, startMs: number, durationMs: number) => ({ index, startMs, durationMs });
 
@@ -93,5 +94,38 @@ describe("groupTimeline", () => {
 
   it("gives an empty list for no items", () => {
     expect(groupTimeline([])).toEqual([]);
+  });
+});
+
+describe("applyMarks", () => {
+  const line = (at: number, text: string): TimelineItem => ({ kind: "line", key: `line-${at}`, at, end: at + 4_000, text });
+  const mark = (tStart: number, patch: Partial<LineMark>): [number, LineMark] => [
+    tStart,
+    { tStart, text: null, hidden: false, speaker: null, highlights: [], ...patch },
+  ];
+  const items: TimelineItem[] = [
+    line(0, "heard one"),
+    { kind: "gap", key: "gap-5000", at: 5_000, gapMs: 2_000 },
+    line(10_000, "heard two"),
+    { kind: "flag", key: "flag-0", at: 11_000 },
+    { kind: "photo", key: "photo-p1", at: 12_000, file: "p1.jpg" },
+    line(20_000, "heard three"),
+  ];
+
+  it("puts the edited words in place of what was heard", () => {
+    const out = applyMarks(items, new Map([mark(10_000, { text: "my words" })]), false);
+    expect(out[2]).toEqual({ kind: "line", key: "line-10000", at: 10_000, end: 14_000, text: "my words" });
+  });
+
+  it("leaves out a hidden line unless showHidden, and keeps the others", () => {
+    const marks = new Map([mark(10_000, { hidden: true })]);
+    expect(applyMarks(items, marks, false).map((i) => i.key)).not.toContain("line-10000");
+    expect(applyMarks(items, marks, true).map((i) => i.key)).toContain("line-10000");
+  });
+
+  it("passes gaps, flags and photos through, and returns lines without marks as they are", () => {
+    const out = applyMarks(items, new Map([mark(10_000, { hidden: true })]), false);
+    expect(out.map((i) => i.kind)).toEqual(["line", "gap", "flag", "photo", "line"]);
+    expect(out[0]).toBe(items[0]);
   });
 });
