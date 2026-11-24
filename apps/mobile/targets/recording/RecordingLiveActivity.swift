@@ -29,7 +29,7 @@ struct RecordingLiveActivity: Widget {
       } compactLeading: {
         Dot(state: context.state)
       } compactTrailing: {
-        Clock(state: context.state).font(.caption.monospacedDigit()).frame(maxWidth: 52)
+        Clock(state: context.state).font(.caption.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 52)
       } minimal: {
         Dot(state: context.state)
       }
@@ -60,7 +60,7 @@ private struct StatusLabel: View {
 
   var body: some View {
     HStack(spacing: 6) {
-      Dot(state: state)
+      Dot(state: state).accessibilityHidden(true)   // the label next to it says the same
       Text(state.paused ? "Paused" : "Recording").font(.headline)
     }
   }
@@ -84,7 +84,7 @@ private struct Clock: View {
   let state: RecordingActivityAttributes.ContentState
 
   var body: some View {
-    // The end of the range sets the widest time the text makes room for. iOS keeps an activity at most 12 hours.
+    // The end of the range sets the widest time the text makes room for. iOS ends an activity after 8 hours and may show it up to 4 hours more.
     Text(
       timerInterval: state.clockStart...state.clockStart.addingTimeInterval(24 * 3600),
       pauseTime: state.pausedAt,
