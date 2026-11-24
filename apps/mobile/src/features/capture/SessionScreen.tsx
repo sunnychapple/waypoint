@@ -230,7 +230,10 @@ export default function SessionScreen() {
       <ScrollView ref={scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.topRow}>
           <CircleButton label="Back" icon="chevron.left" onPress={() => router.back()} />
-          <CircleButton label="More" icon="ellipsis" onPress={openMenu} />
+          <View style={styles.topRight}>
+            <CircleButton label="Media" icon="photo.on.rectangle" onPress={() => router.push(`/media/${encodeURIComponent(id)}`)} />
+            <CircleButton label="More" icon="ellipsis" onPress={openMenu} />
+          </View>
         </View>
 
         <Caption>{spaceName}</Caption>
@@ -633,6 +636,7 @@ function CircleButton({ label, icon, onPress }: { label: string; icon: SFSymbol;
 
 const styles = StyleSheet.create({
   topRow: { flexDirection: "row", justifyContent: "space-between" },
+  topRight: { flexDirection: "row", gap: 8 },
   circle: {
     width: 44,
     height: 44,
