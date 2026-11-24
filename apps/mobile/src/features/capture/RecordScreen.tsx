@@ -285,8 +285,8 @@ const TimelineRow = memo(
       <ParagraphRow
         at={item.at}
         lines={item.lines}
-        onWord={(word, at) => {
-          if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(at), word } });
+        onWord={(ref, word) => {
+          if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(ref.at), word } });
         }}
       />
     );

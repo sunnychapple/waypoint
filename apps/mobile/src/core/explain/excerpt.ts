@@ -38,12 +38,14 @@ export function pageContext(db: SqlDb, sessionId: string, pageId: string): { num
 }
 
 // What the Explain sheet says is sent and what it says when there is nothing to send, for a recording line or a page.
-export function contextCopy(isPage: boolean): { sent: string; missing: string } {
+// A phrase (selected words) says "these words".
+export function contextCopy(isPage: boolean, phrase = false): { sent: string; missing: string } {
+  const what = phrase ? "these words" : "this word";
   return isPage
-    ? { sent: "NotePath sends this word and the text of this page, for this task only.", missing: "There isn't any text from this page to explain this word with." }
+    ? { sent: `NotePath sends ${what} and the text of this page, for this task only.`, missing: `There isn't any text from this page to explain ${what} with.` }
     : {
-        sent: "NotePath sends this word and about a minute of the transcript around it, for this task only.",
-        missing: "There isn't enough of the transcript around this word yet.",
+        sent: `NotePath sends ${what} and about a minute of the transcript around ${phrase ? "them" : "it"}, for this task only.`,
+        missing: `There isn't enough of the transcript around ${what} yet.`,
       };
 }
 
