@@ -1675,6 +1675,14 @@ In `ExplainSheet.tsx`, both calls become `contextCopy(resolvedPageId !== undefin
 
 Selection and marking logic is tested in T4. Checks: typecheck, test, export:ios. By hand: select a phrase across two paragraphs and Explain it. The answer is saved and underlined, and tapping it reopens the answer. Highlight, then Unhighlight. Hide two lines; they leave the transcript and "Show 2 hidden lines" appears. A viewer gets Explain only.
 
+### Review fixes
+
+- Redraw: the rows, and each paragraph's slice of the marks and explained words (`paragraphSlice`), are memoized on the data, and the handlers the rows get are stable (`modelRef` holds the latest selection model). `ParagraphRow` is `memo`, and each line's words are a memoized `LineWords`. A tap redraws only the paragraphs whose selection slice changed.
+- Stale selection: a selection whose words were hidden or removed by an edit or sync picks nothing (`liveSelection`). The screen clears it in an effect, and a tap starts a new selection rather than extending the stale one.
+- VoiceOver: "Select this paragraph" announces "Paragraph selected. Actions are at the bottom." The paragraph hint is "Tap a word to select it", or "Tap a word to explain it" for a viewer. A speaker's name is a button labelled "Speaker: <name>. Change speaker".
+- The selection bar's actions wrap, so large text sizes do not clip them.
+- Known limits: VoiceOver can select a paragraph, not single words. A viewer can still open a paid Explain from a word, as before T7 (owner decision pending).
+
 ---
 
 ## T8 · The selection bar while recording

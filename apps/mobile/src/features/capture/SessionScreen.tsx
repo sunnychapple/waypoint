@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -11,10 +11,13 @@ import { diffWords, partText, uploadParts, type DiffWord } from "../../core/capt
 import { isLiveSession } from "../../core/capture/recording.ts";
 import { notesForSession } from "../../core/capture/notes.ts";
 import { listSegments } from "../../core/capture/segments.ts";
-import { buildTimeline, groupTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
+import { applyMarks, buildTimeline, groupTimeline, type TimelineItem, type TimelineLine } from "../../core/capture/timeline.ts";
 import type { Piece } from "../../core/capture/transcript.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
+import { lineMarks } from "../../core/capture/marks.ts";
+import { explainedWords, paragraphSelection, type Selection, type WordRef } from "../../core/capture/selection.ts";
 import type { SqlDb } from "../../core/db/sql.ts";
+import { explainedInTranscript, type ExplainedTerm } from "../../core/explain/explanations.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { spaceGroups } from "../../core/groups/groups.ts";
 import { researchForSession } from "../../core/research/research.ts";
@@ -34,10 +37,15 @@ import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { PageTextEditor } from "./PageTextEditor.tsx";
-import { ParagraphRow } from "./ParagraphRow.tsx";
+import { ParagraphRow, paragraphSlice } from "./ParagraphRow.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 import { SummaryCard } from "./SummaryCard.tsx";
+import { SelectionBar } from "./SelectionBar.tsx";
+import { liveSelection, selectionModel, type SelectionModel } from "./selectionModel.ts";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
+
+// Saved explanations of a recording (none while it is live, or for pages): a constant, so its identity is stable.
+const NO_EXPLANATIONS: ExplainedTerm[] = [];
 
 // One session: its title, when and where it was saved, and what to do with it.
 // A recording's transcript lists its lines; tapping a word opens Explain (M15), tapping a line's time plays the
@@ -64,6 +72,8 @@ export default function SessionScreen() {
       second: session.kind === "recording" && !live ? secondTranscript(db, id) : null,
       // The recording's parts that are on this iPhone (a synced part may not be downloaded yet).
       playParts: session.kind === "recording" ? uploadParts(db, id).filter((part) => part.file !== "") : [],
+      marks: session.kind === "recording" && !live ? lineMarks(db, id) : [],
+      explanations: session.kind === "recording" && !live ? explainedInTranscript(db, id) : NO_EXPLANATIONS,
     };
   }, id);
   const [editing, setEditing] = useState(false);
@@ -72,6 +82,8 @@ export default function SessionScreen() {
   const [seek, setSeek] = useState<{ ms: number } | null>(null);
   const [more, setMore] = useState(false);
   const [lit, setLit] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const scroll = useRef<ScrollViewInstance>(null);
   const landed = useRef<string | null>(null);
   // A push to ?view=second while this screen is already open moves the switch too.
@@ -91,8 +103,44 @@ export default function SessionScreen() {
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 
+  // The transcript as the person keeps it (Next 1): their words, highlights and names, with hidden lines left out unless
+  // shown. Memoized: explainedWords rebuilds the word list on every call, so it runs only when the lines change.
+  const marks = useMemo(() => new Map((data?.marks ?? []).map((mark) => [mark.tStart, mark] as const)), [data]);
+  const shown = useMemo(() => (data ? applyMarks(data.timeline, marks, showHidden) : []), [data, marks, showHidden]);
+  const lines = useMemo(() => shown.filter((item): item is TimelineLine => item.kind === "line"), [shown]);
+  const explanations = useMemo(() => data?.explanations ?? NO_EXPLANATIONS, [data]);
+  const explained = useMemo(
+    () => explainedWords(lines.map((line) => ({ at: line.at, text: line.text })), explanations),
+    [lines, explanations],
+  );
+  // The rows, and each paragraph's own slice of the marks and explained words: both change with the data, not with a tap.
+  const rows = useMemo(() => groupTimeline(shown), [shown]);
+  const slices = useMemo(
+    () => new Map(rows.flatMap((row) => (row.kind === "paragraph" ? [[row.key, paragraphSlice(row.lines, marks, explained)] as const] : []))),
+    [rows, marks, explained],
+  );
+  // The handlers the rows get are the same across taps. They call the latest selection model (set below each render).
+  const modelRef = useRef<SelectionModel | null>(null);
+  const onWord = useCallback((ref: WordRef, word: string) => modelRef.current?.tapWord(ref, word), []);
+  const onSpeaker = useCallback((at: number) => modelRef.current?.renameRun(at), []);
+  const selectParagraph = useCallback((paragraph: TimelineLine[]) => setSelection(paragraphSelection(paragraph)), []);
+  const playAt = useCallback((at: number) => setSeek({ ms: at }), []);
+  // A selection whose words were hidden or removed by an edit or a sync picks nothing: it is cleared, not kept.
+  const stale = selection !== null && liveSelection(selection, lines) === null;
+  useEffect(() => {
+    if (stale) setSelection(null);
+  }, [stale]);
+
   if (!data) return <Screen>{null}</Screen>;
-  const { session, spaceName, pages, timeline, research, second, overviews, links, role, playParts } = data;
+  const { session, spaceName, pages, research, second, overviews, links, role, playParts } = data;
+  // A viewer of a shared space gets no selection, no bar, no name, no hiding (Next 1).
+  const canChange = role !== "viewer";
+  const hiddenCount = [...marks.values()].filter((mark) => mark.hidden).length;
+  const selected = selectionModel({ sessionId: id, lines, marks, explained, explanations, selection, setSelection, canChange });
+  modelRef.current = selected;
+  // The selected paragraphs are the ones holding a picked word; the others get no selection and are not redrawn by a tap.
+  const activeSelection = selected.picked === null ? null : selection;
+  const pickedAts = new Set(selected.picked?.lines.map((line) => line.at));
   const playable = playParts.length > 0 && (session.state === "saved" || session.state === "interrupted");
   // A mini app or a diagram is listed only while its flag is on (M25b).
   const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
@@ -100,7 +148,6 @@ export default function SessionScreen() {
   const detail = session.kind === "recording" ? formatClock(session.recordedMs) : countLabel(pages.length, "page", "pages");
   // A search hit's moment picks the transcript line to land on: the nearest one (see nearestSegmentIndex).
   const moment = momentFromParam(t);
-  const lines = timeline.filter((item): item is Extract<TimelineItem, { kind: "line" }> => item.kind === "line");
   // A search hit on a page lands on that page (its capture id); any other hit lands on its transcript line.
   const landPage = targetPageId(pages, pageId);
   const jumpKey = `${id}|${t ?? ""}|${pageId ?? ""}`;
@@ -267,7 +314,10 @@ export default function SessionScreen() {
                   key={label}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
-                  onPress={() => setShowSecond(index === 1)}
+                  onPress={() => {
+                    setSelection(null);
+                    setShowSecond(index === 1);
+                  }}
                   style={[styles.switchItem, { backgroundColor: active ? colors.accentSoft : colors.surface2 }]}
                 >
                   <Text style={[styles.switchText, { color: colors.ink }]}>{label}</Text>
@@ -275,6 +325,22 @@ export default function SessionScreen() {
               );
             })}
           </View>
+        ) : null}
+
+        {canChange && session.kind === "recording" && !showSecond && (hiddenCount > 0 || showHidden) ? (
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => {
+              setSelection(null);
+              setShowHidden(!showHidden);
+            }}
+            style={styles.hiddenRow}
+          >
+            <Text style={[styles.toggle, { color: colors.accent }]}>
+              {showHidden ? "Hide hidden lines" : `Show ${countLabel(hiddenCount, "hidden line", "hidden lines")}`}
+            </Text>
+          </Pressable>
         ) : null}
 
         {second !== null && showSecond ? (
@@ -293,21 +359,29 @@ export default function SessionScreen() {
             {second.incomplete && !second.truncated ? <Caption>Some parts of this recording aren't in the better transcript.</Caption> : null}
           </>
         ) : (
-          groupTimeline(timeline).map((row) =>
+          rows.map((row) =>
             row.kind === "paragraph" ? (
               <ParagraphRow
                 key={row.key}
                 at={row.at}
                 lines={row.lines}
                 lit={row.lines.some((line) => line.key === lit)}
-                onLayout={(event) => {
-                  if (targetKey !== null && row.lines.some((line) => line.key === targetKey)) landOn(targetKey, event.nativeEvent.layout.y);
-                }}
-                onPlay={playable && getRecorderStatus().state === "idle" ? () => setSeek({ ms: row.at }) : undefined}
-                onWord={(word, at) => router.push({ pathname: "/explain", params: { sessionId: id, t: String(at), word } })}
+                onLayout={
+                  targetKey !== null && row.lines.some((line) => line.key === targetKey)
+                    ? (event) => landOn(targetKey, event.nativeEvent.layout.y)
+                    : undefined
+                }
+                onPlay={playable && getRecorderStatus().state === "idle" ? playAt : undefined}
+                marks={slices.get(row.key)?.marks}
+                explained={slices.get(row.key)?.explained}
+                selection={row.lines.some((line) => pickedAts.has(line.at)) ? activeSelection : null}
+                canChange={canChange}
+                onWord={onWord}
+                onSpeaker={canChange ? onSpeaker : undefined}
+                onSelectParagraph={canChange ? selectParagraph : undefined}
               />
             ) : (
-              <TimeMarkRow key={row.key} item={row} interactive canChange={role !== "viewer"} />
+              <TimeMarkRow key={row.key} item={row} interactive canChange={canChange} />
             ),
           )
         )}
@@ -368,6 +442,20 @@ export default function SessionScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {canChange && selected.picked !== null && !showSecond ? (
+        <SelectionBar
+          text={selected.picked.text}
+          single={selected.single}
+          canExplain={selected.canExplain}
+          highlighted={selected.highlighted}
+          onExplain={selected.explain}
+          onHighlight={selected.highlight}
+          onNote={selected.note}
+          onMore={selected.more}
+          onClose={() => setSelection(null)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -557,6 +645,7 @@ const styles = StyleSheet.create({
   page: { gap: 8 },
   pageImage: { width: "100%", aspectRatio: 0.75, borderRadius: 12 },
   toggle: { fontSize: 15, fontWeight: "600" },
+  hiddenRow: { minHeight: 44, justifyContent: "center" },
   pageText: { fontSize: 15, lineHeight: 22 },
   actions: { gap: 12 },
   content: { padding: 20, paddingBottom: 40, gap: 16 },

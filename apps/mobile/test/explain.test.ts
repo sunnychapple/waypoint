@@ -260,6 +260,12 @@ describe("page explain copy", () => {
     expect(contextCopy(true).missing).not.toContain("transcript");
     expect(contextCopy(false).sent).toContain("transcript");
   });
+  it("a phrase says these words and around them; a single word is unchanged", () => {
+    expect(contextCopy(false, true).sent).toContain("these words");
+    expect(contextCopy(false, true).sent).toContain("around them");
+    expect(contextCopy(false).sent).toContain("this word");
+    expect(contextCopy(false).sent).toContain("around it");
+  });
   it("failure copy for a page offers no Ask later and does not point at Questions for later", () => {
     for (const failure of [{ kind: "offline" }, { kind: "model_failed" }] as const) {
       const copy = failureCopy(failure, "make");

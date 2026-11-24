@@ -114,12 +114,12 @@ function ExplainBody({
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
-            <Body>{contextCopy(resolvedPageId !== undefined).missing}</Body>
+            <Body>{contextCopy(resolvedPageId !== undefined, word.includes(" ")).missing}</Body>
           ) : model.stillComing ? (
             <Body>Your answer is still on its way. It will be in Questions for later.</Body>
           ) : (
             <>
-              <Body style={{ color: colors.ink2 }}>{contextCopy(resolvedPageId !== undefined).sent}</Body>
+              <Body style={{ color: colors.ink2 }}>{contextCopy(resolvedPageId !== undefined, word.includes(" ")).sent}</Body>
               <Pressable accessibilityRole="button" onPress={() => setShowSent((v) => !v)}>
                 <Text style={[styles.link, { color: colors.accent }]}>{showSent ? "Hide what's sent" : "Show what's sent"}</Text>
               </Pressable>
