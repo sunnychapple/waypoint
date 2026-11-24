@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { migrate } from "../src/core/db/migrate.ts";
+import type { SqlDb } from "../src/core/db/sql.ts";
+import { editLine, lineMarks, toggleHighlight } from "../src/core/capture/marks.ts";
 import {
   canExplain,
   compareRefs,
@@ -11,14 +14,23 @@ import {
   wordsOf,
   type WordRef,
 } from "../src/core/capture/selection.ts";
+import { createMemoryDb } from "./helpers/db.ts";
 
 const ref = (at: number, index: number): WordRef => ({ at, index });
 
 describe("wordsOf", () => {
   it("splits on whitespace and drops empty words", () => {
-    expect(wordsOf("  Cells,  divide \n now ")).toEqual(["Cells,", "divide", "now"]);
+    expect(wordsOf("  Cells,  divide \n now ")).toEqual(["Cells", "divide", "now"]);
     expect(wordsOf("   ")).toEqual([]);
     expect(wordsOf("")).toEqual([]);
+  });
+
+  it("does not count punctuation on its own, so \"so — we ... go\" is 3 words", () => {
+    expect(wordsOf("so — we ... go")).toEqual(["so", "we", "go"]);
+  });
+
+  it("does not count a token over 100 characters", () => {
+    expect(wordsOf(`short ${"a".repeat(101)} end`)).toEqual(["short", "end"]);
   });
 });
 
@@ -66,9 +78,16 @@ describe("isSelected and compareRefs", () => {
 });
 
 describe("pickedText", () => {
-  it("gives the words as written, with punctuation, for words 0 to 1", () => {
+  it("gives the words for words 0 to 1, with edge punctuation trimmed", () => {
     const picked = pickedText([{ at: 0, text: "Cells, divide. Then" }], { from: ref(0, 0), to: ref(0, 1) });
-    expect(picked).toEqual({ text: "Cells, divide", lines: [{ at: 0, from: 0, to: 1 }] });
+    expect(picked).toEqual({ text: "Cells divide", lines: [{ at: 0, from: 0, to: 1 }] });
+  });
+
+  it("counts words the way the renderer taps them: punctuation-only tokens take no index", () => {
+    const lines = [{ at: 0, text: "so — we ... go" }];
+    expect(pickedText(lines, { from: ref(0, 1), to: ref(0, 2) })).toEqual({ text: "we go", lines: [{ at: 0, from: 1, to: 2 }] });
+    expect(paragraphSelection(lines)).toEqual({ from: ref(0, 0), to: ref(0, 2) });
+    expect(explainedWords(lines, [{ id: "e5", t: 0, term: "go" }]).get("0:2")).toBe("e5");
   });
 
   it("joins two lines with one space, and the second line starts at word 0", () => {
@@ -160,5 +179,30 @@ describe("explainedWords", () => {
 
   it("does not mark a term that is no longer in its line", () => {
     expect(explainedWords(lines, [{ id: "e4", t: 0, term: "meiosis" }]).size).toBe(0);
+  });
+});
+
+describe("marks use the same word count", () => {
+  let db: SqlDb;
+  const deps = { now: () => 100 };
+
+  beforeEach(() => {
+    db = createMemoryDb();
+    migrate(db);
+    db.run("INSERT INTO spaces (id, name, is_default, created_at, last_used_at) VALUES ('space-1', 'My notes', 1, 0, 0)");
+    db.run(
+      "INSERT INTO sessions (id, space_id, kind, title, state, transcript, started_at, recorded_ms, indexed_at) VALUES ('s1', 'space-1', 'recording', 'Biology', 'saved', 'done', 0, 0, 5)",
+    );
+    db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES ('s1', 0, 900, 'so — we ... go', 'device')");
+  });
+
+  it("clamps a highlight to the words of an edited line, counting punctuation-only tokens as no word", () => {
+    toggleHighlight(db, deps, "s1", [{ at: 0, from: 0, to: 2 }]);
+    editLine(db, deps, "s1", 0, "so — we ... ok");
+    expect(lineMarks(db, "s1")[0]?.highlights).toEqual([[0, 2]]);
+    editLine(db, deps, "s1", 0, "so — ok ... go");
+    expect(lineMarks(db, "s1")[0]?.highlights).toEqual([[0, 2]]);
+    editLine(db, deps, "s1", 0, "so — ok");
+    expect(lineMarks(db, "s1")[0]?.highlights).toEqual([[0, 1]]);
   });
 });

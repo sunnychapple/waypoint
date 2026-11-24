@@ -1,12 +1,11 @@
 import { WORD_MAX_CHARS } from "@waypoint/contracts";
-import { EDGE } from "../explain/excerpt.ts";
+import { EDGE, splitWords } from "../explain/excerpt.ts";
 import type { LinePick } from "./marks.ts";
 
 // The one word split for transcript lines. marks.ts uses it too, so highlight positions and selection positions always
-// agree: whitespace-separated, empty words dropped. Punctuation stays on its word.
-export function wordsOf(text: string): string[] {
-  return text.split(/\s+/).filter((word) => word !== "");
-}
+// agree. It is the split the renderer taps (splitWords from excerpt.ts): punctuation on its own is not a word, and a
+// token over 100 characters is not one either. Punctuation at a word's edges is trimmed.
+export const wordsOf = (text: string): string[] => splitWords(text).flatMap((k) => (k.word === null ? [] : [k.word]));
 
 // A word in a transcript: the start of its line and its place among the line's words, from 0.
 export type WordRef = { at: number; index: number };
@@ -77,17 +76,26 @@ const matchKey = (word: string): string => word.replace(EDGE, "").toLowerCase();
 // Note 1: saved explanations marked on the words they explain. An explanation is looked for in the line it was asked
 // from (t is that line's start): the first place there where its words start, read on into the next lines for a phrase.
 // Case and punctuation are ignored. Not found (the line was changed) means not marked. Returns refKey → explanation id.
+// Callers must memoize the result on [lines, explanations]: each call rebuilds the word list.
 export function explainedWords(lines: { at: number; text: string }[], explanations: { id: string; t: number; term: string }[]): Map<string, string> {
   const words: { ref: WordRef; key: string }[] = [];
+  // Line start → position in words of that line's first word. A line with no words has no entry.
+  const firstWordOf = new Map<number, number>();
   for (const line of lines) {
-    wordsOf(line.text).forEach((word, index) => words.push({ ref: { at: line.at, index }, key: matchKey(word) }));
+    const lineWords = wordsOf(line.text);
+    if (lineWords.length === 0) continue;
+    if (!firstWordOf.has(line.at)) firstWordOf.set(line.at, words.length);
+    lineWords.forEach((word, index) => words.push({ ref: { at: line.at, index }, key: matchKey(word) }));
   }
   const marked = new Map<string, string>();
   for (const explanation of explanations) {
     const term = wordsOf(explanation.term).map(matchKey).filter((key) => key !== "");
     if (term.length === 0) continue;
-    for (let p = 0; p < words.length; p += 1) {
-      if (words[p]?.ref.at !== explanation.t) continue;
+    // A phrase starts in its line, so the scan begins at that line's first word and stops at its last one. The words
+    // after it are still read by the match itself, which is how a phrase runs into the next line.
+    const start = firstWordOf.get(explanation.t);
+    if (start === undefined) continue;
+    for (let p = start; p < words.length && words[p]?.ref.at === explanation.t; p += 1) {
       if (!term.every((word, i) => words[p + i]?.key === word)) continue;
       for (let i = 0; i < term.length; i += 1) {
         const hit = words[p + i];
