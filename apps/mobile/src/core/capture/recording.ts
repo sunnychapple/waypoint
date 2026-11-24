@@ -2,7 +2,7 @@ import { shortDay } from "../format.ts";
 import type { SqlDb } from "../db/sql.ts";
 import { deleteSetting, getSetting, setSetting } from "../db/settings.ts";
 import { titleFromText } from "./pages.ts";
-import { listSegments } from "./segments.ts";
+import { listSegments, studyLines } from "./segments.ts";
 import { createSession, getSession, RECORDING_HERE_PREFIX, renameSession, type SessionRow } from "./sessions.ts";
 import { partsNeedingTranscription, type Piece } from "./transcript.ts";
 
@@ -109,9 +109,10 @@ export function recordingTitle(firstText: string | null, startedAt: number): str
 export function nameRecording(db: SqlDb, sessionId: string): void {
   const session = getSession(db, sessionId);
   if (session === null || session.title !== DEFAULT_RECORDING_TITLE) return;
-  const words = db
-    .all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? ORDER BY t_start LIMIT 5", [sessionId])
-    .map((row) => row.text)
+  // The lines the person keeps (studyLines), so a hidden line never becomes the title, which share links carry.
+  const words = studyLines(db, sessionId)
+    .slice(0, 5)
+    .map((line) => line.text)
     .join(" ");
   renameSession(db, sessionId, recordingTitle(words.trim() === "" ? null : words, session.startedAt));
 }

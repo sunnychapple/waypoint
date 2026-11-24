@@ -188,6 +188,14 @@ describe("partUpdate (Next 1)", () => {
     expect(partUpdate(part, [span(60_000, 62_000)], existing, [60_000])).toBeNull();
   });
 
+  it("a mark inside the part drops new pieces that mostly repeat a changed line", () => {
+    const existing = [span(60_000, 61_000)];
+    const mostlyRepeat = span(60_400, 62_400); // 600 ms of 2000 overlap the changed line: over a quarter
+    const quarter = span(60_500, 62_500); // exactly a quarter: kept
+    const hole = span(64_000, 66_000);
+    expect(partUpdate(part, [mostlyRepeat, quarter, hole], existing, [60_000])).toEqual({ replace: false, pieces: [quarter, hole] });
+  });
+
   it("a mark in another part does not stop the replacement", () => {
     const pieces = [span(60_000, 62_000)];
     expect(partUpdate(part, pieces, [], [0, 120_000])).toEqual({ replace: true, pieces });
