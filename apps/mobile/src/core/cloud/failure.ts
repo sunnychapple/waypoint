@@ -35,6 +35,13 @@ export function classifyFailure(input: FailureInput): CloudFailure {
   return { kind: "failed" };
 }
 
+// classifyFailure for a quote (or any answer) about one task. An older server has no problem_help, so its quote answers
+// 400 whatever the message: that is "Not available yet", and Try again cannot help. Other tasks keep classifyFailure.
+export function classifyTaskFailure(task: string | undefined, input: FailureInput): CloudFailure {
+  if (task === "problem_help" && input.kind === "api" && input.status === 400) return { kind: "not_available" };
+  return classifyFailure(input);
+}
+
 // Whether "Try again" may re-send with the same Idempotency-Key. Out of credits: the hold was never made, so the same
 // request runs after a purchase. A failed or finished answer needs a new key (docs/architecture.md section 4).
 export function keepsKey(failure: CloudFailure): boolean {

@@ -58,6 +58,8 @@ export default function NewMadeScreen() {
   // while the body is unchanged (keyForRequest).
   const attempt = useRef<{ key: string; body: string } | null>(null);
   const [starting, setStarting] = useState(false);
+  // Set and checked synchronously, before any await: a second tap before the re-render must not send again.
+  const inFlight = useRef(false);
   const [failure, setFailure] = useState<CloudFailure | null>(null);
   const quote = useQuote(available ? { task: kind } : null);
   const signOut = useSignOut();
@@ -70,14 +72,20 @@ export default function NewMadeScreen() {
   const hasText = text !== "";
 
   async function start(): Promise<void> {
-    if (sessionId === null || !hasText || !available || price === null || starting) return;
+    if (inFlight.current || sessionId === null || !hasText || !available || price === null) return;
+    inFlight.current = true;
     setStarting(true);
     setFailure(null);
     const prompt = focus.trim() === "" ? null : focus.trim();
     const body = JSON.stringify({ kind, sessionId, text, prompt });
     const key = keyForRequest(attempt.current, body, () => randomUUID());
-    const result = await startMade(kind, sessionId, key, prompt);
-    setStarting(false);
+    let result: Awaited<ReturnType<typeof startMade>>;
+    try {
+      result = await startMade(kind, sessionId, key, prompt);
+    } finally {
+      inFlight.current = false;
+      setStarting(false);
+    }
     if (result.ok) {
       router.replace(`/job/${encodeURIComponent(result.jobId)}`);
       return;

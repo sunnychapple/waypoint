@@ -28,7 +28,7 @@ export type StartJobInput = {
   request: CreateJobRequest;
   key: string; // made when the person tapped; kept for "Try again" after Out of credits
   sessionId: string | null;
-  detail: Record<string, unknown>; // what the job's screen needs later (never the text sent)
+  detail: Record<string, unknown>; // what the job's screen needs later; for problem help, the problem text too (never the page text)
   sent?: unknown; // what sent_log records, when it is not the request itself (retranscribe)
 };
 
@@ -182,7 +182,7 @@ export function useQuote(request: QuoteRequest | null): QuoteState & { retry: ()
       (error: unknown) => {
         if (!live) return;
         loading.current = false;
-        setState({ loading: false, quote: null, failure: toFailure(error) });
+        setState({ loading: false, quote: null, failure: toFailure(error, request.task) });
       },
     );
     return () => {

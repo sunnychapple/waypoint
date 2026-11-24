@@ -8,4 +8,6 @@ import "./made.ts";
 import "./overviews.ts";
 
 import "./videos.ts";
+
+import "./help.ts";
 export {};

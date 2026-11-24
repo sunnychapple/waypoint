@@ -1523,3 +1523,11 @@ No new unit tests: the logic these screens use is tested in P2 (`cloud-help.test
 From `apps/mobile`: `npm run typecheck`, `npm test`, `npm run export:ios`. Not needed: `npm run test:swift` (no Swift changes).
 
 Known limits: cloud help answers are not listed in the Review tab's "ready" list. They are kept with their job (open them from the cloud jobs list) and deleted with their session. A result that arrives after the person has left the screen is saved on the next job walk, as for practice sets.
+
+### Review fixes
+
+- Two quick taps on Send make one job: the send checks and sets an in-flight ref before its first await (`HelpCloudScreen`, and the same guard in `NewMadeScreen`). The key is minted once per unchanged body before the await and cleared only on success or on a failure that may not reuse it.
+- The spinner shows only while the job is queued or running, or succeeded and not yet saved or deleted. A succeeded job whose answer is kept but no longer readable (its page or session was deleted), or whose result is gone, shows "This answer isn't kept because its page was deleted.", its credits used, and Done. Done is the only button there.
+- A quote for `problem_help` that answers 400 shows "Not available yet" with no Try again (`classifyTaskFailure`, used by `useQuote` for that task only). Other tasks keep the general mapping.
+- The unreadable answer's text states the credits the job actually spent, not a fixed 1.
+- `StartJobInput.detail` is documented as holding the problem text for problem help (Try again needs it). The page text is never stored. The comment changed; the code did not.

@@ -38,7 +38,7 @@ export function QuoteBox({ state, onShowSent, onRetry }: { state: QuoteState; on
           {failure.kind === "out_of_credits" ? (
             <SecondaryButton label="Get credits" onPress={() => router.push(`/plans?need=${failure.shortfall}`)} />
           ) : null}
-          {onRetry !== undefined && copy?.signIn !== true ? <SecondaryButton label="Try again" onPress={onRetry} /> : null}
+          {onRetry !== undefined && copy?.signIn !== true && failure.kind !== "not_available" ? <SecondaryButton label="Try again" onPress={onRetry} /> : null}
         </>
       ) : null}
     </View>

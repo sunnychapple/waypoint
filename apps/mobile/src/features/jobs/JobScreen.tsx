@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "rea
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { failureCopy } from "../../core/cloud/failure.ts";
+import { helpWhere } from "../../core/study/cloudHelp.ts";
 import { getJob, JOB_LABELS, jobLine, type LocalJob } from "../../core/jobs/jobs.ts";
 import { useQuery } from "../../platform/db.ts";
 import { askForPush } from "../../platform/push.ts";
@@ -38,8 +39,14 @@ function retryHref(job: LocalJob): string | null {
       return `/made/new?${query.toString()}`;
     case "retranscribe":
       return job.sessionId !== null ? `/second-transcript?${query.toString()}` : null;
-    case "problem_help":
-      return null; // card P3 adds the cloud help screen
+    case "problem_help": {
+      const where = helpWhere(job.detail);
+      if (job.sessionId === null || where === null) return null;
+      query.set("captureId", where.captureId);
+      if (where.block !== null) query.set("block", String(where.block));
+      else query.set("text", where.problem);
+      return `/study/help-cloud?${query.toString()}`;
+    }
   }
 }
 

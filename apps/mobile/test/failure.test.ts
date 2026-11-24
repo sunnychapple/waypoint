@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyFailure, failureCopy, keepsKey, type CloudFailure } from "../src/core/cloud/failure.ts";
+import { classifyFailure, classifyTaskFailure, failureCopy, keepsKey, type CloudFailure } from "../src/core/cloud/failure.ts";
 
 const api = (status: number, code: string, message: string, shortfall: number | null = null) => ({ kind: "api" as const, status, code, message, shortfall });
 
@@ -21,6 +21,20 @@ describe("classifyFailure", () => {
     expect(classifyFailure({ kind: "network" })).toEqual({ kind: "offline" });
     expect(classifyFailure({ kind: "not_registered" })).toEqual({ kind: "device" });
     expect(classifyFailure({ kind: "bad_reply" })).toEqual({ kind: "failed" });
+  });
+});
+
+describe("classifyTaskFailure", () => {
+  const api = (status: number, message: string) => ({ kind: "api" as const, status, code: "bad_request", message, shortfall: null });
+  it("an older server answers 400 to a problem_help quote: not available, whatever the message", () => {
+    expect(classifyTaskFailure("problem_help", api(400, "invalid request"))).toEqual({ kind: "not_available" });
+    expect(classifyTaskFailure("problem_help", api(400, "job type not available"))).toEqual({ kind: "not_available" });
+    expect(classifyTaskFailure("problem_help", api(500, "config unavailable"))).toEqual({ kind: "failed" });
+  });
+  it("other tasks keep the general mapping", () => {
+    expect(classifyTaskFailure("practice", api(400, "invalid request"))).toEqual({ kind: "failed" });
+    expect(classifyTaskFailure(undefined, api(400, "invalid request"))).toEqual({ kind: "failed" });
+    expect(classifyTaskFailure("problem_help", { kind: "network" })).toEqual({ kind: "offline" });
   });
 });
 
