@@ -20,9 +20,11 @@
           "audio"
         ],
         "NSSpeechRecognitionUsageDescription": "NotePath turns your recording into text on this iPhone. Nothing is sent anywhere.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSSupportsLiveActivities": true
       },
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "appleTeamId": "84XFHFW7TP"
     },
     "plugins": [
       "expo-router",
@@ -54,7 +56,8 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
-      "@clerk/expo"
+      "@clerk/expo",
+      "@bacons/apple-targets"
     ],
     "owner": "chapple-studios",
     "extra": {

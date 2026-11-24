@@ -1,0 +1,7 @@
+{
+  "type": "widget",
+  "name": "RecordingActivity",
+  "displayName": "NotePath Recording",
+  "bundleIdentifier": ".recording",
+  "deploymentTarget": "26.0"
+}

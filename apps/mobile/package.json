@@ -13,6 +13,7 @@
     "test:swift": "cd modules && swift test"
   },
   "dependencies": {
+    "@bacons/apple-targets": "5.0.0",
     "@clerk/expo": "4.15.1",
     "@waypoint/api-client": "0.0.0",
     "@waypoint/contracts": "0.0.0",
@@ -49,5 +50,10 @@
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "parse5": "8.0.1"
+  },
+  "expo": {
+    "autolinking": {
+      "exclude": ["@bacons/apple-targets"]
+    }
   }
 }
