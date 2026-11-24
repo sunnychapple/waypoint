@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanTermGuess, guessHeadline, guessSentence } from "../src/core/explain/term.ts";
+import { cleanTermGuess, guessHeadline, guessLabel, guessSentence } from "../src/core/explain/term.ts";
 
 const guess = (over: Record<string, unknown> = {}) => ({
   misheard: true,
@@ -21,7 +21,12 @@ describe("cleanTermGuess", () => {
   it("keeps an original in another script and shows it in brackets", () => {
     const g = cleanTermGuess(guess({ term: "mochi", original: "もち", language: "japanese", meaning: "rice cake" }), "motchi");
     expect(g?.original).toBe("もち");
-    expect(guessHeadline(g!)).toBe("Probably mochi (もち)");
+    expect(guessHeadline(g!)).toBe("Probably mochi (\u2068もち\u2069)");
+    expect(guessLabel(g!)).toBe("Probably mochi, Japanese, written \u2068もち\u2069");
+  });
+
+  it("leaves the original out of the label when there is none", () => {
+    expect(guessLabel(cleanTermGuess(guess(), "kwaw")!)).toBe("Probably qua, Latin");
   });
 
   it("is null when the model heard the word right", () => {

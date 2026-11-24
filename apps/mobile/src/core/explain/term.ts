@@ -26,9 +26,18 @@ export function cleanTermGuess(raw: unknown, heard: string): TermGuess | null {
 
 const upper = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
+// Unicode isolates keep text in another script from reordering the words around it (right-to-left text, for one).
+const isolate = (text: string): string => `\u2068${text}\u2069`;
+
 // "Probably <term> (<original>)", as on board S3.
 export function guessHeadline(guess: TermGuess): string {
-  return guess.original === null ? `Probably ${guess.term}` : `Probably ${guess.term} (${guess.original})`;
+  return guess.original === null ? `Probably ${guess.term}` : `Probably ${guess.term} (${isolate(guess.original)})`;
+}
+
+// What a screen reader says for the headline: "Probably mochi, Japanese, written もち". Parts that are null are left out.
+export function guessLabel(guess: TermGuess): string {
+  const written = guess.original === null ? "" : `, written ${isolate(guess.original)}`;
+  return `Probably ${guess.term}, ${upper(guess.language)}${written}`;
 }
 
 // "The transcript wrote "<heard>". <Term> is the <Language> word for <meaning>."

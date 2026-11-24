@@ -5,7 +5,7 @@ import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
 import { contextCopy } from "../../core/explain/excerpt.ts";
 import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
-import { guessHeadline, guessSentence } from "../../core/explain/term.ts";
+import { guessHeadline, guessLabel, guessSentence } from "../../core/explain/term.ts";
 import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useSignOut } from "../../platform/auth.tsx";
@@ -117,8 +117,11 @@ function ExplainBody({
         {likely.guess !== null ? (
           <View style={[styles.suggest, { backgroundColor: colors.accentSoft }]}>
             <Caption>Suggested</Caption>
-            <Text style={[styles.suggestTitle, { color: colors.ink }]}>{guessHeadline(likely.guess)}</Text>
+            <Text accessibilityLabel={guessLabel(likely.guess)} style={[styles.suggestTitle, { color: colors.ink }]}>
+              {guessHeadline(likely.guess)}
+            </Text>
             <Body>{guessSentence(likely.guess)}</Body>
+            <Caption>A guess from this iPhone. It might be wrong.</Caption>
             <SecondaryButton label="Keep as said" onPress={likely.keep} />
           </View>
         ) : null}

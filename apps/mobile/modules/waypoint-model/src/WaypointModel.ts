@@ -10,6 +10,7 @@ type NativeModel = {
   helpWithProblem(problem: string, context: string): Promise<unknown>;
   summarize(text: string): Promise<unknown>;
   likelyTerm(word: string, context: string): Promise<unknown>;
+  cancelLikelyTerm(): void;
 };
 
 const native = requireNativeModule<NativeModel>("WaypointModel");
@@ -21,3 +22,4 @@ export const makeQuiz = (text: string, count: number): Promise<unknown> => nativ
 export const helpWithProblem = (problem: string, context: string): Promise<unknown> => native.helpWithProblem(problem, context);
 export const summarize = (text: string): Promise<unknown> => native.summarize(text);
 export const likelyTerm = (word: string, context: string): Promise<unknown> => native.likelyTerm(word, context);
+export const cancelLikelyTerm = (): void => native.cancelLikelyTerm();

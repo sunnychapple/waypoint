@@ -67,10 +67,10 @@ happened to this word. When you are not sure, say it was heard right.
   var misheard: Bool
   @Guide(description: "The term the speaker probably said, spelled in the alphabet of the transcript. Empty when misheard is false.")
   var term: String
-  @Guide(description: "The same term written in its own writing system, or the same as term when that is the same alphabet")
+  @Guide(description: "The same term written in its own writing system, or the same as term when that is the same alphabet. Empty when misheard is false.")
   var original: String
-  @Guide(description: "The name of the language the term comes from, in the language of the transcript")
+  @Guide(description: "The name of the language the term comes from, in the language of the transcript. Empty when misheard is false.")
   var language: String
-  @Guide(description: "What the term means, in a few words, in the language of the transcript")
+  @Guide(description: "What the term means, in a few words, in the language of the transcript. Empty when misheard is false.")
   var meaning: String
 }

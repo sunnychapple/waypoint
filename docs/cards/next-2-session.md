@@ -655,6 +655,14 @@ Checks: `npm run typecheck`, `npm test`, `npm run export:ios`. Native change: a 
 
 Known limits: Apple's small model will sometimes miss a term or suggest a wrong one; the sheet says "Probably" and changes nothing on its own. The cloud Explain still explains the word as written. "This is wrong" and "Double-check" on board S3 belong to the existing cloud answer and are unchanged.
 
+### Review fixes
+
+- `likelyTerm` samples greedily and returns at most 120 tokens. The draft's guide descriptions say `original`, `language` and `meaning` are empty when `misheard` is false.
+- The suggestion runs as a stored, cancellable Task (`termTask`). `makeCards`, `makeQuiz`, `helpWithProblem` and `summarize` cancel it and wait up to one second for it to release the request lock before their own request, so a suggestion never makes the student's request fail as busy. `cancelLikelyTerm()` cancels it; a cancelled suggestion resolves with an empty object, which reads as no guess.
+- The hook cancels the suggestion when the sheet closes or the word changes, drops the previous word's guess at once, and drops a result that arrives while this iPhone records the session.
+- The word goes into the prompt with `"` replaced by `'` and line breaks removed.
+- The headline's accessibility label names the language and the original script, e.g. "Probably mochi, Japanese, written もち", leaving out what is null. The original script sits between Unicode isolates wherever it is placed in other text. A caption under the suggestion says "A guess from this iPhone. It might be wrong."
+
 ---
 
 ## S4 · Photo or Page, with zoom in the camera

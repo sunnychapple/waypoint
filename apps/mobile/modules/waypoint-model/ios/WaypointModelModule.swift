@@ -5,6 +5,9 @@ public class WaypointModelModule: Module {
   // One request at a time. The lock is only held for the flag, never across an await.
   private let lock = NSLock()
   private var busy = false
+  // The background likely-term suggestion, its Task and how many are running. Guarded by the same lock.
+  private var termTask: Task<[String: Any], Error>?
+  private var termActive = 0
 
   public func definition() -> ModuleDefinition {
     Name("WaypointModel")
@@ -28,7 +31,7 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("makeCards") { (text: String, max: Int) async throws -> [[String: Any]] in
-      try await self.run { () async throws -> [[String: Any]] in
+      try await self.runAfterTerm { () async throws -> [[String: Any]] in
         let prompt = "Make up to \(max) flashcards from this text.\n\nText:\n\(text)"
         do {
           let session = LanguageModelSession(instructions: studyInstructions)
@@ -44,7 +47,7 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("makeQuiz") { (text: String, count: Int) async throws -> [[String: Any]] in
-      try await self.run { () async throws -> [[String: Any]] in
+      try await self.runAfterTerm { () async throws -> [[String: Any]] in
         let prompt = "Make up to \(count) quiz questions from this text. Each has four choices. Ask only about things the text states.\n\nText:\n\(text)"
         do {
           let session = LanguageModelSession(instructions: studyInstructions)
@@ -61,7 +64,7 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("helpWithProblem") { (problem: String, context: String) async throws -> [String: Any] in
-      try await self.run { () async throws -> [String: Any] in
+      try await self.runAfterTerm { () async throws -> [String: Any] in
         let prompt = "Help me solve this problem step by step.\n\nProblem:\n\(problem)\n\nThe page it is on:\n\(context)"
         do {
           let session = LanguageModelSession(instructions: studyInstructions)
@@ -78,7 +81,7 @@ public class WaypointModelModule: Module {
     }
 
     AsyncFunction("summarize") { (text: String) async throws -> [String: Any] in
-      try await self.run { () async throws -> [String: Any] in
+      try await self.runAfterTerm { () async throws -> [String: Any] in
         let prompt = "Give this text a short title and a short summary.\n\nText:\n\(text)"
         do {
           let session = LanguageModelSession(instructions: studyInstructions)
@@ -91,13 +94,21 @@ public class WaypointModelModule: Module {
       }
     }
 
+    // A background suggestion. It yields to every other request: those cancel it first (see runAfterTerm).
     AsyncFunction("likelyTerm") { (word: String, context: String) async throws -> [String: Any] in
-      try await self.run { () async throws -> [String: Any] in
-        let prompt = "The transcript wrote the word \"\(word)\". Did the speaker probably say a different term?\n\nTranscript:\n\(context)"
-        let session = LanguageModelSession(instructions: termInstructions)
-        let guess = try await session.respond(to: prompt, generating: TermGuessDraft.self).content
-        return ["misheard": guess.misheard, "term": guess.term, "original": guess.original, "language": guess.language, "meaning": guess.meaning]
+      await self.stopLikelyTerm()
+      self.markTermStarted()
+      let task = Task { () async throws -> [String: Any] in
+        defer { self.markTermEnded() }
+        return try await self.runTerm(word: word, context: context)
       }
+      self.setTermTask(task)
+      return try await task.value
+    }
+
+    // Cancels the suggestion in flight, if any. It resolves with an empty object instead of a guess.
+    Function("cancelLikelyTerm") { () -> Void in
+      self.currentTermTask()?.cancel()
     }
   }
 
@@ -121,10 +132,79 @@ public class WaypointModelModule: Module {
     return list
   }
 
-  private func claim() -> Bool {
+  // The likely-term suggestion is cheap to lose and must never make the student's own request fail as busy. It is
+  // cancelled, and given up to one second to release the request lock, before any other request runs.
+  private func stopLikelyTerm() async {
+    guard let task = currentTermTask() else { return }
+    task.cancel()
+    let deadline = Date().addingTimeInterval(1)
+    while activeTerms() > 0 && Date() < deadline {
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+  }
+
+  private func runAfterTerm<T>(_ body: () async throws -> T) async throws -> T {
+    await stopLikelyTerm()
+    return try await run(body)
+  }
+
+  // Empty when the suggestion was cancelled, so the TypeScript side reads it as "no guess".
+  private func runTerm(word: String, context: String) async throws -> [String: Any] {
+    guard claim(skipIfCancelled: true) else {
+      if Task.isCancelled { return [:] }
+      throw Exception(name: "Model", description: "Another request is still running", code: "busy")
+    }
+    defer { release() }
+    if Task.isCancelled { return [:] }
+    // A quote would end the word early in the prompt, and a line break would split it, so both are replaced.
+    let safeWord = String(word.compactMap { (c: Character) -> Character? in c.isNewline ? nil : (c == "\"" ? "'" : c) })
+    let prompt = "The transcript wrote the word \"\(safeWord)\". Did the speaker probably say a different term?\n\nTranscript:\n\(context)"
+    do {
+      let session = LanguageModelSession(instructions: termInstructions)
+      let options = GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 120)
+      let guess = try await session.respond(to: prompt, generating: TermGuessDraft.self, options: options).content
+      if Task.isCancelled { return [:] }
+      return ["misheard": guess.misheard, "term": guess.term, "original": guess.original, "language": guess.language, "meaning": guess.meaning]
+    } catch {
+      throw Exception(name: "Model", description: String(describing: error), code: modelErrorCode(error))
+    }
+  }
+
+  private func currentTermTask() -> Task<[String: Any], Error>? {
     lock.lock()
     defer { lock.unlock() }
-    if busy { return false }
+    return termTask
+  }
+
+  private func setTermTask(_ task: Task<[String: Any], Error>) {
+    lock.lock()
+    defer { lock.unlock() }
+    termTask = task
+  }
+
+  private func activeTerms() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return termActive
+  }
+
+  private func markTermStarted() {
+    lock.lock()
+    defer { lock.unlock() }
+    termActive += 1
+  }
+
+  private func markTermEnded() {
+    lock.lock()
+    defer { lock.unlock() }
+    termActive -= 1
+  }
+
+  // skipIfCancelled makes the suggestion's claim fail once it is cancelled, so it cannot take the lock after a stop.
+  private func claim(skipIfCancelled: Bool = false) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if busy || (skipIfCancelled && Task.isCancelled) { return false }
     busy = true
     return true
   }
