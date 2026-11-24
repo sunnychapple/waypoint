@@ -454,6 +454,8 @@ END;
 CREATE TRIGGER sync_notes_delete AFTER DELETE ON notes WHEN (SELECT applying FROM sync_mode) = 0 AND EXISTS (SELECT 1 FROM space_groups) BEGIN
   INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('notes', old.id, 1, (SELECT g.group_id FROM sessions s JOIN space_groups g ON g.space_id = s.space_id WHERE s.id = old.session_id));
 END;
+-- Build 6 skipped change kinds it did not know (line marks, notes): fetch each shared space's history again once.
+UPDATE sync_state SET last_seq = 0;
 `,
   },
   {

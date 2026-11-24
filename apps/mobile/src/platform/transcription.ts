@@ -13,6 +13,13 @@ let packMissing = false;
 // Sessions whose parts here were written down this launch while other parts wait for another phone. They stay waiting
 // (so that phone still writes its parts) but are not redone here every 20 seconds.
 const doneHere = new Set<string>();
+// The session whose line is being typed in (Edit): its words are not rewritten while someone types in it.
+let editingSession: string | null = null;
+// `owner`: when clearing, only clear if this session set it, so one screen closing never clears another's.
+export function setEditingSession(id: string | null, owner?: string): void {
+  if (id === null && owner !== undefined && editingSession !== owner) return;
+  editingSession = id;
+}
 
 // Writes down the audio of sessions whose words were not written live. Runs only while the app is active,
 // the speech pack is installed and the recorder is idle. Errors are kept per session; see below.
@@ -30,7 +37,7 @@ async function tick(): Promise<void> {
     if (packMissing || (await getSpeechStatus()).pack !== "installed") return;
     const generation = dbGeneration();
     for (const session of pendingTranscriptions(getDb())) {
-      if (doneHere.has(session.sessionId)) continue;
+      if (doneHere.has(session.sessionId) || session.sessionId === editingSession) continue;
       try {
         if ((await transcribeSession(session.sessionId, session.parts, generation, session.elsewhere)) && session.elsewhere) doneHere.add(session.sessionId);
       } catch (error) {

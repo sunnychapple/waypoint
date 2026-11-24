@@ -105,11 +105,12 @@ export default function SessionScreen() {
     return () => clearTimeout(timer);
   }, [lit]);
   // After a recording stops, and after Continue recording stops again, the iPhone's model writes the title and summary.
+  // Not while Edit is on: the summary runs when Edit turns off.
   const wantsSummary = data !== null && data.needsSummary && data.role !== "viewer";
   const recordedMs = data?.session.recordedMs ?? 0;
   useEffect(() => {
-    if (wantsSummary) void summarizeSession(id, recordedMs);
-  }, [wantsSummary, id, recordedMs]);
+    if (wantsSummary && !editor.on) void summarizeSession(id, recordedMs);
+  }, [wantsSummary, editor.on, id, recordedMs]);
   const miniAppsOn = useConfig()?.flags.mini_app_viewer === true;
   const diagramsOn = useConfig()?.flags.diagram_viewer === true;
 

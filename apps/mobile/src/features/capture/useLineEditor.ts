@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { editLine } from "../../core/capture/marks.ts";
 import { writeDb } from "../../platform/db.ts";
+import { setEditingSession } from "../../platform/transcription.ts";
 
 const deps = { now: Date.now };
 
@@ -50,10 +51,15 @@ export function useLineEditor(sessionId: string | null, textOf: (at: number) => 
   const show = useCallback((at: number | null): void => {
     openRef.current = at;
     typedRef.current = null;
+    // While a line is open, the session's words are not rewritten under the person's typing (see tick).
+    if (at === null) setEditingSession(null, sessionRef.current ?? undefined);
+    else setEditingSession(sessionRef.current);
     setOpen(at);
   }, []);
   // Leaving the screen with a line open keeps what was typed.
   useEffect(() => save, [save]);
+  // Leaving the screen closes the line, so the session's words can be written again.
+  useEffect(() => () => setEditingSession(null, sessionRef.current ?? undefined), []);
   // The app leaving the front (iOS may close it next) keeps what was typed.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

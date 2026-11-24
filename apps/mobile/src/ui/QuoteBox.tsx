@@ -22,7 +22,7 @@ export function QuoteBox({ state, onShowSent, onRetry }: { state: QuoteState; on
         <>
           <Row title={creditsLabel(quote.credits)} right={<Caption>{`${quote.balance_after} left after`}</Caption>} />
           <Caption>{quote.retention === "zero" ? "Not stored in the cloud" : "Sent for this task only"}</Caption>
-          <Caption>Run by Cloudflare's AI service for Waypoint.</Caption>
+          <Caption>Run by Cloudflare's AI service for NotePath.</Caption>
           {onShowSent !== undefined ? (
             <Pressable accessibilityRole="button" accessibilityLabel="Show what's sent" onPress={onShowSent} style={styles.link}>
               <Text style={[styles.linkText, { color: colors.accent }]}>Show what's sent</Text>

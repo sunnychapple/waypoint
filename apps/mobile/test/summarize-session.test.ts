@@ -34,6 +34,7 @@ import { getSummary } from "../src/core/capture/summary.ts";
 import { migrate } from "../src/core/db/migrate.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { summarizeSession } from "../src/platform/summary.ts";
+import { asPerson } from "../src/platform/modelTurn.ts";
 import { createMemoryDb } from "./helpers/db.ts";
 
 const startedAt = new Date(2026, 10, 24, 9, 0).getTime();
@@ -133,6 +134,34 @@ describe("summarizeSession", () => {
     const input = String(state.summarize.mock.calls[0]?.[0]);
     expect(input).toContain("Cells have parts");
     expect(input).not.toContain("Secret password");
+  });
+
+  it("a line hidden during the model call gives no summary from the old text; the next run leaves the line out", async () => {
+    const id = savedRecording(["Cells have parts", "Side comment"]);
+    state.summarize.mockImplementationOnce(async () => {
+      state.db.run("INSERT INTO line_marks (id, session_id, t_start, hidden, updated_at) VALUES ('m1', ?, 1000, 1, 0)", [id]);
+      return { title: "Cell parts", summary: "Cells, and a side comment." };
+    });
+    await summarizeSession(id, 60_000);
+    expect(getSummary(state.db, id)?.summary).toBeNull();
+    await summarizeSession(id, 60_000);
+    expect(state.summarize).toHaveBeenCalledTimes(2);
+    expect(String(state.summarize.mock.calls[1]?.[0])).not.toContain("Side comment");
+    expect(getSummary(state.db, id)?.summary).toBe("Cells have parts.");
+  });
+
+  it("stops and runs again later while the person is waiting for the model", async () => {
+    const id = savedRecording(["Cells have parts"]);
+    let finish!: () => void;
+    const person = asPerson(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await summarizeSession(id, 60_000);
+    expect(state.summarize).not.toHaveBeenCalled();
+    expect(getSummary(state.db, id)?.summary).toBeNull();
+    // When the person's request ends, the stopped summary runs again by itself.
+    finish();
+    await person;
+    await vi.waitFor(() => expect(getSummary(state.db, id)?.summary).toBe("Cells have parts."));
+    expect(state.summarize).toHaveBeenCalledOnce();
   });
 
   it("runs again after a busy reject, and writes the summary on the retry", async () => {

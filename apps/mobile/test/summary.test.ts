@@ -44,9 +44,9 @@ describe("summary store", () => {
     db.run("UPDATE sessions SET state = 'saved', transcript = ?, ended_at = ? WHERE id = ?", [transcript, startedAt + 1000, id]);
   }
 
-  it("a new session has no summary, the app writes it, and the title is not the app's", () => {
+  it("a new session has no summary, the app writes it, and the title is the app's", () => {
     const row = startRecordingSession(db, deps, spaceId, true);
-    expect(getSummary(db, row.id)).toEqual({ summary: null, summaryAuto: true, titleAuto: false });
+    expect(getSummary(db, row.id)).toEqual({ summary: null, summaryAuto: true, titleAuto: true });
   });
 
   it("applySummary replaces the title of a session named by nameRecording, and sets the summary", () => {

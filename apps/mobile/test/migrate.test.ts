@@ -39,6 +39,15 @@ describe("migrate", () => {
     expect(db.all("SELECT id FROM sent_log")).toEqual([]);
   });
 
+  it("migrating from 10 sets every sync_state last_seq to 0, so shared spaces are fetched again once", () => {
+    const db = createMemoryDb();
+    migrate(db, MIGRATIONS.filter((m) => m.version <= 10));
+    db.run("INSERT INTO groups (id, kind, role, key_version, updated_at) VALUES ('g1', 'personal', 'owner', 1, 0)");
+    db.run("INSERT INTO sync_state (group_id, last_seq, pulled_at) VALUES ('g1', 42, 7)");
+    expect(migrate(db)).toBe(13);
+    expect(db.get("SELECT group_id, last_seq, pulled_at FROM sync_state")).toEqual({ group_id: "g1", last_seq: 0, pulled_at: 7 });
+  });
+
   it("a user_version above the latest migration throws", () => {
     const db = createMemoryDb();
     db.exec("PRAGMA user_version = 99");

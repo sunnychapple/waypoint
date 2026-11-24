@@ -13,12 +13,18 @@ import { isUnsupportedLanguage, NO_TEXT_BODY, NO_TEXT_TITLE, UNSUPPORTED_LANGUAG
 import { studyUnits } from "../../core/study/units.ts";
 import { getDb, writeDb } from "../../platform/db.ts";
 import { usePendingText } from "../../platform/pending.ts";
+import { asPerson } from "../../platform/modelTurn.ts";
 import { getAvailability, getContextSize, makeCards, makeQuiz } from "../../../modules/waypoint-model/index.ts";
 import { Body, Caption, PrimaryButton, Screen, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { ModelUnavailable } from "./ModelUnavailable.tsx";
 
-const PORT: ModelPort = { contextSize: getContextSize, makeCards, makeQuiz };
+// Each call waits its turn behind the summary (asPerson), so a run of several groups yields between them.
+const PORT: ModelPort = {
+  contextSize: getContextSize,
+  makeCards: (text, max) => asPerson(() => makeCards(text, max)),
+  makeQuiz: (text, count) => asPerson(() => makeQuiz(text, count)),
+};
 const LETTERS = ["A", "B", "C", "D"] as const;
 
 // Runs one quiz on this iPhone. Wrong answers are saved as flashcards as soon as they are picked.

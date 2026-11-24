@@ -17,7 +17,8 @@ const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000;
 // otherwise the session waits for its audio files to be transcribed.
 export function startRecordingSession(db: SqlDb, deps: Deps, spaceId: string, speechReady: boolean): SessionRow {
   const transcript = speechReady ? "live" : "waiting";
-  const row = createSession(db, deps, { spaceId, kind: "recording", title: DEFAULT_RECORDING_TITLE, state: "recording" });
+  // title_auto 1 from the start: a phone that syncs this row before Stop must not hold the default title as typed.
+  const row = createSession(db, deps, { spaceId, kind: "recording", title: DEFAULT_RECORDING_TITLE, state: "recording", titleAuto: true });
   db.transaction(() => {
     db.run("UPDATE sessions SET transcript = ? WHERE id = ?", [transcript, row.id]);
     db.run("UPDATE spaces SET last_used_at = ? WHERE id = ?", [deps.now(), spaceId]);
