@@ -5,6 +5,7 @@ import { failureCopy, type FailureAction } from "../../core/cloud/failure.ts";
 import { creditsLabel, priceOf } from "../../core/config/config.ts";
 import { contextCopy } from "../../core/explain/excerpt.ts";
 import { verdictOf, type ThreadItem } from "../../core/explain/explanations.ts";
+import { guessHeadline, guessSentence } from "../../core/explain/term.ts";
 import type { InstantSentTask } from "../../core/explain/sent.ts";
 import { formatOffset } from "../../core/format.ts";
 import { useSignOut } from "../../platform/auth.tsx";
@@ -14,6 +15,7 @@ import { Body, Caption, PrimaryButton, SecondaryButton, Title } from "../../ui/k
 import { useColors, type Colors } from "../../ui/theme.ts";
 import { CloudLine } from "../../ui/CloudLine.tsx";
 import { useExplain } from "./useExplain.ts";
+import { useLikelyTerm } from "./useLikelyTerm.ts";
 
 // D1–D8: a tapped word, explained by the cloud, with more detail, a double-check and Save. Opened as a sheet over the
 // recording or the session.
@@ -34,7 +36,7 @@ export default function ExplainSheet() {
   );
 }
 
-const HEADINGS: Record<InstantSentTask, string> = { explain: "Answer", more_detail: "More detail", double_check: "Double-check" };
+const HEADINGS: Record<InstantSentTask, string> = { explain: "What it means here", more_detail: "More detail", double_check: "Double-check" };
 const RUNNING: Record<InstantSentTask, string> = { explain: "Explaining…", more_detail: "Adding more detail…", double_check: "Double-checking…" };
 // Used only until the live price table (M13) has loaded.
 const FALLBACK_PRICES: Record<InstantSentTask, number> = { explain: 1, more_detail: 3, double_check: 4 };
@@ -63,6 +65,7 @@ function ExplainBody({
   const model = useExplain(sessionId, t, word, flagId, explanationId, pageId);
   const [showSent, setShowSent] = useState(false);
   const { phase, explanation, unsavedItem, offerResearch, pageNumber, pageId: resolvedPageId } = model;
+  const likely = useLikelyTerm(sessionId, word, model.excerpt, timed && resolvedPageId === undefined);
   const thread = explanation?.thread ?? [];
   const hasAnswer = thread.some((item) => item.kind === "explain");
   const explained = hasAnswer || unsavedItem?.kind === "explain";
@@ -106,11 +109,19 @@ function ExplainBody({
         <Title>{word}</Title>
         <Caption>
           {timed && resolvedPageId === undefined
-            ? `“${word}” · at ${formatOffset(t)}`
+            ? `Said at ${formatOffset(t)}`
             : pageNumber === null
               ? `“${word}”`
               : `“${word}” · on page ${pageNumber}`}
         </Caption>
+        {likely.guess !== null ? (
+          <View style={[styles.suggest, { backgroundColor: colors.accentSoft }]}>
+            <Caption>Suggested</Caption>
+            <Text style={[styles.suggestTitle, { color: colors.ink }]}>{guessHeadline(likely.guess)}</Text>
+            <Body>{guessSentence(likely.guess)}</Body>
+            <SecondaryButton label="Keep as said" onPress={likely.keep} />
+          </View>
+        ) : null}
 
         {phase.kind === "idle" && !explained ? (
           model.excerpt === "" ? (
@@ -137,6 +148,7 @@ function ExplainBody({
         {thread.map((item, index) => (
           <ThreadBlock key={`${item.sentId}-${index}`} item={item} colors={colors} />
         ))}
+        {hasAnswer ? <Caption>AI can be wrong. Check it with your teacher or text.</Caption> : null}
 
         {unsavedItem !== null ? (
           <View style={styles.block}>
@@ -242,4 +254,6 @@ const styles = StyleSheet.create({
   boxTitle: { fontSize: 16, fontWeight: "700" },
   boxBody: { fontSize: 15, lineHeight: 21 },
   verdict: { borderLeftWidth: 4, paddingLeft: 12 },
+  suggest: { padding: 14, borderRadius: 16, gap: 8 },
+  suggestTitle: { fontSize: 20, fontWeight: "700" },
 });

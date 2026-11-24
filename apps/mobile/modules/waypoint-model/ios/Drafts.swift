@@ -55,3 +55,22 @@ Do not add facts that are not in the text. Write short, plain sentences at the r
   @Guide(description: "Two or three short sentences saying what the text covers, in the language of the text")
   var summary: String
 }
+
+let termInstructions = """
+You check one word in a transcript written by speech recognition. Speech recognition sometimes writes a term from \
+another language, a name, or a special word as a similar-sounding common word. Decide from the transcript whether that \
+happened to this word. When you are not sure, say it was heard right.
+"""
+
+@Generable struct TermGuessDraft {
+  @Guide(description: "True only when the speaker probably said a different term than the word the transcript wrote")
+  var misheard: Bool
+  @Guide(description: "The term the speaker probably said, spelled in the alphabet of the transcript. Empty when misheard is false.")
+  var term: String
+  @Guide(description: "The same term written in its own writing system, or the same as term when that is the same alphabet")
+  var original: String
+  @Guide(description: "The name of the language the term comes from, in the language of the transcript")
+  var language: String
+  @Guide(description: "What the term means, in a few words, in the language of the transcript")
+  var meaning: String
+}

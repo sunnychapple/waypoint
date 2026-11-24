@@ -90,6 +90,15 @@ public class WaypointModelModule: Module {
         }
       }
     }
+
+    AsyncFunction("likelyTerm") { (word: String, context: String) async throws -> [String: Any] in
+      try await self.run { () async throws -> [String: Any] in
+        let prompt = "The transcript wrote the word \"\(word)\". Did the speaker probably say a different term?\n\nTranscript:\n\(context)"
+        let session = LanguageModelSession(instructions: termInstructions)
+        let guess = try await session.respond(to: prompt, generating: TermGuessDraft.self).content
+        return ["misheard": guess.misheard, "term": guess.term, "original": guess.original, "language": guess.language, "meaning": guess.meaning]
+      }
+    }
   }
 
   // Apple's default filter refuses ordinary schoolwork such as a page about a war. The text is the student's own page, so a
