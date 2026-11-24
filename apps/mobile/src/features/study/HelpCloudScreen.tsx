@@ -145,7 +145,7 @@ export default function HelpCloudScreen() {
       {job !== null && job.problem === "unreadable" ? <Body>The answer arrived but couldn't be opened on this iPhone.</Body> : null}
       {missing ? (
         <>
-          <Body>This answer isn't kept because its page was deleted.</Body>
+          <Body>This answer isn't kept any more. Its page or recording was deleted.</Body>
           <Caption>{`${creditsLabel(job.spent ?? job.quoted)} used`}</Caption>
           <PrimaryButton label="Done" onPress={() => router.back()} />
         </>
