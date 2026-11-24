@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
@@ -15,7 +15,7 @@ import { applyMarks, buildTimeline, groupTimeline, type TimelineItem, type Timel
 import type { Piece } from "../../core/capture/transcript.ts";
 import { deleteSessionRow, getSession, renameSession } from "../../core/capture/sessions.ts";
 import { lineMarks } from "../../core/capture/marks.ts";
-import { explainedWords, paragraphSelection, type Selection } from "../../core/capture/selection.ts";
+import { explainedWords, paragraphSelection, type Selection, type WordRef } from "../../core/capture/selection.ts";
 import type { SqlDb } from "../../core/db/sql.ts";
 import { explainedInTranscript, type ExplainedTerm } from "../../core/explain/explanations.ts";
 import { getSpace } from "../../core/db/spaces.ts";
@@ -37,11 +37,11 @@ import { WordText } from "../../ui/WordText.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { getRecorderStatus } from "../../../modules/waypoint-audio/index.ts";
 import { PageTextEditor } from "./PageTextEditor.tsx";
-import { ParagraphRow } from "./ParagraphRow.tsx";
+import { ParagraphRow, paragraphSlice } from "./ParagraphRow.tsx";
 import { RecordingPlayer } from "./RecordingPlayer.tsx";
 import { SummaryCard } from "./SummaryCard.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
-import { selectionModel } from "./selectionModel.ts";
+import { liveSelection, selectionModel, type SelectionModel } from "./selectionModel.ts";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 
 // Saved explanations of a recording (none while it is live, or for pages): a constant, so its identity is stable.
@@ -113,14 +113,34 @@ export default function SessionScreen() {
     () => explainedWords(lines.map((line) => ({ at: line.at, text: line.text })), explanations),
     [lines, explanations],
   );
+  // The rows, and each paragraph's own slice of the marks and explained words: both change with the data, not with a tap.
+  const rows = useMemo(() => groupTimeline(shown), [shown]);
+  const slices = useMemo(
+    () => new Map(rows.flatMap((row) => (row.kind === "paragraph" ? [[row.key, paragraphSlice(row.lines, marks, explained)] as const] : []))),
+    [rows, marks, explained],
+  );
+  // The handlers the rows get are the same across taps. They call the latest selection model (set below each render).
+  const modelRef = useRef<SelectionModel | null>(null);
+  const onWord = useCallback((ref: WordRef, word: string) => modelRef.current?.tapWord(ref, word), []);
+  const onSpeaker = useCallback((at: number) => modelRef.current?.renameRun(at), []);
+  const selectParagraph = useCallback((paragraph: TimelineLine[]) => setSelection(paragraphSelection(paragraph)), []);
+  const playAt = useCallback((at: number) => setSeek({ ms: at }), []);
+  // A selection whose words were hidden or removed by an edit or a sync picks nothing: it is cleared, not kept.
+  const stale = selection !== null && liveSelection(selection, lines) === null;
+  useEffect(() => {
+    if (stale) setSelection(null);
+  }, [stale]);
 
   if (!data) return <Screen>{null}</Screen>;
   const { session, spaceName, pages, research, second, overviews, links, role, playParts } = data;
   // A viewer of a shared space gets no selection, no bar, no name, no hiding (Next 1).
   const canChange = role !== "viewer";
   const hiddenCount = [...marks.values()].filter((mark) => mark.hidden).length;
-  const paragraphView = { marks, explained, selection };
   const selected = selectionModel({ sessionId: id, lines, marks, explained, explanations, selection, setSelection, canChange });
+  modelRef.current = selected;
+  // The selected paragraphs are the ones holding a picked word; the others get no selection and are not redrawn by a tap.
+  const activeSelection = selected.picked === null ? null : selection;
+  const pickedAts = new Set(selected.picked?.lines.map((line) => line.at));
   const playable = playParts.length > 0 && (session.state === "saved" || session.state === "interrupted");
   // A mini app or a diagram is listed only while its flag is on (M25b).
   const made = data.made.filter((item) => (item.kind !== "mini_app" || miniAppsOn) && (item.kind !== "diagram" || diagramsOn));
@@ -339,21 +359,26 @@ export default function SessionScreen() {
             {second.incomplete && !second.truncated ? <Caption>Some parts of this recording aren't in the better transcript.</Caption> : null}
           </>
         ) : (
-          groupTimeline(shown).map((row) =>
+          rows.map((row) =>
             row.kind === "paragraph" ? (
               <ParagraphRow
                 key={row.key}
                 at={row.at}
                 lines={row.lines}
                 lit={row.lines.some((line) => line.key === lit)}
-                onLayout={(event) => {
-                  if (targetKey !== null && row.lines.some((line) => line.key === targetKey)) landOn(targetKey, event.nativeEvent.layout.y);
-                }}
-                onPlay={playable && getRecorderStatus().state === "idle" ? () => setSeek({ ms: row.at }) : undefined}
-                view={paragraphView}
-                onWord={selected.tapWord}
-                onSpeaker={canChange ? selected.renameRun : undefined}
-                onSelectParagraph={canChange ? () => setSelection(paragraphSelection(row.lines)) : undefined}
+                onLayout={
+                  targetKey !== null && row.lines.some((line) => line.key === targetKey)
+                    ? (event) => landOn(targetKey, event.nativeEvent.layout.y)
+                    : undefined
+                }
+                onPlay={playable && getRecorderStatus().state === "idle" ? playAt : undefined}
+                marks={slices.get(row.key)?.marks}
+                explained={slices.get(row.key)?.explained}
+                selection={row.lines.some((line) => pickedAts.has(line.at)) ? activeSelection : null}
+                canChange={canChange}
+                onWord={onWord}
+                onSpeaker={canChange ? onSpeaker : undefined}
+                onSelectParagraph={canChange ? selectParagraph : undefined}
               />
             ) : (
               <TimeMarkRow key={row.key} item={row} interactive canChange={canChange} />

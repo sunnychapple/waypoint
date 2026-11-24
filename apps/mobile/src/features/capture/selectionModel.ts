@@ -34,11 +34,18 @@ export type SelectionModel = {
   renameRun: (at: number) => void;
 };
 
+// A selection still picks words when its words are among the shown lines. When an edit or a sync hid or removed them, it
+// picks nothing and counts as no selection (the screen clears it).
+export function liveSelection(selection: Selection | null, lines: TimelineLine[]): Selection | null {
+  if (selection === null) return null;
+  return pickedText(lines.map((line) => ({ at: line.at, text: line.text })), selection).lines.length > 0 ? selection : null;
+}
+
 // The selection and what the bar does with it (S2).
 export function selectionModel(input: SelectionInput): SelectionModel {
-  const { sessionId, lines, marks, explained, explanations, selection, setSelection, canChange } = input;
-  const found = selection === null ? null : pickedText(lines.map((line) => ({ at: line.at, text: line.text })), selection);
-  const picked = found !== null && found.lines.length > 0 ? found : null;
+  const { sessionId, lines, marks, explained, explanations, setSelection, canChange } = input;
+  const selection = liveSelection(input.selection, lines);
+  const picked = selection === null ? null : pickedText(lines.map((line) => ({ at: line.at, text: line.text })), selection);
   const starts = picked?.lines.map((line) => line.at) ?? [];
 
   function nameLines(at: number[]): void {

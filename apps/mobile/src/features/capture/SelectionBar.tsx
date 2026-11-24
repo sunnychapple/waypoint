@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
   quote: { flex: 1, fontSize: 15, fontStyle: "italic" },
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   hint: { fontSize: 13 },
-  actions: { flexDirection: "row", justifyContent: "space-around" },
+  actions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-around" },
   button: { minWidth: 64, minHeight: 52, alignItems: "center", justifyContent: "center", gap: 4 },
   label: { fontSize: 13, fontWeight: "600" },
 });
