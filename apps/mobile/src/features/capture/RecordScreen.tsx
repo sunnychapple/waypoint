@@ -363,7 +363,7 @@ function Dock({ model }: { model: Model }) {
       <Waveform />
 
       <View style={styles.actions}>
-        <ActionButton label="Snap page" icon="camera.fill" onPress={model.photo} />
+        <ActionButton label="Photo" icon="camera.fill" onPress={model.photo} />
         <ActionButton label="Ask later" icon="questionmark.bubble" onPress={model.flag} />
       </View>
     </View>
