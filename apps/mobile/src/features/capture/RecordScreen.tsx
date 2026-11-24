@@ -1,4 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SqlDb } from "../../core/db/sql.ts";
+import { lineMarks, type LineMark } from "../../core/capture/marks.ts";
+import { explainedWords, paragraphSelection, refKey, type Selection, type WordRef } from "../../core/capture/selection.ts";
+import { explainedInTranscript, type ExplainedTerm } from "../../core/explain/explanations.ts";
 import {
   Alert,
   Linking,
@@ -15,16 +19,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { setRecordingLabel } from "../../../modules/waypoint-audio/index.ts";
-import { formatClock, formatOffset } from "../../core/format.ts";
-import { groupTimeline, PARAGRAPH_PAUSE_MS, type TimelineRow as Row } from "../../core/capture/timeline.ts";
+import { countLabel, formatClock, formatOffset } from "../../core/format.ts";
+import { applyMarks, groupTimeline, PARAGRAPH_PAUSE_MS, type TimelineLine, type TimelineRow as Row } from "../../core/capture/timeline.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
-import { useQuery } from "../../platform/db.ts";
+import { useQuery, useStableQuery } from "../../platform/db.ts";
 import { setRecordScreenShowing } from "../../platform/push.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { isAtEnd } from "../../core/capture/follow.ts";
-import { ParagraphRow } from "./ParagraphRow.tsx";
+import { ParagraphRow, paragraphSlice } from "./ParagraphRow.tsx";
+import { SelectionBar } from "./SelectionBar.tsx";
+import { liveSelection, selectionModel } from "./selectionModel.ts";
 import { TimeMarkRow } from "./TimelineMarks.tsx";
 import { Waveform } from "./Waveform.tsx";
 import { useRecording, type Banner, type TimelineItem } from "./useRecording.ts";
@@ -106,6 +112,32 @@ export default function RecordScreen() {
 
 type Model = ReturnType<typeof useRecording>;
 
+type Extras = { marks: LineMark[]; explanations: ExplainedTerm[] };
+
+// The person's marks and saved answers for the live screen, read again after every write.
+function transcriptExtras(db: SqlDb, sessionId: string | null): Extras {
+  return sessionId === null ? { marks: [], explanations: [] } : { marks: lineMarks(db, sessionId), explanations: explainedInTranscript(db, sessionId) };
+}
+
+// What a row draws from the screen: the marks, the explained words, and the selection.
+type RowView = { marks: ReadonlyMap<number, LineMark>; explained: ReadonlyMap<string, string>; selection: Selection | null };
+type RowActions = { word: (ref: WordRef, word: string) => void; speaker: (at: number) => void; selectLines: (lines: TimelineLine[]) => void };
+
+// Everything a row draws, as text. A row redraws only when this changes.
+function rowSig(item: Row, view: RowView): string {
+  if (item.kind !== "paragraph") return JSON.stringify(item);
+  const { selection } = view;
+  const explained = [...view.explained.keys()];
+  return item.lines
+    .map((line) => {
+      const mark = view.marks.get(line.at);
+      const chosen = selection !== null && line.at >= selection.from.at && line.at <= selection.to.at ? `${refKey(selection.from)}-${refKey(selection.to)}` : "";
+      const words = explained.filter((key) => key.startsWith(`${line.at}:`)).join(",");
+      return `${line.key}|${line.text}|${mark === undefined ? "" : JSON.stringify(mark)}|${chosen}|${words}`;
+    })
+    .join("\n");
+}
+
 function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const colors = useColors();
   const scroll = useRef<ScrollViewInstance>(null);
@@ -113,9 +145,27 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
   const touching = useRef(false); // the person's finger or fling is moving the list; the screen's own scrolling never sets this
   const position = useRef({ contentHeight: 0, offsetY: 0, viewHeight: 0 });
   const [showJump, setShowJump] = useState(false);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const paused = model.recorder === "paused";
   const showPause = paused && model.pauseReason !== "user" && model.pauseReason !== "none";
-  const rows = useMemo(() => groupTimeline(model.timeline), [model.timeline]);
+  const extras = useStableQuery((db) => transcriptExtras(db, model.sessionId), model.sessionId ?? "");
+  const marks = useMemo(() => new Map(extras.marks.map((mark) => [mark.tStart, mark] as const)), [extras.marks]);
+  const timeline = useMemo(() => applyMarks(model.timeline, marks, showHidden), [model.timeline, marks, showHidden]);
+  const rows = useMemo(() => groupTimeline(timeline), [timeline]);
+  const lines = useMemo(() => timeline.filter((item): item is TimelineLine => item.kind === "line"), [timeline]);
+  const explained = useMemo(
+    () => explainedWords(lines.map((line) => ({ at: line.at, text: line.text })), extras.explanations),
+    [lines, extras.explanations],
+  );
+  const view = useMemo<RowView>(() => ({ marks, explained, selection }), [marks, explained, selection]);
+  const sigs = useMemo(() => rows.map((row) => rowSig(row, view)), [rows, view]);
+  const hiddenCount = extras.marks.filter((mark) => mark.hidden).length;
+  // A selection whose words were hidden picks nothing: it is cleared, not kept.
+  const stale = selection !== null && liveSelection(selection, lines) === null;
+  useEffect(() => {
+    if (stale) setSelection(null);
+  }, [stale]);
   // Words still being heard that will join the last paragraph show under it with no time of their own.
   const lastRow = rows.at(-1);
   const lastLine = lastRow?.kind === "paragraph" ? lastRow.lines.at(-1) : undefined;
@@ -136,6 +186,27 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
     setFollowing(isAtEnd(position.current));
   }
 
+  // Rows are memoized, so they call the latest selection model through this ref, and their handlers never change.
+  const selected = selectionModel({
+    sessionId: model.sessionId,
+    lines,
+    marks,
+    explained,
+    explanations: extras.explanations,
+    selection,
+    setSelection,
+    canChange: true,
+    // Words chosen while new lines arrive stay in view: the list stops following until Jump to live.
+    onSelect: () => setFollowing(false),
+  });
+  const latest = useRef(selected);
+  latest.current = selected;
+  const [actions] = useState<RowActions>(() => ({
+    word: (ref, word) => latest.current.tapWord(ref, word),
+    speaker: (at) => latest.current.renameRun(at),
+    selectLines: (rowLines) => setSelection(paragraphSelection(rowLines)),
+  }));
+
   return (
     <View style={styles.transcriptArea}>
       <View style={styles.topRow}>
@@ -144,6 +215,22 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         <View style={styles.spacer} />
       </View>
       <Title>{model.title}</Title>
+
+      {hiddenCount > 0 || showHidden ? (
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => {
+            setSelection(null);
+            setShowHidden(!showHidden);
+          }}
+          style={styles.hiddenRow}
+        >
+          <Text style={[styles.hiddenText, { color: colors.accent }]}>
+            {showHidden ? "Hide hidden lines" : `Show ${countLabel(hiddenCount, "hidden line", "hidden lines")}`}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {model.banner ? <BannerView banner={model.banner} /> : null}
       {showPause ? (
@@ -216,8 +303,8 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
           if (following.current && !touching.current) scroll.current?.scrollToEnd({ animated: true });
         }}
       >
-        {rows.map((item) => (
-          <TimelineRow key={item.key} item={item} sessionId={model.sessionId} />
+        {rows.map((item, i) => (
+          <TimelineRow key={item.key} item={item} sig={sigs[i] ?? ""} view={view} actions={actions} />
         ))}
         {model.volatile ? (
           <View style={[styles.volatile, continuesParagraph ? styles.volatileJoined : null]}>
@@ -227,7 +314,7 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
         ) : null}
       </ScrollView>
 
-      {showJump ? (
+      {showJump && selected.picked === null ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Jump to live"
@@ -247,6 +334,21 @@ function Transcript({ model, onClose }: { model: Model; onClose: () => void }) {
           <SymbolView name="questionmark.bubble.fill" tintColor={colors.bg} size={14} />
           <Text style={[styles.toastText, { color: colors.bg }]}>Saved to ask later at {formatOffset(model.toast.t)}</Text>
         </View>
+      ) : null}
+
+      {selected.picked !== null ? (
+        <SelectionBar
+          text={selected.picked.text}
+          single={selected.single}
+          canExplain={selected.canExplain}
+          highlighted={selected.highlighted}
+          inset={false}
+          onExplain={selected.explain}
+          onHighlight={selected.highlight}
+          onNote={selected.note}
+          onMore={selected.more}
+          onClose={() => setSelection(null)}
+        />
       ) : null}
     </View>
   );
@@ -278,28 +380,30 @@ function FolderPill({ sessionId, fallback, title }: { sessionId: string | null; 
   );
 }
 
+type TimelineRowProps = { item: Row; sig: string; view: RowView; actions: RowActions };
+
 const TimelineRow = memo(
-  function TimelineRow({ item, sessionId }: { item: Row; sessionId: string | null }) {
+  function TimelineRow({ item, view, actions }: TimelineRowProps) {
     if (item.kind !== "paragraph") return <TimeMarkRow item={item} interactive={item.kind === "photo"} canChange />;
+    // Only this paragraph's slice of the marks and words, and the selection only when it reaches this paragraph.
+    const slice = paragraphSlice(item.lines, view.marks, view.explained);
+    const range = view.selection;
+    const reached = range !== null && item.lines.some((line) => line.at >= range.from.at && line.at <= range.to.at);
     return (
       <ParagraphRow
         at={item.at}
         lines={item.lines}
-        onWord={(ref, word) => {
-          if (sessionId !== null) router.push({ pathname: "/explain", params: { sessionId, t: String(ref.at), word } });
-        }}
+        marks={slice.marks}
+        explained={slice.explained}
+        selection={reached ? range : null}
+        onWord={actions.word}
+        onSpeaker={actions.speaker}
+        onSelectParagraph={actions.selectLines}
       />
     );
   },
-  // A paragraph changes only in which lines it holds; a written line never changes.
-  (a, b) =>
-    a.sessionId === b.sessionId &&
-    (a.item === b.item ||
-      (a.item.key === b.item.key &&
-        (a.item.kind !== "note" || b.item.kind !== "note" || a.item.text === b.item.text) &&
-        (a.item.kind !== "paragraph" ||
-          b.item.kind !== "paragraph" ||
-          a.item.lines.map((line) => line.key).join() === b.item.lines.map((line) => line.key).join()))),
+  // Only what the row draws: new lines keep arriving while recording, and every other row stays as it is.
+  (a, b) => a.sig === b.sig && a.actions === b.actions,
 );
 
 function BannerView({ banner }: { banner: Banner }) {
@@ -402,6 +506,8 @@ const styles = StyleSheet.create({
   micOff: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center" },
   footer: { padding: 20, gap: 12 },
   transcriptArea: { flex: 1, paddingHorizontal: 20, paddingTop: 8, gap: 12 },
+  hiddenRow: { minHeight: 44, justifyContent: "center", alignSelf: "flex-start" },
+  hiddenText: { fontSize: 15, fontWeight: "600" },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   circle: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   pill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, height: 36, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth },
