@@ -33,13 +33,27 @@ public class WaypointPagesModule: Module {
     AsyncFunction("openCamera") { (sessionId: String, promise: Promise) in
       guard !self.cameraOpen, self.scan == nil else { promise.reject("busy", "The camera is already open"); return }
       guard AVCaptureDevice.default(for: .video) != nil else { promise.reject("no_camera", "This iPhone has no camera"); return }
+      // Restricted by Screen Time or a profile: Settings cannot change it, so there is nothing for the person to open.
+      guard AVCaptureDevice.authorizationStatus(for: .video) != .restricted else {
+        promise.reject("camera_restricted", "The camera is turned off on this iPhone."); return
+      }
       self.cameraOpen = true
       AVCaptureDevice.requestAccess(for: .video) { granted in
         DispatchQueue.main.async {
-          guard granted, let presenter = self.appContext?.utilities?.currentViewController() else {
+          guard granted else {
             self.cameraOpen = false
-            if granted { promise.reject("no_view", "Nothing to show the camera from") }
-            else { promise.reject("camera_denied", "Camera access is off") }
+            promise.reject("camera_denied", "Camera access is off")
+            return
+          }
+          guard let presenter = self.appContext?.utilities?.currentViewController() else {
+            self.cameraOpen = false
+            promise.reject("no_view", "Nothing to show the camera from")
+            return
+          }
+          // Something else is already on screen (a sheet or the page scanner): the camera cannot be shown over it.
+          guard presenter.presentedViewController == nil else {
+            self.cameraOpen = false
+            promise.reject("busy", "The camera is already open")
             return
           }
           let camera = PhotoCameraController(sessionId: sessionId) { [weak self] result in
@@ -53,7 +67,10 @@ public class WaypointPagesModule: Module {
             case .failed(let message): promise.reject("camera_failed", message)
             }
           }
-          presenter.present(camera, animated: true)
+          // A camera that finished while it was still being presented is dismissed here.
+          presenter.present(camera, animated: true) {
+            if camera.isFinished { camera.dismiss(animated: true) }
+          }
         }
       }
     }.runOnQueue(.main)

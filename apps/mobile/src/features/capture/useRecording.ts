@@ -43,7 +43,7 @@ import { deleteSessionRow, type SessionRow } from "../../core/capture/sessions.t
 import { buildTimeline, type TimelineItem } from "../../core/capture/timeline.ts";
 import { getSavingTo, getSpace } from "../../core/db/spaces.ts";
 import { writeDb } from "../../platform/db.ts";
-import { deleteSessionFiles } from "../../platform/files.ts";
+import { deleteFile, deleteSessionFiles } from "../../platform/files.ts";
 import { askForPush } from "../../platform/push.ts";
 
 const deps = { now: Date.now, newId: randomUUID };
@@ -103,6 +103,8 @@ export function useRecording(): RecordingModel {
   const clockOffsetRef = useRef(0);
   const brokeRef = useRef(false);
   const stoppingRef = useRef(false);
+  // True while the camera is opening or open: a second Photo tap does nothing.
+  const photoBusyRef = useRef(false);
 
   // Native events for this session only.
   useEffect(() => {
@@ -289,31 +291,45 @@ export function useRecording(): RecordingModel {
   // Photo for a board or a demonstration; Page in the camera opens the page scanner instead.
   async function photo(): Promise<void> {
     const current = sessionRef.current;
-    if (!current) return;
-    let files: string[];
+    if (!current || photoBusyRef.current) return;
+    photoBusyRef.current = true;
     try {
-      const shot = await openCamera(current.id);
-      if (shot.kind === "cancelled") return;
-      if (shot.kind === "photo") files = [shot.file];
-      else if (!isScannerSupported()) {
-        Alert.alert("This iPhone can't scan pages.");
+      // `at` is epoch ms: the shutter for a photo, the time of the scan for pages.
+      const shots: { file: string; at: number }[] = [];
+      try {
+        const shot = await openCamera(current.id);
+        if (shot.kind === "cancelled") return;
+        if (shot.kind === "photo") shots.push({ file: shot.file, at: shot.capturedAt });
+        else if (!isScannerSupported()) {
+          Alert.alert("This iPhone can't scan pages.");
+          return;
+        } else for (const page of await scanPages(current.id)) shots.push({ file: page.file, at: Date.now() });
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+        if (code === "camera_denied") {
+          Alert.alert("NotePath can't use the camera", "Turn on Camera for NotePath in Settings.", [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Settings", onPress: () => void Linking.openSettings() },
+          ]);
+        } else if (code === "camera_restricted") {
+          Alert.alert("The camera is turned off on this iPhone.");
+        } else {
+          Alert.alert("Couldn't take the photo.", messageOf(error));
+        }
         return;
-      } else files = (await scanPages(current.id)).map((page) => page.file);
-    } catch (error) {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === "camera_denied") {
-        Alert.alert("NotePath can't use the camera", "Turn on Camera for NotePath in Settings.", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
-        ]);
-      } else {
-        Alert.alert("Couldn't take the photo.", messageOf(error));
       }
-      return;
-    }
-    for (const file of files) {
-      const t = Date.now() - current.startedAt + clockOffsetRef.current;
-      const id = writeDb((db) => addPhoto(db, deps, current.id, t, file));
-      setPhotos((previous) => [...previous, { id, t, file }]);
+      // The session changed or ended while the camera was open: the photos are not attached to it.
+      if (sessionRef.current?.id !== current.id || stoppingRef.current) {
+        for (const shot of shots) deleteFile(shot.file);
+        return;
+      }
+      for (const shot of shots) {
+        const t = shot.at - current.startedAt + clockOffsetRef.current;
+        const id = writeDb((db) => addPhoto(db, deps, current.id, t, shot.file));
+        setPhotos((previous) => [...previous, { id, t, file: shot.file }]);
+      }
+    } finally {
+      photoBusyRef.current = false;
     }
   }
 

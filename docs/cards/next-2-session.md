@@ -1038,6 +1038,19 @@ Checks: `npm run typecheck`, `npm test`, `npm run test:swift`, `npm run export:i
 
 Known limits: a photo and a page from the recording are both stored as `photo` captures, so the timeline and the media panel call both "Photo". Zoom does not carry over between photos.
 
+### Review fixes
+
+- The camera rejects a second open while a sheet or the page scanner is on screen (`busy`), and clears its open state on every path that does not present.
+- Restricted by Screen Time or a profile (`camera_restricted`) shows "The camera is turned off on this iPhone." with no Settings button. Denied keeps its message.
+- The photo's time is the shutter (`capturedAt`, epoch ms), not the time the camera closed. If the session changed or ended while the camera was open, the photo is discarded and its file deleted. Pages keep the time of the scan.
+- A second Photo tap while the camera is opening or open does nothing (ref guard in `useRecording`).
+- Cancel and Photo/Page are disabled while a photo is taken. A photo that finishes after the camera closed is deleted.
+- An interruption or runtime error from the capture session ends the camera with the failure message. A configuration failure ends it on the next main-queue turn.
+- `configure()` stays on the main queue: it sets up the zoom scale, the rotation coordinator and the controls, which read it on the main queue, so moving it needs a rewrite of the start-up path.
+- Accessibility: the active zoom button has the selected trait and reads "Zoom 2 times, selected"; the segmented control is "Photo or page"; zoom buttons are at least 44 wide.
+
+Known limit: the iPhone's shutter sound may be heard in the recording.
+
 ---
 
 ## S5 · Media panel: photos, pages and links
