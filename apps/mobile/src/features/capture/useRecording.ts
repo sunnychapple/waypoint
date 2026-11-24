@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState } from "react-native";
+import { Alert, AppState, Linking } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -21,7 +21,7 @@ import {
   type RecorderState,
   type SpeechStatus,
 } from "../../../modules/waypoint-audio/index.ts";
-import { isScannerSupported, scanPages } from "../../../modules/waypoint-pages/index.ts";
+import { isScannerSupported, openCamera, scanPages } from "../../../modules/waypoint-pages/index.ts";
 import { SECOND_ALWAYS_KEY } from "../../core/capture/second.ts";
 import { addPiece, EMPTY_LIVE, type LiveTranscript, type Piece } from "../../core/capture/transcript.ts";
 import { getSetting } from "../../core/db/settings.ts";
@@ -286,21 +286,34 @@ export function useRecording(): RecordingModel {
     setToast({ t });
   }
 
+  // Photo for a board or a demonstration; Page in the camera opens the page scanner instead.
   async function photo(): Promise<void> {
     const current = sessionRef.current;
     if (!current) return;
-    if (!isScannerSupported()) {
-      Alert.alert("Photos aren't supported on this iPhone.");
+    let files: string[];
+    try {
+      const shot = await openCamera(current.id);
+      if (shot.kind === "cancelled") return;
+      if (shot.kind === "photo") files = [shot.file];
+      else if (!isScannerSupported()) {
+        Alert.alert("This iPhone can't scan pages.");
+        return;
+      } else files = (await scanPages(current.id)).map((page) => page.file);
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "camera_denied") {
+        Alert.alert("NotePath can't use the camera", "Turn on Camera for NotePath in Settings.", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        ]);
+      } else {
+        Alert.alert("Couldn't take the photo.", messageOf(error));
+      }
       return;
     }
-    try {
-      for (const page of await scanPages(current.id)) {
-        const t = Date.now() - current.startedAt + clockOffsetRef.current;
-        const id = writeDb((db) => addPhoto(db, deps, current.id, t, page.file));
-        setPhotos((previous) => [...previous, { id, t, file: page.file }]);
-      }
-    } catch (error) {
-      Alert.alert("Couldn't take the photo.", messageOf(error));
+    for (const file of files) {
+      const t = Date.now() - current.startedAt + clockOffsetRef.current;
+      const id = writeDb((db) => addPhoto(db, deps, current.id, t, file));
+      setPhotos((previous) => [...previous, { id, t, file }]);
     }
   }
 
