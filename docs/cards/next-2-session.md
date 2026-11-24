@@ -1340,6 +1340,16 @@ Known limits: a link shows its address, not the page's title (nothing is fetched
 
 ---
 
+### Review fixes
+
+- Jump: the Media panel adds `n=<Date.now()>` to the jump, and SessionScreen's `jumpKey` includes it, so the same photo or page lands again each time.
+- Links: only text with an explicit `http://` or `https://` (any case) or starting `www.` counts, so `index.html` and `main.py` are not links. Trailing `.,;:!?'"` and `。`, `、`, `…` are stripped; `)`, `]`, `}` only when unbalanced. Each candidate is parsed with `new URL`, kept only if http(s), and skipped when over 2000 characters (not truncated). Duplicates collapse on the href without its trailing `/`.
+- Rows: the title is the URL's `hostname` (punycode for non-ASCII); the row opens `url.href`. One button labelled "Open <hostname> in the browser", with the link's page or time as plain text. The separate "Go to" button is gone, so a link no longer jumps to its moment; photos and pages still do.
+- Thumbnails: React Native `Image` with `resizeMethod="resize"` at a fixed size from the screen width (three columns). expo-image is not a dependency and `package.json` is not in this card's files, so it was not added. The grid is a `FlatList` with `numColumns={3}`; this screen no longer sits inside `Screen`'s ScrollView.
+- Data: `useStableQuery` instead of `useQuery`, so a recording's writes redraw the screen only when the media or links change.
+
+Checks: `npm run typecheck`, `npm test`, `npm run export:ios`.
+
 ## S6 · Fix transcript from a suggested term
 
 Branch `feat/n2-s6-fix-term`. **Last card**: after S3 is merged and after the transcript-editing group's card that adds `editSegmentText` (in `src/core/capture/`) is merged. Files, and no others:

@@ -61,6 +61,7 @@ function RootStack() {
         <Stack.Screen name="pages/new" />
         <Stack.Screen name="pages/[id]" />
         <Stack.Screen name="session/[id]" />
+        <Stack.Screen name="media/[id]" />
         <Stack.Screen name="later" />
         <Stack.Screen
           name="explain"
