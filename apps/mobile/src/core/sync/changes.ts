@@ -315,7 +315,15 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     // A note started before this member joined "from now" (open question 56) is not theirs to see.
     if (here === null && typeof change.row.started_at === "number" && change.row.started_at < historyFrom(db, groupId) - HISTORY_FROM_SLACK_MS) return "older";
     if (!newer(db, table, key, change.at, deviceId)) return "older";
-    upsertRow(db, "sessions", { ...withSessionDefaults(db, key, change.row), space_id: space });
+    let row = withSessionDefaults(db, key, change.row);
+    // A title this phone's person typed wins over a title the app made on another phone. This phone keeps its title and
+    // sends it back, so the other phones take it too (its dirty row gets a newer clock when the outbox is collected).
+    const typed = here !== null ? db.get<{ title: string; title_auto: number }>("SELECT title, title_auto FROM sessions WHERE id = ?", [key]) : null;
+    if (typed !== null && typed !== undefined && typed.title_auto === 0 && row.title_auto === 1 && typed.title !== row.title) {
+      row = { ...row, title: typed.title, title_auto: 0 };
+      db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('sessions', ?, 0, NULL)", [key]);
+    }
+    upsertRow(db, "sessions", { ...row, space_id: space });
     retryPending(db, groupId, space, key);
     return "applied";
   }
@@ -390,19 +398,20 @@ function upsertRow(db: SqlDb, table: ChildTable, source: Record<string, string |
 }
 
 // A session sent by an app version before migration 13 has no title_auto, summary or summary_auto: this iPhone's values
-// stay. A title that changed on that phone was typed by a person, so it is no longer the app's.
+// stay. A title that changed on that phone was typed by a person, so it is no longer the app's. The three columns are
+// always normalized: title_auto and summary_auto to 0 or 1 (a number other than 0 is 1), summary to a string of at most
+// 2,000 characters or null.
 function withSessionDefaults(db: SqlDb, id: string, row: Record<string, string | number | null>): Record<string, string | number | null> {
-  if ("title_auto" in row && "summary" in row && "summary_auto" in row) return row;
   const here = db.get<{ title: string; title_auto: number; summary: string | null; summary_auto: number }>(
     "SELECT title, title_auto, summary, summary_auto FROM sessions WHERE id = ?",
     [id],
   );
-  return {
-    ...row,
-    title_auto: "title_auto" in row ? (row.title_auto ?? 0) : here !== null && here.title === row.title ? here.title_auto : 0,
-    summary: "summary" in row ? (row.summary ?? null) : (here?.summary ?? null),
-    summary_auto: "summary_auto" in row ? (row.summary_auto ?? 1) : (here?.summary_auto ?? 1),
-  };
+  const flag = (value: string | number | null | undefined, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) ? (value !== 0 ? 1 : 0) : fallback;
+  const titleAuto = "title_auto" in row ? flag(row.title_auto, 0) : here !== null && here.title === row.title ? here.title_auto : 0;
+  const summary = "summary" in row ? (typeof row.summary === "string" ? [...row.summary].slice(0, 2_000).join("") : null) : (here?.summary ?? null);
+  const summaryAuto = "summary_auto" in row ? flag(row.summary_auto, 1) : (here?.summary_auto ?? 1);
+  return { ...row, title_auto: titleAuto, summary, summary_auto: summaryAuto };
 }
 
 // Keeps the newest waiting version of a row; nothing is marked seen, so it is compared again when it is applied.

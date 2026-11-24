@@ -247,6 +247,12 @@ Checks: `npm run typecheck`, `npm test`.
 
 Known limits: the summary is not in search. An older app that changes a session sends no summary, so the summary on that phone is whatever it had.
 
+### Review fixes
+
+- A received sessions row is always normalized: `title_auto` and `summary_auto` become 0 or 1 (a number other than 0 is 1; null or a non-number gives the default, 0 for `title_auto` and 1 for `summary_auto`), and `summary` is a string cut to 2,000 characters, or null.
+- A typed title wins across phones. A received row with `title_auto = 1` for a session whose local row has `title_auto = 0` and another title keeps the local `title` and `title_auto = 0`, applies the rest of the row, and inserts a `dirty` row for the session, so this phone sends its typed title back with a newer clock.
+- Tests in `test/sync.test.ts`: the typed-title scenario (the typed title survives a made one and is sent back with a newer `at`); a 2,500-character summary is stored as 2,000; `title_auto: 5` and `summary_auto: 7` become 1 and `summary: 42` becomes null, without throwing; a row with only some of the three columns keeps this phone's values for the rest.
+
 ---
 
 ## S2 · Apple's model writes the title and summary after recording stops

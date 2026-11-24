@@ -409,6 +409,64 @@ describe("applying changes", () => {
     expect(b.db.get(kept, [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 0 });
     expect(title(b, s.id)).toBe("Mitosis");
   });
+  it("a title typed on this phone wins over a title the app made on another phone, and goes back out", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET title = 'Mitosis', title_auto = 0 WHERE id = ?", [s.id]);
+    b.db.run("DELETE FROM dirty");
+    const made = { ...session, at: session.at + 5, row: { ...session.row, title: "Cell cycle", title_auto: 1 } };
+    expect(applyChange(b.db, G, made, "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT title, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ title: "Mitosis", title_auto: 0 });
+    expect(b.db.get("SELECT table_name, row_id, deleted, group_id FROM dirty")).toEqual({ table_name: "sessions", row_id: s.id, deleted: 0, group_id: null });
+    // The typed title goes back with a clock newer than the made one, so the other phones take it.
+    const back = one(send(b), "upsert", "sessions");
+    expect(back.row).toMatchObject({ title: "Mitosis", title_auto: 0 });
+    expect(back.at).toBeGreaterThan(made.at);
+  });
+  it("a received summary over 2,000 characters is cut to 2,000", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    const long = { ...session, at: session.at + 5, row: { ...session.row, summary: "s".repeat(2_500), summary_auto: 1 } };
+    expect(applyChange(b.db, G, long, "dev_a")).toBe("applied");
+    expect(b.db.get<{ n: number }>("SELECT length(summary) AS n FROM sessions WHERE id = ?", [s.id])?.n).toBe(2_000);
+  });
+  it("a title_auto or summary_auto that is not 0 or 1 is stored as 1 (or the default), without throwing", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    const odd = { ...session, at: session.at + 5, row: { ...session.row, title_auto: 5, summary_auto: 7 } };
+    expect(applyChange(b.db, G, odd, "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT title_auto, summary_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ title_auto: 1, summary_auto: 1 });
+    const nulls = { ...session, at: session.at + 10, row: { ...session.row, title_auto: null, summary_auto: null, summary: 42 } };
+    expect(applyChange(b.db, G, nulls, "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT title_auto, summary_auto, summary FROM sessions WHERE id = ?", [s.id])).toEqual({ title_auto: 0, summary_auto: 1, summary: null });
+  });
+  it("a row with only some of the three new columns keeps this phone's values for the rest", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const session = one(send(a), "upsert", "sessions");
+    expect(applyChange(b.db, G, session, "dev_a")).toBe("applied");
+    b.db.run("UPDATE sessions SET summary = 'Kept' WHERE id = ?", [s.id]);
+    const only = (at: number, extra: Record<string, string | number | null>) => {
+      const row = Object.fromEntries(Object.entries(session.row).filter(([k]) => k !== "title_auto" && k !== "summary" && k !== "summary_auto"));
+      return { ...session, at, row: { ...row, ...extra } };
+    };
+    expect(applyChange(b.db, G, only(session.at + 5, { summary_auto: 0 }), "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Kept", summary_auto: 0, title_auto: 0 });
+    expect(applyChange(b.db, G, only(session.at + 10, { summary: "Sent" }), "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Sent", summary_auto: 0, title_auto: 0 });
+    expect(applyChange(b.db, G, only(session.at + 15, { title_auto: 1 }), "dev_a")).toBe("applied");
+    expect(b.db.get("SELECT summary, summary_auto, title_auto FROM sessions WHERE id = ?", [s.id])).toEqual({ summary: "Sent", summary_auto: 0, title_auto: 1 });
+  });
   it("children that arrive before their session (or a card before its photo) wait, then land", () => {
     const a = device("a", { random: true });
     const b = device("b");
