@@ -330,7 +330,11 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
     if (!newer(db, table, key, change.at, deviceId)) return "older";
     const from = change.bucket * SEGMENT_BUCKET_MS;
     const to = from + SEGMENT_BUCKET_MS;
-    db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
+    // While this iPhone records the session, another phone recording it too (both tapped Continue) must not delete the
+    // words this one just wrote: add theirs instead. "recording_here:" is RECORDING_HERE_PREFIX in sessions.ts, which
+    // imports this file.
+    const recordingHere = db.get("SELECT 1 AS n FROM settings WHERE key = ?", [`recording_here:${sessionId}`]) !== null;
+    if (!recordingHere) db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
     for (const r of change.rows) {
       if (r.t_start < from || r.t_start >= to) continue;
       db.run("INSERT OR IGNORE INTO segments (session_id, t_start, t_end, text, source) VALUES (?, ?, ?, ?, ?)", [sessionId, r.t_start, Math.max(r.t_start, r.t_end), r.text, change.source]);

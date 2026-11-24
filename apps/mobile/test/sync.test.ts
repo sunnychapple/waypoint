@@ -4,6 +4,7 @@ import { addFlag, addPhoto, finishRecording, savePart, saveSegment, startRecordi
 import { addPages, startPagesSession } from "../src/core/capture/pages.ts";
 import { moveSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
+import { setSetting } from "../src/core/db/settings.ts";
 import { askLater } from "../src/core/explain/later.ts";
 import { createSpace, ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import { saveCards } from "../src/core/study/cards.ts";
@@ -578,6 +579,22 @@ describe("applying changes", () => {
     const stray = { t_start: 5, t_end: 6, text: "stray" };
     expect(applyChange(b.db, G, { ...second, at: second.at + 1, rows: [stray, { t_start: 600_000, t_end: 600_020, text: "again" }] }, "dev_a")).toBe("applied");
     expect(b.db.all<{ text: string }>("SELECT text FROM segments ORDER BY t_start").map((r) => r.text)).toEqual(["first", "again"]);
+  });
+  it("while this phone records the session, a received bucket adds its words and keeps a local one", () => {
+    for (const recordingHere of [true, false]) {
+      const a = device("a");
+      const b = device("b");
+      const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+      saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "theirs" });
+      const changes = send(a);
+      for (const c of changes) if (c.op !== "segments") applyChange(b.db, G, c, "dev_a");
+      if (recordingHere) setSetting(b.db, `recording_here:${s.id}`, "1");
+      saveSegment(b.db, s.id, { tStart: 5_000, tEnd: 6_000, text: "mine" });
+      const bucket = one(changes, "segments");
+      expect(applyChange(b.db, G, { ...bucket, at: bucket.at + 1 }, "dev_a")).toBe("applied");
+      const texts = b.db.all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? ORDER BY t_start", [s.id]).map((r) => r.text);
+      expect(texts).toEqual(recordingHere ? ["theirs", "mine"] : ["theirs"]);
+    }
   });
   it("a waiting row keeps its newest version; a deleted session clears what waited for it", () => {
     const b = device("b");

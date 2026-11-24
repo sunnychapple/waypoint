@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Linking,
@@ -12,13 +12,14 @@ import {
   type ScrollViewInstance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { formatClock, formatOffset } from "../../core/format.ts";
 import { groupTimeline, PARAGRAPH_PAUSE_MS, type TimelineRow as Row } from "../../core/capture/timeline.ts";
 import { getSession } from "../../core/capture/sessions.ts";
 import { getSpace } from "../../core/db/spaces.ts";
 import { useQuery } from "../../platform/db.ts";
+import { setRecordScreenShowing } from "../../platform/push.ts";
 import { Body, PrimaryButton, SecondaryButton, Title } from "../../ui/kit.tsx";
 import { useColors } from "../../ui/theme.ts";
 import { isAtEnd } from "../../core/capture/follow.ts";
@@ -38,6 +39,13 @@ const PAUSE_REASONS: Record<string, string> = {
 export default function RecordScreen() {
   const colors = useColors();
   const model = useRecording();
+
+  useFocusEffect(
+    useCallback(() => {
+      setRecordScreenShowing(true);
+      return () => setRecordScreenShowing(false);
+    }, []),
+  );
 
   function close(): void {
     if (model.phase !== "recording") {

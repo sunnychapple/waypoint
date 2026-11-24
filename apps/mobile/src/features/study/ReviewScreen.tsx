@@ -144,9 +144,14 @@ export default function ReviewScreen() {
     setFlipped(!flipped);
   }
 
+  // A viewer of a shared space cannot change its notes.
+  const session = getSession(getDb(), card.sessionId);
+  const canRemove = session === null || spaceGroups(getDb()).get(session.spaceId)?.role !== "viewer";
+  const shared = session !== null && spaceGroups(getDb()).has(session.spaceId);
+
   // A card the model got wrong can be taken out.
   function removeCard() {
-    Alert.alert("Remove this card?", "It won't come back in your reviews.", [
+    Alert.alert("Remove this card?", shared ? "It will be removed for everyone in this space." : "It won't come back in your reviews.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
@@ -158,10 +163,6 @@ export default function ReviewScreen() {
       },
     ]);
   }
-
-  // A viewer of a shared space cannot change its notes.
-  const session = getSession(getDb(), card.sessionId);
-  const canRemove = session === null || spaceGroups(getDb()).get(session.spaceId)?.role !== "viewer";
 
   return (
     <Screen>

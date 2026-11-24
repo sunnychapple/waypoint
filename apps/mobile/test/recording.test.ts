@@ -15,6 +15,7 @@ import {
 } from "../src/core/capture/recording.ts";
 import { deleteSessionRow, getSession } from "../src/core/capture/sessions.ts";
 import { migrate } from "../src/core/db/migrate.ts";
+import { getSetting, setSetting } from "../src/core/db/settings.ts";
 import { ensureDefaultSpace } from "../src/core/db/spaces.ts";
 import type { SqlDb } from "../src/core/db/sql.ts";
 import { createMemoryDb } from "./helpers/db.ts";
@@ -141,6 +142,25 @@ describe("recording", () => {
     expect(pendingTranscriptions(db)).toEqual([
       { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
     ]);
+  });
+
+  it("pendingTranscriptions skips a waiting session with an audio part whose file is on another phone", () => {
+    const waiting = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, waiting.id, 9000, 0);
+    savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
+    expect(pendingTranscriptions(db)).toEqual([]);
+    db.run("UPDATE captures SET file = 'p0.m4a' WHERE session_id = ?", [waiting.id]);
+    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
+
+  it("recoverSessions forgets this phone's marker for a session no longer recording, and keeps the one still recording", () => {
+    insertSession("closed", "interrupted", "waiting");
+    insertSession("active", "recording", "live");
+    setSetting(db, "recording_here:closed", "1");
+    setSetting(db, "recording_here:active", "1");
+    recoverSessions(db, { sessionId: "active", state: "recording" });
+    expect(getSetting(db, "recording_here:closed")).toBeNull();
+    expect(getSetting(db, "recording_here:active")).not.toBeNull();
   });
 
   it("pendingTranscriptions does not count cloud words as on-device words", () => {

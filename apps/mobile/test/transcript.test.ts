@@ -145,4 +145,22 @@ describe("replacementFor", () => {
     const piece = { tStart: 60_000, tEnd: 100_000 };
     expect(replacementFor(part, [piece], [{ tStart: 120_000, tEnd: 130_000 }])).toEqual([piece]);
   });
+
+  it("keeps a segment that runs on into the next part, and leaves out a piece that mostly repeats it", () => {
+    const pieces = [
+      { tStart: 117_000, tEnd: 120_000 },
+      { tStart: 10_000, tEnd: 60_000 },
+    ];
+    expect(replacementFor({ startMs: 0, durationMs: 120_000 }, pieces, [{ tStart: 118_000, tEnd: 123_000 }])).toEqual([
+      { tStart: 10_000, tEnd: 60_000 },
+    ]);
+  });
+
+  it("returns null unless the second pass writes down at least 2 seconds more of the part", () => {
+    const whole = { startMs: 0, durationMs: 60_000 };
+    const existing = [{ tStart: 0, tEnd: 10_000 }];
+    expect(replacementFor(whole, [{ tStart: 0, tEnd: 11_000 }], existing)).toBeNull();
+    const more = [{ tStart: 0, tEnd: 13_000 }];
+    expect(replacementFor(whole, more, existing)).toEqual(more);
+  });
 });

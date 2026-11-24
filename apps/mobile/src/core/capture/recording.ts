@@ -199,6 +199,11 @@ function mayRecover(db: SqlDb, session: { id: string; started_at: number }, now:
 // another phone may still be recording, become interrupted and wait for transcription. Their length is what the saved
 // audio parts add up to, and they end where the last saved part ends. Returns their ids.
 export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; state: string }, now = Date.now()): string[] {
+  // A marker for a session that another phone has since closed would let this phone close that phone's next recording.
+  db.run(
+    `DELETE FROM settings WHERE key LIKE ? AND substr(key, ?) NOT IN (SELECT id FROM sessions WHERE state IN ('recording', 'paused'))`,
+    [`${RECORDING_HERE_PREFIX}%`, RECORDING_HERE_PREFIX.length + 1],
+  );
   const nativeActive = nativeStatus.state !== "idle";
   const ids = db
     .all<{ id: string; started_at: number }>("SELECT id, started_at FROM sessions WHERE state IN ('recording', 'paused')")
@@ -223,11 +228,15 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
 }
 
 // Waiting sessions that are saved or interrupted, each with the audio parts that have a hole in their on-device words.
+// A session with any audio part that has no file here is skipped: its words are written by the phone that has the audio,
+// and marking it failed here would sync "failed" back to that phone.
 export function pendingTranscriptions(
   db: SqlDb,
 ): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[] }[] {
   const sessions = db.all<{ id: string }>(
-    "SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted') ORDER BY started_at",
+    `SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted')
+       AND NOT EXISTS (SELECT 1 FROM captures c WHERE c.session_id = sessions.id AND c.kind = 'audio' AND c.file = '')
+     ORDER BY started_at`,
   );
   return sessions.map((session) => {
     const pairs = db

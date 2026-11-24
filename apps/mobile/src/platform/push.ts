@@ -9,12 +9,19 @@ import { currentUserId, refreshDeviceNow, useDeviceStatus } from "./device.ts";
 import { followJob } from "./jobs.ts";
 import { syncNow } from "./sync.ts";
 
-// Alerts show as banners while the app is open, too, except the recording pause alert: the recording screen shows it.
+// Alerts show as banners while the app is open, too, except the recording pause alert while the recording screen is in
+// front: that screen shows the pause itself. On any other screen the pause alert shows as a banner.
 const RECORDING_PAUSED_ALERT = "waypoint.recording-paused"; // AudioRecorder.alertId
+
+// True while the recording screen is in front: it shows the pause itself, so the alert is not shown as a banner there.
+let recordScreenShowing = false;
+export function setRecordScreenShowing(showing: boolean): void {
+  recordScreenShowing = showing;
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const show = notification.request.identifier !== RECORDING_PAUSED_ALERT;
+    const show = notification.request.identifier !== RECORDING_PAUSED_ALERT || !recordScreenShowing;
     return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
   },
 });

@@ -8,6 +8,7 @@ protocol AudioBufferSink: AnyObject {
   func runStarted(sessionId: String, runStartMs: Int64, format: AVAudioFormat)
   func append(_ buffer: AVAudioPCMBuffer)
   func runEnded()
+  func setPartialsEnabled(_ on: Bool)
 }
 
 enum RecorderError: Error { case busy, notRecording, notPaused, micDenied, writeFailed, micBusy }
@@ -27,8 +28,8 @@ final class AudioRecorder {
   private let control = DispatchQueue(label: "waypoint.audio.control")
   private let io = DispatchQueue(label: "waypoint.audio.io")
   private var engine = AVAudioEngine()
-  private var sessionId: String?          // control
-  private var paused = false              // control
+  private var sessionId: String? { didSet { publishStatus() } }   // control
+  private var paused = false { didSet { publishStatus() } }        // control
   private var wantsResume = false         // control: the system paused us, and the person has not paused or stopped
   private var retry: DispatchWorkItem?    // control: the next resume attempt
   private var observers: [NSObjectProtocol] = []
@@ -39,6 +40,8 @@ final class AudioRecorder {
   private var writeFailed = false         // io: set on the first failed write of a run, so it pauses once
   private var runId = 0                   // io: the current run, so a late buffer from an earlier run is dropped
   private var levelsOn = true             // io: off while nobody can see the level bars
+  private let statusLock = NSLock()
+  private var statusSnapshot: (sessionId: String?, paused: Bool) = (nil, false)   // statusLock
 
   static func now() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
 
@@ -64,6 +67,8 @@ final class AudioRecorder {
       guard self.sessionId == nil else { throw RecorderError.busy }
       guard AVAudioApplication.shared.recordPermission == .granted else { throw RecorderError.micDenied }
       try Self.configureSession()
+      // A fresh engine: the last one can hold a format from before a route change or a call.
+      engine = AVAudioEngine()
       try FileManager.default.createDirectory(
         at: Self.documents.appendingPathComponent("sessions/\(sessionId)", isDirectory: true),
         withIntermediateDirectories: true)
@@ -109,18 +114,25 @@ final class AudioRecorder {
   }
 
   func status() -> [String: Any] {
-    control.sync {
-      let recorded = io.sync { Double(timeline?.recordedMs(now: Self.now()) ?? 0) }
-      let state = sessionId == nil ? "idle" : (paused ? "paused" : "recording")
-      return ["sessionId": sessionId ?? "", "state": state, "recordedMs": recorded]
-    }
+    let (sessionId, paused) = statusLock.withLock { statusSnapshot }
+    let recorded = io.sync { Double(timeline?.recordedMs(now: Self.now()) ?? 0) }
+    let state = sessionId == nil ? "idle" : (paused ? "paused" : "recording")
+    return ["sessionId": sessionId ?? "", "state": state, "recordedMs": recorded]
   }
 
   func setLevelsEnabled(_ on: Bool) {
-    io.async { self.levelsOn = on }
+    io.async {
+      self.levelsOn = on
+      self.sink?.setPartialsEnabled(on)
+    }
   }
 
   // MARK: control queue only
+
+  private func publishStatus() {
+    let snapshot = (sessionId: sessionId, paused: paused)
+    statusLock.withLock { statusSnapshot = snapshot }
+  }
 
   private func startRun() throws {
     guard let id = sessionId else { throw RecorderError.notRecording }

@@ -66,7 +66,7 @@ export default function CloudScreen() {
     <Screen>
       <BackButton />
       <Title>Cloud & privacy</Title>
-      <Body>Recording, pages, flashcards, quizzes and search work on this iPhone. Only the cloud tasks you tap send text, and only for that task.</Body>
+      <Body>Recording, pages, flashcards, quizzes and search work on this iPhone. Only the cloud tasks you tap send text, and only for that task. Cloudflare's AI service runs those tasks for Waypoint.</Body>
 
       {SHOW_ZERO_RETENTION ? (
         <>

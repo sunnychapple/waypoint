@@ -60,9 +60,10 @@ async function transcribeSession(
       const fresh = replacementFor(part, pieces, existing);
       if (fresh === null) return;
       db.transaction(() => {
-        db.run("DELETE FROM segments WHERE session_id = ? AND source = 'device' AND t_start >= ? AND t_start < ?", [
+        db.run("DELETE FROM segments WHERE session_id = ? AND source = 'device' AND t_start >= ? AND t_start < ? AND t_end <= ?", [
           sessionId,
           part.startMs,
+          part.startMs + part.durationMs,
           part.startMs + part.durationMs,
         ]);
         for (const piece of fresh) saveSegment(db, sessionId, piece);
