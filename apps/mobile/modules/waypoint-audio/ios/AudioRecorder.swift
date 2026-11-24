@@ -66,13 +66,18 @@ final class AudioRecorder {
     try control.sync {
       guard self.sessionId == nil else { throw RecorderError.busy }
       guard AVAudioApplication.shared.recordPermission == .granted else { throw RecorderError.micDenied }
-      try Self.configureSession()
-      // A fresh engine: the last one can hold a format from before a route change or a call.
-      engine = AVAudioEngine()
-      try FileManager.default.createDirectory(
-        at: Self.documents.appendingPathComponent("sessions/\(sessionId)", isDirectory: true),
-        withIntermediateDirectories: true)
-      self.sessionId = sessionId
+      self.sessionId = sessionId   // first, so status() never reports idle while this start is under way
+      do {
+        try Self.configureSession()
+        // A fresh engine: the last one can hold a format from before a route change or a call.
+        engine = AVAudioEngine()
+        try FileManager.default.createDirectory(
+          at: Self.documents.appendingPathComponent("sessions/\(sessionId)", isDirectory: true),
+          withIntermediateDirectories: true)
+      } catch {
+        self.sessionId = nil
+        throw error
+      }
       io.sync {
         self.ioSessionId = sessionId
         self.timeline = RecordingTimeline(

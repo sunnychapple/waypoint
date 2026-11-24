@@ -327,17 +327,22 @@ function write(db: SqlDb, groupId: string, space: string, change: SyncChange, de
   }
   if (parent !== space) return synced(db, parent) ? defer(db, groupId, change, deviceId, table, key, sessionId) : "rejected";
   if (change.op === "segments") {
-    if (!newer(db, table, key, change.at, deviceId)) return "older";
     const from = change.bucket * SEGMENT_BUCKET_MS;
     const to = from + SEGMENT_BUCKET_MS;
     // While this iPhone records the session, another phone recording it too (both tapped Continue) must not delete the
-    // words this one just wrote: add theirs instead. "recording_here:" is RECORDING_HERE_PREFIX in sessions.ts, which
-    // imports this file.
-    const recordingHere = db.get("SELECT 1 AS n FROM settings WHERE key = ?", [`recording_here:${sessionId}`]) !== null;
-    if (!recordingHere) db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
+    // words this one just wrote, even with an older bucket: add theirs instead, then send the merged bucket back so both
+    // phones end with every word. "recording_here:" is RECORDING_HERE_PREFIX in sessions.ts, which imports this file.
+    const merging = change.source === "device" && db.get("SELECT 1 AS n FROM settings WHERE key = ?", [`recording_here:${sessionId}`]) !== null;
+    if (!merging && !newer(db, table, key, change.at, deviceId)) return "older";
+    const count = (): number => db.get<{ n: number }>("SELECT COUNT(*) AS n FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to])?.n ?? 0;
+    const before = count();
+    if (!merging) db.run("DELETE FROM segments WHERE session_id = ? AND source = ? AND t_start >= ? AND t_start < ?", [sessionId, change.source, from, to]);
     for (const r of change.rows) {
       if (r.t_start < from || r.t_start >= to) continue;
       db.run("INSERT OR IGNORE INTO segments (session_id, t_start, t_end, text, source) VALUES (?, ?, ?, ?, ?)", [sessionId, r.t_start, Math.max(r.t_start, r.t_end), r.text, change.source]);
+    }
+    if (merging && count() > before) {
+      db.run("INSERT INTO dirty (table_name, row_id, deleted, group_id) VALUES ('segments', ?, 0, NULL)", [`${sessionId}:${change.source}:${change.bucket}`]);
     }
     // New words from another phone (a continued recording) must reach this phone's search.
     db.run("UPDATE sessions SET indexed_at = NULL WHERE id = ?", [sessionId]);

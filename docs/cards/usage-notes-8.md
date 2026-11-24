@@ -231,6 +231,14 @@ In `CloudScreen`, the opening `Body` becomes:
 
 From `apps/mobile`: `npm run typecheck`, `npm test`, `npm run test:swift`, `npm run export:ios`, and the simulator build above.
 
+### Review fixes
+
+- changes.ts: while this phone records a session, a device bucket is merged before the "older" check, so an older bucket from another phone still adds its words, and a bucket that gained words is sent back as a dirty bucket. Cloud buckets still replace.
+- recording.ts: a session is skipped only when every part that needs writing down is on another phone; the parts here are written down, and the rest keep their holes.
+  - Known limit: when two phones each recorded parts of one session and both have parts that need a second pass, the first phone to finish marks the session done, so the other phone's parts keep their holes.
+- AudioRecorder.swift: `start()` sets the session id first, so status never reports idle during a start, and clears it again if setup throws.
+- ReviewScreen.tsx: "everyone" is named only when the card's space is a shared group.
+
 ### Known limits, not fixed here
 
 - A card saved from a cloud practice set is still labelled `quiz_miss`. Nothing reads the label.

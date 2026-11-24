@@ -596,6 +596,46 @@ describe("applying changes", () => {
       expect(texts).toEqual(recordingHere ? ["theirs", "mine"] : ["theirs"]);
     }
   });
+  it("while this phone records, an older device bucket still adds its words and goes back out as a dirty bucket", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "theirs" });
+    const changes = send(a);
+    for (const c of changes) applyChange(b.db, G, c, "dev_a");
+    setSetting(b.db, `recording_here:${s.id}`, "1");
+    saveSegment(b.db, s.id, { tStart: 5_000, tEnd: 6_000, text: "mine" });
+    const bucket = one(changes, "segments");
+    b.db.run("DELETE FROM dirty");
+    expect(applyChange(b.db, G, { ...bucket, at: 1, rows: [{ t_start: 0, t_end: 10, text: "theirs" }, { t_start: 7_000, t_end: 8_000, text: "older" }] }, "dev_a")).toBe("applied");
+    expect(b.db.all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? ORDER BY t_start", [s.id]).map((r) => r.text)).toEqual(["theirs", "mine", "older"]);
+    expect(b.db.all<{ row_id: string }>("SELECT row_id FROM dirty WHERE table_name = 'segments'")).toEqual([{ row_id: `${s.id}:device:0` }]);
+  });
+  it("while this phone records, a device bucket that adds no new words leaves no dirty row", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    saveSegment(a.db, s.id, { tStart: 0, tEnd: 10, text: "theirs" });
+    const changes = send(a);
+    for (const c of changes) applyChange(b.db, G, c, "dev_a");
+    setSetting(b.db, `recording_here:${s.id}`, "1");
+    const bucket = one(changes, "segments");
+    b.db.run("DELETE FROM dirty");
+    expect(applyChange(b.db, G, { ...bucket, at: bucket.at + 1 }, "dev_a")).toBe("applied");
+    expect(b.db.all("SELECT row_id FROM dirty WHERE table_name = 'segments'")).toEqual([]);
+  });
+  it("while this phone records, a cloud bucket still replaces the cloud rows", () => {
+    const a = device("a");
+    const b = device("b");
+    const s = startRecordingSession(a.db, a.deps, a.space.id, true);
+    const changes = send(a);
+    for (const c of changes) if (c.op !== "segments") applyChange(b.db, G, c, "dev_a");
+    setSetting(b.db, `recording_here:${s.id}`, "1");
+    b.db.run("INSERT INTO segments (session_id, t_start, t_end, text, source) VALUES (?, 0, 10, 'old cloud', 'cloud')", [s.id]);
+    const cloud: SyncChange = { v: 1, id: "seg_cloud_0000000000", at: 1_000, op: "segments", session_id: s.id, source: "cloud", bucket: 0, rows: [{ t_start: 0, t_end: 10, text: "new cloud" }] };
+    expect(applyChange(b.db, G, cloud, "dev_a")).toBe("applied");
+    expect(b.db.all<{ text: string }>("SELECT text FROM segments WHERE session_id = ? AND source = 'cloud'", [s.id]).map((r) => r.text)).toEqual(["new cloud"]);
+  });
   it("a waiting row keeps its newest version; a deleted session clears what waited for it", () => {
     const b = device("b");
     const flag = (at: number, question: string): SyncChange => ({ v: 1, id: `flg_${String(at).padStart(16, "0")}`, at, op: "upsert", table: "flags", row: { id: "f1", session_id: "s_late", t: 0, question, state: "open" } });

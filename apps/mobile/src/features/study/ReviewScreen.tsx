@@ -147,7 +147,7 @@ export default function ReviewScreen() {
   // A viewer of a shared space cannot change its notes.
   const session = getSession(getDb(), card.sessionId);
   const canRemove = session === null || spaceGroups(getDb()).get(session.spaceId)?.role !== "viewer";
-  const shared = session !== null && spaceGroups(getDb()).has(session.spaceId);
+  const shared = session !== null && spaceGroups(getDb()).get(session.spaceId)?.kind === "shared";
 
   // A card the model got wrong can be taken out.
   function removeCard() {

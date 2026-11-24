@@ -144,13 +144,21 @@ describe("recording", () => {
     ]);
   });
 
-  it("pendingTranscriptions skips a waiting session with an audio part whose file is on another phone", () => {
+  it("pendingTranscriptions skips a waiting session whose only needed part is on another phone", () => {
     const waiting = startRecordingSession(db, deps(), homeId, false);
     finishRecording(db, waiting.id, 9000, 0);
     savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
     expect(pendingTranscriptions(db)).toEqual([]);
-    db.run("UPDATE captures SET file = 'p0.m4a' WHERE session_id = ?", [waiting.id]);
-    expect(pendingTranscriptions(db)).toEqual([{ sessionId: waiting.id, parts: [{ file: "p0.m4a", startMs: 0, durationMs: 20_000 }] }]);
+  });
+
+  it("pendingTranscriptions returns a session with one needed part here and one on another phone, with only the part here", () => {
+    const waiting = startRecordingSession(db, deps(), homeId, false);
+    finishRecording(db, waiting.id, 9000, 0);
+    savePart(db, deps(), waiting.id, { index: 0, startMs: 0, durationMs: 20_000, file: "" });
+    savePart(db, deps(), waiting.id, { index: 1, startMs: 20_000, durationMs: 20_000, file: "p1.m4a" });
+    expect(pendingTranscriptions(db)).toEqual([
+      { sessionId: waiting.id, parts: [{ file: "p1.m4a", startMs: 20_000, durationMs: 20_000 }] },
+    ]);
   });
 
   it("recoverSessions forgets this phone's marker for a session no longer recording, and keeps the one still recording", () => {

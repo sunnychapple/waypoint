@@ -228,17 +228,15 @@ export function recoverSessions(db: SqlDb, nativeStatus: { sessionId: string; st
 }
 
 // Waiting sessions that are saved or interrupted, each with the audio parts that have a hole in their on-device words.
-// A session with any audio part that has no file here is skipped: its words are written by the phone that has the audio,
-// and marking it failed here would sync "failed" back to that phone.
+// A session is skipped only when every part that needs writing down is on another phone (file = ''): that phone writes
+// them down, and marking it failed here would sync "failed" back to it. Otherwise the parts here are written down.
 export function pendingTranscriptions(
   db: SqlDb,
 ): { sessionId: string; parts: { file: string; startMs: number; durationMs: number }[] }[] {
   const sessions = db.all<{ id: string }>(
-    `SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted')
-       AND NOT EXISTS (SELECT 1 FROM captures c WHERE c.session_id = sessions.id AND c.kind = 'audio' AND c.file = '')
-     ORDER BY started_at`,
+    "SELECT id FROM sessions WHERE transcript = 'waiting' AND state IN ('saved', 'interrupted') ORDER BY started_at",
   );
-  return sessions.map((session) => {
+  const result = sessions.map((session) => {
     const pairs = db
       .all<{ file: string; t: number; duration_ms: number | null }>(
         "SELECT file, t, duration_ms FROM captures WHERE session_id = ? AND kind = 'audio' ORDER BY t, position, id",
@@ -249,11 +247,15 @@ export function pendingTranscriptions(
       .all<{ t_start: number; t_end: number }>("SELECT t_start, t_end FROM segments WHERE session_id = ? AND source = 'device'", [session.id])
       .map((row) => ({ tStart: row.t_start, tEnd: row.t_end }));
     const needed = new Set(partsNeedingTranscription(pairs.map((p) => p.span), segments));
+    const parts = pairs.filter((p) => needed.has(p.span));
+    // Parts recorded on another phone have no file here; that phone writes them down.
+    const here = parts.filter((p) => p.file !== "");
+    const skip = parts.length > 0 && here.length === 0;
     return {
       sessionId: session.id,
-      parts: pairs
-        .filter((p) => needed.has(p.span))
-        .map((p) => ({ file: p.file, startMs: p.span.startMs, durationMs: p.span.durationMs })),
+      parts: here.map((p) => ({ file: p.file, startMs: p.span.startMs, durationMs: p.span.durationMs })),
+      skip,
     };
   });
+  return result.filter((session) => !session.skip).map(({ sessionId, parts }) => ({ sessionId, parts }));
 }
