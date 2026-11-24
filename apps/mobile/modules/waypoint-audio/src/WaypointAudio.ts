@@ -18,6 +18,8 @@ export type SpeechErrorEvent = { sessionId: string; message: string };
 export type SpeechPackEvent = { fraction: number };
 // Where a recorder picks up a saved session: time since the session started, the next part number, and what it already holds.
 export type ContinueFrom = { elapsedMs: number; firstIndex: number; priorRecordedMs: number };
+// What the Lock Screen shows under "Recording": the session's title and the folder it is saved to.
+export type RecordingLabel = { title: string; place: string };
 
 type Events = {
   onState(event: StateEvent): void;
@@ -31,12 +33,13 @@ type Events = {
 declare class WaypointAudioNative extends NativeModule<Events> {
   getMicPermission(): Promise<MicPermission>;
   requestMicPermission(): Promise<MicPermission>;
-  start(sessionId: string, elapsedMs: number, firstIndex: number, priorRecordedMs: number): Promise<void>;
+  start(sessionId: string, elapsedMs: number, firstIndex: number, priorRecordedMs: number, title: string, place: string): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   stop(): Promise<number>;
   getStatus(): RecorderStatus;
   setLevelsEnabled(on: boolean): void;
+  setRecordingLabel(title: string, place: string): void;
   getSpeechStatus(): Promise<SpeechStatus>;
   downloadSpeechPack(): Promise<SpeechStatus>;
   transcribeFile(file: string, startMs: number): Promise<TranscriptPiece[]>;
@@ -46,13 +49,17 @@ const native = requireNativeModule<WaypointAudioNative>("WaypointAudio");
 
 export const getMicPermission = (): Promise<MicPermission> => native.getMicPermission();
 export const requestMicPermission = (): Promise<MicPermission> => native.requestMicPermission();
-export const startRecording = (sessionId: string, from: ContinueFrom = { elapsedMs: 0, firstIndex: 0, priorRecordedMs: 0 }): Promise<void> =>
-  native.start(sessionId, from.elapsedMs, from.firstIndex, from.priorRecordedMs);
+export const startRecording = (
+  sessionId: string,
+  from: ContinueFrom = { elapsedMs: 0, firstIndex: 0, priorRecordedMs: 0 },
+  label: RecordingLabel = { title: "", place: "" },
+): Promise<void> => native.start(sessionId, from.elapsedMs, from.firstIndex, from.priorRecordedMs, label.title, label.place);
 export const pauseRecording = (): Promise<void> => native.pause();
 export const resumeRecording = (): Promise<void> => native.resume();
 export const stopRecording = (): Promise<number> => native.stop();
 export const getRecorderStatus = (): RecorderStatus => native.getStatus();
 export const setRecorderLevelsEnabled = (on: boolean): void => native.setLevelsEnabled(on);
+export const setRecordingLabel = (label: RecordingLabel): void => native.setRecordingLabel(label.title, label.place);
 export const onRecorderState = (l: (e: StateEvent) => void): EventSubscription => native.addListener("onState", l);
 export const onRecorderPart = (l: (e: PartEvent) => void): EventSubscription => native.addListener("onPart", l);
 export const onRecorderLevel = (l: (e: LevelEvent) => void): EventSubscription => native.addListener("onLevel", l);
